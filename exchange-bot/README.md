@@ -28,14 +28,27 @@ Wymagany Node.js 18.17+.
    ```bash
    cd exchange-bot
    npm install
-   cp .env.example .env   # uzupełnij DISCORD_TOKEN i GUILD_ID
-   npm start              # albo: node index.js
+   cp config.example.json config.json   # wpisz token i guildId
+   npm start                           # albo: node index.js
    ```
 
 4. Na serwerze:
    - `/setup kategoria:<kategoria> staff:<rola> logi:<#kanał> [baner:<link>] [limit:<liczba>]`
    - `/panel`, aby wysłać panel ticketów
    - opcjonalnie `/kurs ustaw od:BLIK do:Litecoin prowizja:8`
+
+### Token: config.json albo .env
+
+Najprościej jest skopiować `config.example.json` jako `config.json` i wpisać:
+
+```json
+{
+  "token": "token bota",
+  "guildId": "ID serwera (albo puste)"
+}
+```
+
+Zamiast tego możesz ustawić zmienne `DISCORD_TOKEN` i `GUILD_ID` w pliku `.env` lub w panelu hostingu. Mają one pierwszeństwo przed `config.json`.
 
 ## Struktura
 

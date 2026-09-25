@@ -1117,9 +1117,13 @@ if (process.argv.includes('--check')) {
   process.exit(0);
 }
 
-const { DISCORD_TOKEN, GUILD_ID } = process.env;
-if (!DISCORD_TOKEN) {
-  console.error('Brak DISCORD_TOKEN w pliku .env (skopiuj .env.example).');
+// Token i ID serwera: z pliku config.json obok index.js albo ze zmiennych środowiskowych / .env.
+const configFile = join(dirname(fileURLToPath(import.meta.url)), 'config.json');
+const fileConfig = existsSync(configFile) ? JSON.parse(readFileSync(configFile, 'utf8')) : {};
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || fileConfig.token;
+const GUILD_ID = process.env.GUILD_ID || fileConfig.guildId;
+if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
+  console.error('Brak tokena. Wpisz go w config.json w polu "token" (albo ustaw DISCORD_TOKEN).');
   process.exit(1);
 }
 
