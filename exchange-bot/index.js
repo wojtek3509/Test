@@ -881,7 +881,9 @@ command(
   async (i) => {
     const { settings } = guild(i.guildId);
     if (!settings.categoryId) return replyFail(i, 'Najpierw użyj `/setup`.');
-    const channel = i.options.getChannel('kanal') ?? i.channel;
+    const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
+    const channel = await i.guild.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) return replyFail(i, 'Bot nie widzi tego kanału. Sprawdź, czy ma do niego dostęp.');
 
     const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', ReadMessageHistory: 'Czytanie historii' };
     const perms = channel.permissionsFor(i.client.user);
@@ -1062,7 +1064,24 @@ async function onAnnouncement(i) {
 
 // ═══ ROUTING INTERAKCJI ══════════════════════════════════════════════════
 
+const inviteUrl = (clientId) =>
+  `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=8&scope=bot%20applications.commands`;
+
 async function route(i) {
+  // Komendy widać też na serwerach, gdzie aplikacja nie ma konta bota (dodana bez zakresu "bot").
+  // Wtedy bot nie widzi ani serwera, ani kanałów, więc prosimy o ponowne zaproszenie.
+  if (i.inGuild() && !i.inCachedGuild() && i.isRepliable()) {
+    return i.reply({
+      components: [
+        notice(
+          `### ⚠️ Bot nie jest członkiem tego serwera\nAplikacja została dodana bez konta bota, więc nie widzi kanałów.\n` +
+            `Zaproś go ponownie tym linkiem (zakresy \`bot\` + \`applications.commands\`):\n${inviteUrl(i.client.user.id)}`,
+          colors.warning,
+        ),
+      ],
+      flags: V2_EPHEMERAL,
+    });
+  }
   if (i.isChatInputCommand()) return commands.get(i.commandName)?.execute(i);
 
   const [scope, action, ...args] = i.customId?.split(':') ?? [];
@@ -1156,6 +1175,8 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Zalogowano jako ${c.user.tag}`);
+  console.log(`🔗 Link zaproszenia: ${inviteUrl(c.user.id)}`);
+  console.log(`🏠 Serwery bota: ${c.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak — zaproś bota linkiem powyżej'}`);
   c.user.setActivity({ name: '💱 Exchange • /kalkulator', type: ActivityType.Custom });
 
   // Rejestracja komend przy każdym starcie: na serwerze GUILD_ID (od razu) albo globalnie.
