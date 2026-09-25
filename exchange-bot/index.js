@@ -882,8 +882,33 @@ command(
     const { settings } = guild(i.guildId);
     if (!settings.categoryId) return replyFail(i, 'Najpierw użyj `/setup`.');
     const channel = i.options.getChannel('kanal') ?? i.channel;
-    await channel.send({ components: [panel(settings, i.guild)], flags: V2 });
-    await replyOk(i, `Panel wysłany na ${channel}`);
+
+    const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', ReadMessageHistory: 'Czytanie historii' };
+    const perms = channel.permissionsFor(i.client.user);
+    const missing = Object.entries(needed).filter(([flag]) => !perms?.has(PermissionFlagsBits[flag]));
+    if (missing.length) {
+      return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, name]) => `> • ${name}`).join('\n')}`);
+    }
+
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    try {
+      await channel.send({ components: [panel(settings, i.guild)], flags: V2 });
+    } catch (err) {
+      // 50035 = Discord odrzucił treść, najczęściej przez link do baneru, który nie jest bezpośrednim obrazkiem.
+      if (err.code !== 50035 || !settings.bannerUrl) throw err;
+      console.warn('Panel odrzucony z banerem, wysyłam bez niego:', err.message);
+      await channel.send({ components: [panel({ ...settings, bannerUrl: null }, i.guild)], flags: V2 });
+      return i.editReply({
+        components: [
+          notice(
+            `### ⚠️ Panel wysłany bez baneru\nLink do baneru jest nieprawidłowy. Podaj bezpośredni link do obrazka (kończący się na .png/.jpg/.gif) w \`/setup\`.`,
+            colors.warning,
+          ),
+        ],
+        flags: V2,
+      });
+    }
+    await i.editReply({ components: [ok(`Panel wysłany na ${channel}`)], flags: V2 });
   },
 );
 
@@ -1162,13 +1187,26 @@ client.once(Events.ClientReady, async (c) => {
   }
 });
 
+const knownErrors = {
+  50001: 'Bot nie ma dostępu do tego kanału lub serwera.',
+  50013: 'Bot nie ma wymaganych uprawnień. Nadaj mu uprawnienia z README (najprościej rolę z Administratorem) i przesuń jego rolę wyżej.',
+  50035: 'Discord odrzucił wiadomość (nieprawidłowe dane, np. zły link do obrazka).',
+  10003: 'Kanał nie istnieje. Sprawdź konfigurację w `/setup`.',
+};
+
+function describeError(err) {
+  const hint = knownErrors[err?.code] ?? 'Coś poszło nie tak. Spróbuj ponownie.';
+  const detail = String(err?.message ?? err).slice(0, 300);
+  return `${hint}\n-# Szczegóły: \`${err?.code ?? 'brak kodu'}\` ${detail.replace(/`/g, "'")}`;
+}
+
 client.on(Events.InteractionCreate, async (i) => {
   try {
     await route(i);
   } catch (err) {
     console.error(err);
     if (!i.isRepliable()) return;
-    const payload = { components: [fail('Coś poszło nie tak. Spróbuj ponownie.')], flags: V2_EPHEMERAL };
+    const payload = { components: [fail(describeError(err))], flags: V2_EPHEMERAL };
     if (i.deferred || i.replied) await i.followUp(payload).catch(() => {});
     else await i.reply(payload).catch(() => {});
   }
