@@ -5,7 +5,7 @@ Bot na Discorda do obsługi exchange'u z zaawansowanymi ticketami. Cały interfe
 ## Funkcje
 
 - **Panel ticketów**: baner, ikona serwera, lista kategorii i menu wyboru. Dodatkowo przyciski „Kursy i prowizje” oraz „Moje tickety”.
-- **4 kategorie**: Exchange, Pomoc, Współpraca, Zgłoszenie (edytowalne w `src/config.js`).
+- **4 kategorie**: Exchange, Pomoc, Współpraca, Zgłoszenie (edytowalne na początku `index.js`).
 - **Formularz wymiany**: listy wyboru metod bezpośrednio w modalu (BLIK, przelew, PayPal, Revolut, PSC, BTC, LTC, ETH, USDT). Bot liczy prowizję i kwotę do otrzymania.
 - **Ticket**: prywatny kanał z numeracją `exchange-0001`, avatarem autora, szczegółami i pingiem staffu.
 - **Przejmowanie** ticketu przez staff i **statusy wymiany** (oczekuje na płatność → otrzymana → w realizacji → zrealizowano). Kolor kontenera zmienia się razem ze statusem.
@@ -28,9 +28,8 @@ Wymagany Node.js 18.17+.
    ```bash
    cd exchange-bot
    npm install
-   cp .env.example .env   # uzupełnij DISCORD_TOKEN, CLIENT_ID, GUILD_ID
-   npm run deploy         # rejestruje komendy slash
-   npm start
+   cp .env.example .env   # uzupełnij DISCORD_TOKEN i GUILD_ID
+   npm start              # albo: node index.js
    ```
 
 4. Na serwerze:
@@ -40,20 +39,21 @@ Wymagany Node.js 18.17+.
 
 ## Struktura
 
-```
-src/
-  config.js           nazwa, kolory, kategorie, metody płatności, statusy
-  ui.js               wszystkie widoki Components V2 i modale
-  db.js               zapis danych w data/db.json
-  handlers/tickets.js logika ticketów
-  commands/           komendy slash
-  index.js            start bota i routing interakcji
-  deploy.js           rejestracja komend
-  selftest.js         walidacja komponentów offline (npm run check)
-```
+Cały bot jest w jednym pliku `index.js`, podzielonym na sekcje:
+
+- **KONFIGURACJA**: nazwa, kolory, kategorie, metody płatności, statusy
+- **BAZA DANYCH**: zapis w `data/db.json`
+- **WIDOKI COMPONENTS V2**: panel, karta ticketu, modale, logi, statystyki
+- **TICKETY**: otwieranie, przejmowanie, statusy, zamykanie, oceny
+- **KOMENDY SLASH**: `/setup`, `/panel`, `/kurs`, `/kalkulator`, `/ticket`, `/statystyki`, `/ogloszenie`
+- **START**: logowanie i rejestracja komend
+
+Komendy rejestrują się same przy każdym starcie: na serwerze z `GUILD_ID` od razu, a bez niego globalnie (to może potrwać do godziny).
+
+`node index.js --check` sprawdza wszystkie komponenty offline, bez tokena.
 
 ## Uwagi
 
 - Dane (ustawienia, tickety, oceny) są w `data/db.json`. Plik nie trafia do gita.
 - Transcript zapisuje zwykłe wiadomości z kanału. Kontenery Components V2 (np. karta ticketu) nie są w nim renderowane, ale ich dane są w logu zamknięcia.
-- Nazwę, stopkę i kolory zmienisz w `src/config.js`.
+- Nazwę, stopkę i kolory zmienisz w sekcji KONFIGURACJA w `index.js`.

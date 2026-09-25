@@ -3,11 +3,10 @@
   "version": "1.0.0",
   "description": "Discord exchange bot with advanced tickets built on Components V2",
   "type": "module",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "deploy": "node src/deploy.js",
-    "check": "node --check src/index.js && node src/selftest.js"
+    "start": "node index.js",
+    "check": "node index.js --check"
   },
   "engines": {
     "node": ">=18.17"
