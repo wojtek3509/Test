@@ -186,6 +186,21 @@ const pricing = [
   },
 ];
 
+// Metody płatności w formularzu „Zrealizowane” (maks. 25). Emoji może być własne: '<:ltc:123…>'.
+const payments = {
+  blik: { label: 'BLIK', emoji: '📱' },
+  kodblik: { label: 'KOD BLIK', emoji: '🔢' },
+  ltc: { label: 'LTC', emoji: '💠' },
+  btc: { label: 'BTC', emoji: '🪙' },
+  eth: { label: 'ETH', emoji: '💎' },
+  usdt: { label: 'USDT', emoji: '💵' },
+  paypal: { label: 'PayPal', emoji: '🅿️' },
+  psc: { label: 'PSC', emoji: '🎫' },
+  przelew: { label: 'Przelew', emoji: '🏦' },
+  revolut: { label: 'Revolut', emoji: '💳' },
+};
+const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
+
 // Oceny w opiniach.
 const reviewCriteria = [
   { id: 'quality', label: 'Jakość bota', emoji: '🤖' },
@@ -205,6 +220,7 @@ const legitTimeoutMinutes = 10;
 // Nazwy kanałów z licznikiem ({n} = liczba). Zmiana nazwy maks. co 5 minut (limit Discorda).
 const counterNames = {
   legit: '🤔┃czy-legit→{n}',
+  legitCheck: '✅┃legit-check→{n}',
   reviews: '⭐┃opinie→{n}',
 };
 
@@ -237,6 +253,8 @@ function guild(id) {
   g.giveaways ??= {};
   g.panels ??= {};
   g.stats ??= { opened: 0, closed: 0 };
+  g.stats.done ??= 0;
+  g.stats.lc ??= 0;
   return g;
 }
 
@@ -639,7 +657,6 @@ function ticketMessage(ticket, user) {
         .setStyle(ButtonStyle.Primary)
         .setDisabled(Boolean(ticket.claimedBy)),
       new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tk:transcript').setLabel('Transcript').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     ),
   );
   sep(b);
@@ -651,22 +668,29 @@ const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(
 
 function closedView(ticket, subtitle, withReviewButton, guildId) {
   const t = ticketTypes[ticket.type];
-  const b = box(colors.neutral);
+  const b = box(ticket.result === 'done' ? colors.success : colors.neutral);
   text(
     b,
     [
-      title(`Ticket ${pad(ticket.number)} zamknięty`, '🔒'),
+      title(`Ticket ${pad(ticket.number)} zamknięty`, ticket.result === 'done' ? '✅' : '🔒'),
       subtitle ? `-# ${subtitle}` : null,
       '>>> ' +
         [
+          row('Wynik', ticket.result === 'done' ? '✅ **Zrealizowane**' : '❌ **Niezrealizowane**'),
           row('Autor', `<@${ticket.userId}>`),
           row('Kategoria', `${t.emoji} ${t.label}`),
           row('Obsługiwał', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—'),
-          row('Zamknął', `<@${ticket.closedBy}>`),
-          row('Powód', ticket.closeReason ?? '*brak*'),
+          row('Zamknął', ticket.closedBy ? `<@${ticket.closedBy}>` : 'automatycznie (legit check)'),
+          ticket.deal ? row('Produkt', `\`${ticket.deal.product}\``) : null,
+          ticket.deal ? row('Cena', `\`${ticket.deal.price}\``) : null,
+          ticket.deal ? row('Płatność', paymentName(ticket.deal.payment)) : null,
+          ticket.lcUrl ? row('Legit check', ticket.lcUrl) : null,
+          ticket.result !== 'done' ? row('Powód', ticket.closeReason ?? '*brak*') : null,
           row('Otwarty', ts(ticket.openedAt, 'f')),
           row('Zamknięty', ts(ticket.closedAt, 'f')),
-        ].join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
     ]
       .filter(Boolean)
       .join('\n'),
@@ -796,60 +820,234 @@ async function onStatus(i) {
   });
 }
 
-async function onTranscript(i) {
-  const { ticket, error } = staffTicket(i);
-  if (error) return replyV2(i, fail(error));
-  await i.deferReply({ flags: V2_EPHEMERAL });
-  const file = await createTranscript(i.channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
-  await i.editReply({ components: [ok('Transcript wygenerowany.')], files: [file], flags: V2 });
-}
-
 async function onCloseRequest(i) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return replyV2(i, fail('To nie jest aktywny kanał ticketu.'));
-  if (ticket.userId !== i.user.id && !isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+  const staff = isStaff(i.member, guild(i.guildId).settings);
+  if (ticket.userId !== i.user.id && !staff) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
   const b = box(colors.danger);
-  text(
-    b,
-    [`## 🔒 ${x} Zamknąć ticket?`, point('Kanał zostanie **usunięty**.'), point('Transcript trafi do **logów** i do autora.'), point('Autor dostanie prośbę o **opinię**.')].join('\n'),
-  );
-  b.addActionRowComponents((r) =>
-    r.setComponents(
-      new ButtonBuilder().setCustomId('tk:closeyes').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tk:closewhy').setLabel('Zamknij z powodem').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  if (staff) {
+    text(
+      b,
+      [
+        `## 🔒 ${x} Jak zakończyć ticket?`,
+        point('**✅ Zrealizowane** — podajesz produkt, cenę i płatność, klient wystawia legit checka, a ticket zamknie się sam.'),
+        point('**❌ Niezrealizowane** — ticket zamyka się od razu, transcript trafia do logów.'),
+      ].join('\n'),
+    );
+    b.addActionRowComponents((r) =>
+      r.setComponents(
+        new ButtonBuilder().setCustomId('tk:done').setLabel('Zrealizowane').setEmoji('✅').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('tk:notdone').setLabel('Niezrealizowane').setEmoji('❌').setStyle(ButtonStyle.Danger),
+      ),
+    );
+  } else {
+    text(b, [`## 🔒 ${x} Zamknąć ticket?`, point('Kanał zostanie **usunięty**, a transcript trafi do Ciebie w DM.')].join('\n'));
+    b.addActionRowComponents((r) =>
+      r.setComponents(new ButtonBuilder().setCustomId('tk:userclose').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger)),
+    );
+  }
   await replyV2(i, b);
 }
 
-async function closeTicket(i, reason = null) {
+function doneModal() {
+  return new ModalBuilder()
+    .setCustomId('tk:donesubmit')
+    .setTitle('✅ Zamówienie zrealizowane')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Nazwa produktu')
+        .setTextInputComponent(
+          new TextInputBuilder().setCustomId('product').setStyle(TextInputStyle.Short).setPlaceholder('np. Bot do exchange').setMaxLength(80),
+        ),
+      new LabelBuilder()
+        .setLabel('Cena')
+        .setTextInputComponent(new TextInputBuilder().setCustomId('price').setStyle(TextInputStyle.Short).setPlaceholder('np. 50 PLN').setMaxLength(30)),
+      new LabelBuilder()
+        .setLabel('Płatność')
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId('payment')
+            .setPlaceholder('Wybierz metodę płatności…')
+            .addOptions(Object.entries(payments).map(([value, m]) => ({ label: m.label, value, emoji: m.emoji }))),
+        ),
+    );
+}
+
+function notDoneModal() {
+  return new ModalBuilder()
+    .setCustomId('tk:notdonesubmit')
+    .setTitle('❌ Zamówienie niezrealizowane')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Powód (opcjonalnie)')
+        .setTextInputComponent(
+          new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300),
+        ),
+    );
+}
+
+/** Wzór wiadomości, którą klient wysyła na kanał legit checków. */
+const repTemplate = (ticket) => `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} | ${ticket.deal.price} | ${payments[ticket.deal.payment]?.label ?? ticket.deal.payment}`;
+
+function repRequestView(ticket, lcChannelId) {
+  const b = box(colors.success);
+  text(
+    b,
+    [
+      title('Zamówienie zrealizowane', '✅'),
+      '>>> ' +
+        [
+          row('Produkt', `\`${ticket.deal.product}\``),
+          row('Cena', `\`${ticket.deal.price}\``),
+          row('Płatność', paymentName(ticket.deal.payment)),
+          row('Sprzedawca', `<@${ticket.deal.sellerId}>`),
+          row('Klient', `<@${ticket.userId}>`),
+        ].join('\n'),
+    ].join('\n'),
+  );
+  sep(b);
+  text(
+    b,
+    [
+      `## ⭐ ${x} Wystaw legit checka`,
+      `<@${ticket.userId}>, dziękujemy za zakup! Wejdź na ${lcChannelId ? `<#${lcChannelId}>` : 'kanał legit checków'} i wyślij:`,
+      codeBlock(repTemplate(ticket)),
+      `-# 🔒 Ticket zamknie się automatycznie, gdy wyślesz repa. Transcript dostaniesz w DM.`,
+    ].join('\n'),
+  );
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder().setCustomId('tk:copyrep').setLabel('Skopiuj wzór').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('tk:closenorep').setLabel('Zamknij bez repa (staff)').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+    ),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+/** Karta wysyłana pod repem klienta na kanale legit checków. */
+function legitCheckCard(ticket, number, author) {
+  const b = box(colors.success);
+  header(
+    b,
+    [
+      title(`Legit check ${pad(number)}`, '✅'),
+      '>>> ' +
+        [
+          row('Klient', `<@${ticket.userId}>`),
+          row('Sprzedawca', `<@${ticket.deal.sellerId}>`),
+          row('Produkt', `\`${ticket.deal.product}\``),
+          row('Cena', `\`${ticket.deal.price}\``),
+          row('Płatność', paymentName(ticket.deal.payment)),
+          row('Data', ts(Date.now(), 'f')),
+        ].join('\n'),
+    ].join('\n'),
+    author?.displayAvatarURL?.({ size: 256 }),
+  );
+  sep(b);
+  text(b, `-# ✅ Transakcja potwierdzona przez ${brand.name} • dziękujemy za zaufanie!`);
+  return b;
+}
+
+async function onDoneSubmit(i) {
+  const { ticket, error } = staffTicket(i);
+  if (error) return replyV2(i, fail(error));
+  const g = guild(i.guildId);
+  const deal = {
+    product: i.fields.getTextInputValue('product'),
+    price: i.fields.getTextInputValue('price'),
+    payment: i.fields.getStringSelectValues('payment')[0],
+    sellerId: ticket.claimedBy ?? i.user.id,
+  };
+  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, status: 'done', awaitingRep: true, claimedBy: ticket.claimedBy ?? i.user.id }));
+  const updated = getTicket(i.guildId, i.channelId);
+
+  // Odświeżamy kartę ticketu (etap „Gotowe”).
+  const user = await i.client.users.fetch(updated.userId);
+  const card = await i.channel.messages.fetch(updated.messageId).catch(() => null);
+  await card?.edit({ components: [ticketMessage(updated, user)], flags: V2 }).catch(() => {});
+
+  if (!g.settings.lcChannelId) {
+    // Bez kanału legit checków nie ma na co czekać — zamykamy od razu.
+    await i.reply({ components: [repRequestView(updated, null)], flags: V2, allowedMentions: { users: [updated.userId] } });
+    return finalizeTicket(i.client, i.guild, i.channel, { closedBy: i.user.id, result: 'done' });
+  }
+  await i.reply({ components: [repRequestView(updated, g.settings.lcChannelId)], flags: V2, allowedMentions: { users: [updated.userId] } });
+}
+
+/** Klient wysłał wiadomość na kanale legit checków → zamykamy jego ticket czekający na repa. */
+async function onLegitCheckMessage(message) {
+  const g = guild(message.guild.id);
+  if (message.channelId !== g.settings.lcChannelId || message.author.bot) return false;
+  const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id);
+  if (!ticket) return true;
+  const number = updateGuild(message.guild.id, (gg) => gg.stats.lc++).stats.lc;
+  updateGuild(message.guild.id, (gg) => Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url }));
+  await message.react('✅').catch(() => {});
+  await message
+    .reply({ components: [legitCheckCard(ticket, number, message.author)], flags: V2, allowedMentions: { parse: [] } })
+    .catch((err) => console.error('Legit check:', err.message));
+  scheduleCounter(message.client, message.channelId, counterNames.legitCheck, number, 'legitCheck', message.guild.id);
+
+  const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (channel) {
+    await channel
+      .send({ components: [notice(`### ✅ ${x} Legit check otrzymany!\nDziękujemy <@${ticket.userId}>! ${message.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
+      .catch(() => {});
+    await finalizeTicket(message.client, message.guild, channel, { closedBy: null, result: 'done' });
+  }
+  return true;
+}
+
+/** Sprawdza uprawnienia i zamyka ticket z poziomu interakcji. */
+async function closeTicket(i, { reason = null, result = 'notdone' } = {}) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return replyV2(i, fail('Ten ticket jest już zamykany.'));
-  const { settings } = guild(i.guildId);
-  if (ticket.userId !== i.user.id && !isStaff(i.member, settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
-
-  updateGuild(i.guildId, (g) => {
-    Object.assign(g.tickets[i.channelId], { closedAt: Date.now(), closedBy: i.user.id, closeReason: reason });
-    g.stats.closed++;
-  });
+  if (ticket.userId !== i.user.id && !isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
   await i.reply({
-    components: [notice([`## 🔒 ${x} Ticket zamykany`, row('Zamknął', `<@${i.user.id}>`), reason ? row('Powód', reason) : null, '-# Kanał zniknie za kilka sekund…'].filter(Boolean).join('\n'), colors.danger)],
+    components: [
+      notice(
+        [
+          `## 🔒 ${x} Ticket zamykany`,
+          row('Wynik', result === 'done' ? '✅ Zrealizowane' : '❌ Niezrealizowane'),
+          row('Zamknął', `<@${i.user.id}>`),
+          reason ? row('Powód', reason) : null,
+          '-# Kanał zniknie za kilka sekund…',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        colors.danger,
+      ),
+    ],
     flags: V2,
     allowedMentions: { parse: [] },
   });
+  await finalizeTicket(i.client, i.guild, i.channel, { closedBy: i.user.id, reason, result });
+}
 
-  const closed = getTicket(i.guildId, i.channelId);
-  const channel = i.channel;
+/** Zamyka ticket: zapis, transcript do logów i do klienta w DM, usunięcie kanału. */
+async function finalizeTicket(client, g, channel, { closedBy, reason = null, result }) {
+  const current = getTicket(g.id, channel.id);
+  if (!current || current.closedAt) return;
+  updateGuild(g.id, (gg) => {
+    Object.assign(gg.tickets[channel.id], { closedAt: Date.now(), closedBy, closeReason: reason, result, awaitingRep: false });
+    gg.stats.closed++;
+    if (result === 'done') gg.stats.done++;
+  });
+  const closed = getTicket(g.id, channel.id);
+  const { settings } = guild(g.id);
   const transcript = await createTranscript(channel, { filename: transcriptName(closed), poweredBy: false, saveImages: true });
   if (settings.logChannelId) {
-    const log = await i.guild.channels.fetch(settings.logChannelId).catch(() => null);
-    await log?.send({ components: [closedView(closed, i.guild.name, false)], files: [transcript], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
+    const log = await g.channels.fetch(settings.logChannelId).catch(() => null);
+    await log?.send({ components: [closedView(closed, g.name, false)], files: [transcript], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
   }
-  const user = await i.client.users.fetch(closed.userId).catch(() => null);
+  const user = await client.users.fetch(closed.userId).catch(() => null);
   await user
-    ?.send({ components: [closedView(closed, `Dziękujemy za skorzystanie z ${brand.name}!`, true, i.guildId)], files: [transcript], flags: V2 })
+    ?.send({ components: [closedView(closed, `Dziękujemy za skorzystanie z ${brand.name}!`, result === 'done', g.id)], files: [transcript], flags: V2 })
     .catch(() => {});
-  setTimeout(() => channel.delete(`Ticket zamknięty przez ${i.user.tag}`).catch(console.error), 5000);
+  setTimeout(() => channel.delete('Ticket zamknięty').catch(console.error), 5000);
 }
 
 // ═══ OPINIE ════════════════════════════════════════════════════════════
@@ -1086,7 +1284,9 @@ async function onGiveawayJoin(i) {
 const boostTypes = [MessageType.GuildBoost, MessageType.GuildBoostTier1, MessageType.GuildBoostTier2, MessageType.GuildBoostTier3];
 
 async function onMessage(message) {
-  if (!message.guild || !boostTypes.includes(message.type)) return;
+  if (!message.guild) return;
+  if (await onLegitCheckMessage(message)) return;
+  if (!boostTypes.includes(message.type)) return;
   const { settings } = guild(message.guild.id);
   if (!settings.boostChannelId) return;
   const channel = await message.guild.channels.fetch(settings.boostChannelId).catch(() => null);
@@ -1118,6 +1318,7 @@ command(
     .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów i transcriptów').addChannelTypes(ChannelType.GuildText).setRequired(true))
     .addChannelOption((o) => o.setName('opinie').setDescription('Kanał, na który trafiają opinie').addChannelTypes(ChannelType.GuildText))
     .addChannelOption((o) => o.setName('boosty').setDescription('Kanał podziękowań za boosty').addChannelTypes(ChannelType.GuildText))
+    .addChannelOption((o) => o.setName('legitcheck').setDescription('Kanał legit checków (rep po zrealizowanym zamówieniu)').addChannelTypes(ChannelType.GuildText))
     .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
     .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
     .addIntegerOption((o) => o.setName('limit').setDescription('Maks. otwartych ticketów na osobę').setMinValue(1).setMaxValue(10)),
@@ -1129,6 +1330,7 @@ command(
       st.logChannelId = i.options.getChannel('logi').id;
       st.reviewChannelId = i.options.getChannel('opinie')?.id ?? st.reviewChannelId ?? null;
       st.boostChannelId = i.options.getChannel('boosty')?.id ?? st.boostChannelId ?? null;
+      st.lcChannelId = i.options.getChannel('legitcheck')?.id ?? st.lcChannelId ?? null;
       st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
       st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
       st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
@@ -1146,6 +1348,7 @@ command(
                 row('📜 Logi', ch(s.logChannelId)),
                 row('⭐ Opinie', ch(s.reviewChannelId)),
                 row('🚀 Boosty', ch(s.boostChannelId)),
+                row('✅ Legit check', ch(s.lcChannelId)),
                 row('✅ Rola za regulamin', s.rulesRoleId ? `<@&${s.rulesRoleId}>` : '`—`'),
                 row('🔢 Liczniki kanałów', s.counters ? '`włączone`' : '`wyłączone`'),
                 row('🎫 Limit ticketów', `\`${s.maxOpen}\``),
@@ -1320,7 +1523,7 @@ command(
     const ticket = getTicket(i.guildId, i.channelId);
     if (!ticket || ticket.closedAt) return replyFail(i, 'Tej komendy używa się w kanale ticketu.');
     const sub = i.options.getSubcommand();
-    if (sub === 'zamknij') return closeTicket(i, i.options.getString('powod'));
+    if (sub === 'zamknij') return closeTicket(i, { reason: i.options.getString('powod') });
     if (!isStaff(i.member, guild(i.guildId).settings)) return replyFail(i, 'Tylko staff może to zrobić.');
     if (sub === 'nazwa') {
       await i.channel.setName(i.options.getString('nazwa'));
@@ -1383,6 +1586,8 @@ command(
             row('🎫 Otwarte tickety', `\`${open}\``),
             row('📂 Wszystkie tickety', `\`${g.stats.opened}\``),
             row('🔒 Zamknięte', `\`${g.stats.closed}\``),
+            row('✅ Zrealizowane', `\`${g.stats.done}\``),
+            row('📝 Legit checki', `\`${g.stats.lc}\``),
             row('⭐ Opinie', `\`${s.count}\`${s.count ? ` · średnia \`${s.avg.toFixed(2)}/5\`` : ''}`),
             row('🎉 Konkursy', `\`${gws.length}\` · aktywne \`${gws.filter((gw) => !gw.ended).length}\``),
           ].join('\n'),
@@ -1424,24 +1629,28 @@ async function route(i) {
     }
     if (i.isStringSelectMenu() && action === 'status') return onStatus(i);
     if (i.isModalSubmit() && action === 'form') return onTicketForm(i, arg);
-    if (i.isModalSubmit() && action === 'closereason') return closeTicket(i, i.fields.getTextInputValue('reason'));
+    if (i.isModalSubmit() && action === 'donesubmit') return onDoneSubmit(i);
+    if (i.isModalSubmit() && action === 'notdonesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason') || null });
     if (i.isButton()) {
       if (action === 'quick') return onTicketSelect(i, arg);
       if (action === 'claim') return onClaim(i);
       if (action === 'close') return onCloseRequest(i);
-      if (action === 'closeyes') return closeTicket(i);
-      if (action === 'transcript') return onTranscript(i);
-      if (action === 'closewhy') {
-        return i.showModal(
-          new ModalBuilder()
-            .setCustomId('tk:closereason')
-            .setTitle('🔒 Zamknij ticket')
-            .addLabelComponents(
-              new LabelBuilder()
-                .setLabel('Powód zamknięcia')
-                .setTextInputComponent(new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setMaxLength(300)),
-            ),
-        );
+      if (action === 'userclose') return closeTicket(i, { reason: 'Zamknięte przez klienta' });
+      if (action === 'done' || action === 'notdone') {
+        const { error } = staffTicket(i);
+        if (error) return replyV2(i, fail(error));
+        return i.showModal(action === 'done' ? doneModal() : notDoneModal());
+      }
+      if (action === 'copyrep') {
+        const ticket = getTicket(i.guildId, i.channelId);
+        if (!ticket?.deal) return replyV2(i, fail('Brak danych zamówienia.'));
+        // Zwykła wiadomość (bez Components V2), żeby na telefonie łatwo ją skopiować przytrzymaniem.
+        return i.reply({ content: repTemplate(ticket), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      }
+      if (action === 'closenorep') {
+        const { error } = staffTicket(i);
+        if (error) return replyV2(i, fail(error));
+        return closeTicket(i, { reason: 'Zrealizowane — zamknięte bez legit checka', result: 'done' });
       }
     }
   }
@@ -1509,6 +1718,7 @@ function selfTest() {
     { ...base, type: 'partner', status: 'waiting', form: { server: null, offer: 'Reklama' } },
   ];
   const closed = { ...tickets[0], closedAt: Date.now(), closedBy: '3', closeReason: 'Gotowe' };
+  const dealTicket = { ...tickets[0], deal: { product: 'Bot do exchange', price: '50 PLN', payment: 'ltc', sellerId: '3' } };
   const gw = { channelId: '1', prize: '20% zniżki', winners: 1, requirements: null, image: img, hostId: '2', endsAt: Date.now() + 1e6, entrants: ['1', '2'], ended: false };
 
   const built = [
@@ -1525,6 +1735,12 @@ function selfTest() {
     giveawayView({ ...gw, ended: true, winnerIds: ['2'] }, 300),
     giveawayView({ ...gw, ended: true, winnerIds: [], entrants: [] }, 0),
     entrantsView(gw),
+    doneModal(),
+    notDoneModal(),
+    repRequestView(dealTicket, '5'),
+    repRequestView(dealTicket, null),
+    legitCheckCard(dealTicket, 12, user),
+    closedView({ ...dealTicket, closedAt: Date.now(), closedBy: null, result: 'done', lcUrl: 'https://discord.com/channels/1/2/3' }, 'Serwer', true, '9'),
     boostView(user, 23, 2),
   ];
   for (const item of built) item.toJSON();
