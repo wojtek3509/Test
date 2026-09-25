@@ -6,10 +6,10 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 
 | Panel / funkcja | Jak włączyć | Co robi |
 | --- | --- | --- |
-| 🎫 Tickety | `/panel typ:tickety` | Menu kategorii: Bot discord, Hosting, Pytanie, Współpraca. Formularz, prywatny kanał, przejmowanie i etapy zamówienia z paskiem postępu. Transcript powstaje dopiero po zamknięciu i trafia do logów oraz do klienta w DM. |
+| 🎫 Tickety | `/panel typ:tickety` | Menu kategorii: Bot discord, Hosting, Pytanie, Współpraca. Formularz, prywatny kanał i przejmowanie. Transcript powstaje dopiero po zamknięciu i trafia do logów oraz do klienta w DM. |
 | 📜 Regulamin | `/panel typ:regulamin` | Lista §1–§4 i menu, które pokazuje wybraną sekcję. Opcjonalny przycisk „Akceptuję regulamin” nadający rolę. |
 | ⭐ Opinie | `/panel typ:opinie` | Przycisk „Wystaw opinię” i formularz: produkt, **jakość bota**, **czas realizacji**, **obsługa klienta** (1–5 ⭐) i treść. Panel pokazuje średnie ocen na żywo. Po zamknięciu ticketu klient dostaje w DM przycisk do opinii. |
-| 🤔 Czy legit? | `/panel typ:legit` | Reakcje ✅ ❌, licznik w nazwie kanału (`czy-legit→404`) i automatyczne wyciszenie za ❌. |
+| 🤔 Czy legit? | `/panel typ:legit` | Reakcje ✅ ❌ zapisywane od razu w bazie, licznik w nazwie kanału (`czy-legit→404`, aktualizacja co 10 minut) i automatyczne wyciszenie za ❌. |
 | 💰 Cennik | `/panel typ:cennik` | Ceny botów i hostingu oraz przyciski „Zamów bota” / „Kup hosting”, które od razu otwierają ticket. |
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
@@ -20,14 +20,14 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 1. Staff klika **Zamknij** i wybiera **✅ Zrealizowane** albo **❌ Niezrealizowane**.
 2. **Zrealizowane** otwiera formularz: nazwa produktu (np. *Bot do exchange*), cena (np. *50 PLN*) i płatność (BLIK, LTC, BTC, PayPal…).
 3. W tickecie pojawia się karta „Zamówienie zrealizowane” z gotowym wzorem repa, np. `+rep @sprzedawca Bot do exchange | 50 PLN | LTC`. Przycisk **📋 Skopiuj wzór** podaje go jako zwykły tekst do skopiowania.
-4. Klient wysyła repa na kanale legit checków (`/setup legitcheck:#kanał`). Bot:
+4. Klient wysyła repa na kanale legit checków (`/setup legitcheck:#kanał`). Rep musi zaczynać się od `+rep`. Na inną wiadomość bot odpowie wzorem i ticket się nie zamknie. Gdy rep jest poprawny, bot:
    - dodaje reakcję ✅,
    - odpowiada kartą „Legit check #0012” z danymi zamówienia,
    - podbija licznik w nazwie kanału,
    - **sam zamyka ticket**: transcript i podsumowanie trafiają na kanał logów, a klient dostaje w DM transcript i przycisk do opinii.
 5. **Niezrealizowane** zamyka ticket od razu (z opcjonalnym powodem). Staff może też użyć przycisku **Zamknij bez repa**.
 
-Bez ustawionego kanału legit checków ticket zamyka się od razu po wypełnieniu formularza.
+„Zrealizowane” działa dopiero po ustawieniu kanału legit checków. Kliknięcie „Skopiuj wzór” nigdy nie zamyka ticketu.
 
 ## Instalacja
 
@@ -38,7 +38,9 @@ Bez ustawionego kanału legit checków ticket zamyka się od razu po wypełnieni
    - `/setup kategoria:<kategoria> staff:<rola> logi:#logi opinie:#opinie boosty:#boosty legitcheck:#legit-check [rola-regulamin] [liczniki]`
    - `/panel typ:tickety`, `regulamin`, `opinie`, `legit`, `cennik` (każdy z opcjonalnym `baner:<link do obrazka>`)
 
-Bot nie wymaga żadnych uprzywilejowanych intentów.
+W Developer Portal → **Bot** włącz **Message Content Intent**. Dzięki temu bot sprawdza, czy rep zaczyna się od `+rep`. Bez niego bot też wystartuje, ale wtedy rep musi oznaczać sprzedawcę.
+
+Liczniki w nazwach kanałów (czy legit, legit check, opinie) są zapisywane w bazie od razu, a nazwy kanałów aktualizują się co 10 minut. To limit Discorda: nazwę kanału można zmienić tylko 2 razy na 10 minut.
 
 Boosty: bot reaguje na systemowe wiadomości Discorda o boostach, więc w **Ustawienia serwera → Ogólne → Kanał wiadomości systemowych** zostaw włączone „Wysyłaj wiadomość, gdy ktoś wzmocni serwer”.
 
@@ -48,7 +50,6 @@ Na początku `index.js`, w sekcji **KONFIGURACJA**:
 
 - `brand`: nazwa, emoji i hasło w stopce.
 - `ticketTypes`: kategorie ticketów i pola formularzy.
-- `statuses`: etapy zamówienia.
 - `rules`: treść regulaminu.
 - `pricing`: cennik.
 - `reviewCriteria` / `reviewProducts`: oceny w opiniach.

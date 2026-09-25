@@ -44,8 +44,6 @@ const style = {
   chevron: '»',
   cross: '×',
   arrow: '➜',
-  barFull: '🟦',
-  barEmpty: '⬛',
 };
 
 const colors = {
@@ -110,16 +108,6 @@ const ticketTypes = {
       { id: 'offer', label: 'Twoja propozycja', style: 'long', min: 10 },
     ],
   },
-};
-
-// Etapy zamówienia (bot/hosting) — pokazywane z paskiem postępu.
-const statuses = {
-  waiting: { label: 'Oczekuje na obsługę', emoji: '🕓' },
-  quote: { label: 'Wycena', emoji: '💬' },
-  payment: { label: 'Oczekuje na płatność', emoji: '💸' },
-  progress: { label: 'W realizacji', emoji: '⚙️' },
-  testing: { label: 'Testy', emoji: '🧪' },
-  done: { label: 'Gotowe', emoji: '✅' },
 };
 
 // Regulamin: sekcje wybierane z menu.
@@ -217,7 +205,7 @@ const reviewCooldownMinutes = 60;
 
 // „Czy legit?”: wyciszenie za ❌ (minuty, 0 = wyłączone). Staff nie jest wyciszany.
 const legitTimeoutMinutes = 10;
-// Nazwy kanałów z licznikiem ({n} = liczba). Zmiana nazwy maks. co 5 minut (limit Discorda).
+// Nazwy kanałów z licznikiem ({n} = liczba). Aktualizowane co 10 minut (limit Discorda).
 const counterNames = {
   legit: '🤔┃czy-legit→{n}',
   legitCheck: '✅┃legit-check→{n}',
@@ -268,6 +256,14 @@ function updateGuild(id, fn) {
 const getTicket = (guildId, channelId) => guild(guildId).tickets[channelId] ?? null;
 const openTicketsOf = (guildId, userId) => Object.values(guild(guildId).tickets).filter((t) => t.userId === userId && !t.closedAt);
 
+// ═══ STAN BOTA ═════════════════════════════════════════════════════════
+
+// „Message Content Intent” (Developer Portal → Bot) pozwala sprawdzić, czy rep zaczyna się od „+rep”.
+// Jeśli nie jest włączony, bot i tak wystartuje — wtedy rep musi tylko oznaczać sprzedawcę.
+let messageContentOn = true;
+let botClient;
+let loopsStarted = false;
+
 // ═══ STYL I POMOCNIKI ══════════════════════════════════════════════════
 
 const V2 = MessageFlags.IsComponentsV2;
@@ -290,7 +286,6 @@ const row = (label, value) => `${c} ${x} **${label}:** ${value}`;
 /** Punkt „» × tekst”. */
 const point = (text) => `${c} ${x} ${text}`;
 const stars = (n) => `${'⭐'.repeat(n)}${'✩'.repeat(5 - n)}`;
-const progressBar = (step, total) => `${style.barFull.repeat(step)}${style.barEmpty.repeat(total - step)}`;
 /** Bezpieczny blok kodu (usuwa ``` z tekstu użytkownika). */
 const codeBlock = (text) => `\`\`\`\n${String(text).replace(/```/g, 'ˋˋˋ').slice(0, 1500)}\n\`\`\``;
 
@@ -574,7 +569,6 @@ function boostView(member, count, tier) {
 
 // ═══ TICKETY ═══════════════════════════════════════════════════════════
 
-const statusOrder = Object.keys(statuses);
 const replyV2 = (i, container) => i.reply({ components: [container], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
 
 function isStaff(member, settings) {
@@ -611,8 +605,7 @@ function ticketModal(type) {
 
 function ticketMessage(ticket, user) {
   const t = ticketTypes[ticket.type];
-  const status = statuses[ticket.status] ?? statuses.waiting;
-  const b = box(ticket.status === 'done' ? colors.success : colors.brand);
+  const b = box(ticket.deal ? colors.success : colors.brand);
   header(
     b,
     [
@@ -631,23 +624,6 @@ function ticketMessage(ticket, user) {
     });
   text(b, [`### ${t.emoji} ${x} ${t.label}`, ...answers].join('\n'));
   sep(b);
-  const statusLines = [`### 📍 ${x} Status`];
-  if (t.order) {
-    const step = statusOrder.indexOf(ticket.status) + 1;
-    statusLines.push(`${progressBar(step, statusOrder.length)} \`${step}/${statusOrder.length}\``);
-  }
-  statusLines.push(row('Etap', `${status.emoji} ${status.label}`), row('Obsługuje', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '*czeka na przejęcie*'));
-  text(b, statusLines.join('\n'));
-  if (t.order) {
-    b.addActionRowComponents((r) =>
-      r.setComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('tk:status')
-          .setPlaceholder('🛠️ Zmień etap zamówienia (staff)')
-          .addOptions(Object.entries(statuses).map(([value, s]) => ({ label: s.label, value, emoji: s.emoji, default: value === ticket.status }))),
-      ),
-    );
-  }
   b.addActionRowComponents((r) =>
     r.setComponents(
       new ButtonBuilder()
@@ -665,6 +641,8 @@ function ticketMessage(ticket, user) {
 }
 
 const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(4, '0')}.html`;
+// Podmieniane w teście offline.
+let makeTranscript = (channel, ticket) => createTranscript(channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
 
 function closedView(ticket, subtitle, withReviewButton, guildId) {
   const t = ticketTypes[ticket.type];
@@ -759,7 +737,7 @@ async function onTicketForm(i, type) {
     return i.editReply({ components: [fail('Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.')], flags: V2 });
   }
 
-  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), status: 'waiting', claimedBy: null, form };
+  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), claimedBy: null, form };
   const message = await channel.send({ components: [ticketMessage(ticket, i.user)], flags: V2, allowedMentions: { parse: [] } });
   ticket.messageId = message.id;
   await message.pin().catch(() => {});
@@ -787,37 +765,10 @@ async function onClaim(i) {
   const { ticket, error } = staffTicket(i);
   if (error) return replyV2(i, fail(error));
   if (ticket.claimedBy) return replyV2(i, fail(`Ticket jest już przejęty przez <@${ticket.claimedBy}>.`));
-  updateGuild(i.guildId, (g) => {
-    const tk = g.tickets[i.channelId];
-    tk.claimedBy = i.user.id;
-    if (tk.status === 'waiting') tk.status = ticketTypes[tk.type].order ? 'quote' : 'progress';
-  });
+  updateGuild(i.guildId, (g) => (g.tickets[i.channelId].claimedBy = i.user.id));
   const user = await i.client.users.fetch(ticket.userId);
   await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
   await i.channel.send({ components: [notice(`### 🙋 ${x} Ticket przejęty\n<@${i.user.id}> zajmie się Twoją sprawą.`)], flags: V2 });
-}
-
-async function onStatus(i) {
-  const { ticket, error } = staffTicket(i);
-  if (error) return replyV2(i, fail(error));
-  const status = i.values[0];
-  updateGuild(i.guildId, (g) => {
-    g.tickets[i.channelId].status = status;
-    g.tickets[i.channelId].claimedBy ??= i.user.id;
-  });
-  const user = await i.client.users.fetch(ticket.userId);
-  await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
-  const s = statuses[status];
-  const step = statusOrder.indexOf(status) + 1;
-  await i.channel.send({
-    components: [
-      notice(
-        `### ${s.emoji} ${x} ${s.label}\n${progressBar(step, statusOrder.length)}\n-# <@${ticket.userId}>, etap Twojego zamówienia został zaktualizowany`,
-        status === 'done' ? colors.success : colors.brand,
-      ),
-    ],
-    flags: V2,
-  });
 }
 
 async function onCloseRequest(i) {
@@ -961,20 +912,26 @@ async function onDoneSubmit(i) {
     payment: i.fields.getStringSelectValues('payment')[0],
     sellerId: ticket.claimedBy ?? i.user.id,
   };
-  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, status: 'done', awaitingRep: true, claimedBy: ticket.claimedBy ?? i.user.id }));
+  if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.'));
+  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, claimedBy: ticket.claimedBy ?? i.user.id }));
   const updated = getTicket(i.guildId, i.channelId);
 
-  // Odświeżamy kartę ticketu (etap „Gotowe”).
+  // Karta ticketu zmienia kolor na zielony (zamówienie zrealizowane).
   const user = await i.client.users.fetch(updated.userId);
   const card = await i.channel.messages.fetch(updated.messageId).catch(() => null);
   await card?.edit({ components: [ticketMessage(updated, user)], flags: V2 }).catch(() => {});
 
-  if (!g.settings.lcChannelId) {
-    // Bez kanału legit checków nie ma na co czekać — zamykamy od razu.
-    await i.reply({ components: [repRequestView(updated, null)], flags: V2, allowedMentions: { users: [updated.userId] } });
-    return finalizeTicket(i.client, i.guild, i.channel, { closedBy: i.user.id, result: 'done' });
-  }
+  // Ticket NIE zamyka się tutaj — czeka, aż klient wyśle repa na kanale legit checków.
   await i.reply({ components: [repRequestView(updated, g.settings.lcChannelId)], flags: V2, allowedMentions: { users: [updated.userId] } });
+}
+
+/**
+ * Czy wiadomość jest poprawnym repem: musi zaczynać się od „+rep”.
+ * Bez „Message Content Intent” bot nie widzi treści — wtedy rep musi oznaczać sprzedawcę.
+ */
+function isValidRep(message, ticket) {
+  if (!messageContentOn) return message.mentions.users.has(ticket.deal.sellerId);
+  return /^\s*\+\s*rep\b/i.test(message.content);
 }
 
 /** Klient wysłał wiadomość na kanale legit checków → zamykamy jego ticket czekający na repa. */
@@ -983,13 +940,28 @@ async function onLegitCheckMessage(message) {
   if (message.channelId !== g.settings.lcChannelId || message.author.bot) return false;
   const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id);
   if (!ticket) return true;
+  if (!isValidRep(message, ticket)) {
+    const hint = await message
+      .reply({
+        components: [
+          notice(
+            `### ⚠️ ${x} To nie jest poprawny rep\nRep musi zaczynać się od **+rep**. Wzór:\n${codeBlock(repTemplate(ticket))}`,
+            colors.warning,
+          ),
+        ],
+        flags: V2,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => null);
+    setTimeout(() => hint?.delete().catch(() => {}), 20_000);
+    return true;
+  }
   const number = updateGuild(message.guild.id, (gg) => gg.stats.lc++).stats.lc;
   updateGuild(message.guild.id, (gg) => Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url }));
   await message.react('✅').catch(() => {});
   await message
     .reply({ components: [legitCheckCard(ticket, number, message.author)], flags: V2, allowedMentions: { parse: [] } })
     .catch((err) => console.error('Legit check:', err.message));
-  scheduleCounter(message.client, message.channelId, counterNames.legitCheck, number, 'legitCheck', message.guild.id);
 
   const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
   if (channel) {
@@ -1038,7 +1010,7 @@ async function finalizeTicket(client, g, channel, { closedBy, reason = null, res
   });
   const closed = getTicket(g.id, channel.id);
   const { settings } = guild(g.id);
-  const transcript = await createTranscript(channel, { filename: transcriptName(closed), poweredBy: false, saveImages: true });
+  const transcript = await makeTranscript(channel, closed);
   if (settings.logChannelId) {
     const log = await g.channels.fetch(settings.logChannelId).catch(() => null);
     await log?.send({ components: [closedView(closed, g.name, false)], files: [transcript], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
@@ -1116,7 +1088,6 @@ async function onReviewSubmit(i, guildId) {
   updateGuild(guildId, (gg) => gg.reviews.push(review));
   await i.editReply({ components: [ok(`Dziękujemy za opinię! ${msg.url}`)], flags: V2 });
   await refreshPanel(i.client, guildId, 'opinie');
-  scheduleCounter(i.client, channel.id, counterNames.reviews, guild(guildId).reviews.length, 'reviews', guildId);
 }
 
 // ═══ PANELE: WYSYŁANIE I ODŚWIEŻANIE ══════════════════════════════════
@@ -1142,22 +1113,37 @@ async function refreshPanel(client, guildId, type) {
 }
 
 // ─── Liczniki w nazwach kanałów (np. ⭐┃opinie→9) ───────────────────────
-// Discord pozwala zmienić nazwę kanału ~2 razy na 10 minut, więc zmiany zbieramy i wysyłamy maks. co 5 minut.
+// Liczby są od razu zapisywane w bazie. Discord pozwala zmienić nazwę kanału tylko 2 razy na 10 minut,
+// więc nazwy kanałów aktualizujemy co 10 minut (i raz przy starcie bota) — tylko gdy liczba się zmieniła.
 
-const counterState = new Map();
-function scheduleCounter(client, channelId, pattern, n, key, guildId) {
-  if (!pattern || guild(guildId).settings.counters === false) return;
-  const state = counterState.get(channelId) ?? { last: 0, timer: null, name: null };
-  state.name = pattern.replace('{n}', n);
-  counterState.set(channelId, state);
-  if (state.timer) return;
-  const wait = Math.max(0, state.last + 5 * 60_000 - Date.now()) + 3000;
-  state.timer = setTimeout(async () => {
-    state.timer = null;
-    state.last = Date.now();
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel && channel.name !== state.name) await channel.setName(state.name, `Licznik: ${key}`).catch((err) => console.warn('Licznik:', err.message));
-  }, wait);
+/** [id kanału, wzór nazwy, liczba] dla wszystkich liczników serwera. */
+function counterTargets(g) {
+  return [
+    [g.panels.legit?.channelId, counterNames.legit, g.legitVotes?.yes ?? 0],
+    [g.settings.lcChannelId, counterNames.legitCheck, g.stats.lc],
+    [g.settings.reviewChannelId, counterNames.reviews, g.reviews.length],
+  ].filter(([id, pattern]) => id && pattern);
+}
+
+async function updateCounters(client) {
+  for (const [guildId] of Object.entries(store.guilds)) {
+    const g = guild(guildId);
+    if (g.settings.counters === false || !client.guilds.cache.has(guildId)) continue;
+    for (const [channelId, pattern, n] of counterTargets(g)) {
+      const name = pattern.replace('{n}', n);
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel || channel.name === name) continue;
+      // Nie czekamy w nieskończoność na limit Discorda — spróbujemy ponownie za 10 minut.
+      await Promise.race([channel.setName(name, 'Licznik'), new Promise((r) => setTimeout(r, 15_000))]).catch((err) =>
+        console.warn(`Licznik ${name}:`, err.message),
+      );
+    }
+  }
+}
+
+function counterLoop(client) {
+  updateCounters(client).catch(console.error);
+  setInterval(() => updateCounters(client).catch(console.error), 10 * 60_000);
 }
 
 // ═══ CZY LEGIT ═════════════════════════════════════════════════════════
@@ -1165,16 +1151,21 @@ function scheduleCounter(client, channelId, pattern, n, key, guildId) {
 async function onLegitReaction(reaction, user, added) {
   if (user.bot) return;
   if (reaction.partial) await reaction.fetch().catch(() => null);
+  if (reaction.message.partial) await reaction.message.fetch().catch(() => null);
   const message = reaction.message;
   if (!message.guildId) return;
   const g = guild(message.guildId);
   if (g.panels.legit?.messageId !== message.id) return;
   const emoji = reaction.emoji.name;
+  if (emoji !== '✅' && emoji !== '❌') return;
 
-  if (emoji === '✅') {
-    const count = Math.max(0, (message.reactions.cache.get('✅')?.count ?? 1) - 1);
-    scheduleCounter(message.client, message.channelId, counterNames.legit, count, 'legit', message.guildId);
-  }
+  // Liczymy głosy bez reakcji samego bota i zapisujemy w bazie od razu.
+  const votes = (name) => {
+    const r = message.reactions.cache.get(name);
+    return r ? Math.max(0, r.count - (r.me ? 1 : 0)) : 0;
+  };
+  updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votes('✅'), no: votes('❌') }));
+
   if (emoji === '❌' && added && legitTimeoutMinutes > 0) {
     const member = await message.guild.members.fetch(user.id).catch(() => null);
     if (!member || isStaff(member, g.settings) || !member.moderatable) return;
@@ -1627,7 +1618,6 @@ async function route(i) {
       // Odświeżamy panel, żeby menu wróciło do „Nie wybrałeś/aś żadnej kategorii”.
       return i.message.edit({ components: [ticketsPanel(guild(i.guildId), logoOf(i.guild, i.client))], flags: V2 }).catch(() => {});
     }
-    if (i.isStringSelectMenu() && action === 'status') return onStatus(i);
     if (i.isModalSubmit() && action === 'form') return onTicketForm(i, arg);
     if (i.isModalSubmit() && action === 'donesubmit') return onDoneSubmit(i);
     if (i.isModalSubmit() && action === 'notdonesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason') || null });
@@ -1712,10 +1702,10 @@ function selfTest() {
   g.reviews.push(review);
   const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), claimedBy: '3' };
   const tickets = [
-    { ...base, type: 'bot', status: 'progress', form: { desc: 'Bot z ticketami', budget: '50', deadline: null } },
-    { ...base, type: 'hosting', status: 'waiting', claimedBy: null, form: { bot: 'discord.js', period: '3m', notes: 'x' } },
-    { ...base, type: 'question', status: 'waiting', form: { question: 'Ile kosztuje?' } },
-    { ...base, type: 'partner', status: 'waiting', form: { server: null, offer: 'Reklama' } },
+    { ...base, type: 'bot', form: { desc: 'Bot z ticketami', budget: '50', deadline: null } },
+    { ...base, type: 'hosting', claimedBy: null, form: { bot: 'discord.js', period: '3m', notes: 'x' } },
+    { ...base, type: 'question', form: { question: 'Ile kosztuje?' } },
+    { ...base, type: 'partner', form: { server: null, offer: 'Reklama' } },
   ];
   const closed = { ...tickets[0], closedAt: Date.now(), closedBy: '3', closeReason: 'Gotowe' };
   const dealTicket = { ...tickets[0], deal: { product: 'Bot do exchange', price: '50 PLN', payment: 'ltc', sellerId: '3' } };
@@ -1748,10 +1738,193 @@ function selfTest() {
   console.log(`✅ ${built.length} komponentów/komend przeszło walidację`);
 }
 
+
+// ─── Test przepływu (symulacja Discorda, bez sieci) ────────────────────
+
+async function flowTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test nie przeszedł: ${msg}`);
+  };
+  const log = [];
+  const img = 'https://cdn.discordapp.com/embed/avatars/0.png';
+  const GID = 'flow-guild';
+  const STAFF = 'staff1';
+  const CLIENT = 'client1';
+  const TICKET_CH = 'ticket-ch';
+  const LC_CH = 'lc-ch';
+  const LOG_CH = 'log-ch';
+  const LEGIT_CH = 'legit-ch';
+
+  const mkUser = (id) => ({ id, bot: false, tag: id, displayAvatarURL: () => img, toString: () => `<@${id}>`, send: async (p) => log.push(['dm', id, p]) });
+  const users = { [STAFF]: mkUser(STAFF), [CLIENT]: mkUser(CLIENT) };
+  const mkChannel = (id, name) => ({
+    id,
+    name,
+    messages: { fetch: async () => ({ edit: async (p) => log.push(['edit', id, p]) }) },
+    send: async (p) => (log.push(['send', id, p]), { id: `m-${log.length}`, url: `https://discord.com/channels/${GID}/${id}/m`, delete: async () => {} }),
+    setName: async (n) => (log.push(['rename', id, n]), (channels[id].name = n)),
+    delete: async () => log.push(['delete', id]),
+  });
+  const channels = {
+    [TICKET_CH]: mkChannel(TICKET_CH, 'bot-0001'),
+    [LC_CH]: mkChannel(LC_CH, 'legit-check'),
+    [LOG_CH]: mkChannel(LOG_CH, 'logi'),
+    [LEGIT_CH]: mkChannel(LEGIT_CH, 'czy-legit'),
+  };
+  const member = (id, staff) => ({
+    id,
+    permissions: { has: () => false },
+    roles: { cache: { has: (r) => staff && r === 'staff-role' } },
+    moderatable: true,
+    timeout: async (ms) => log.push(['timeout', id, ms]),
+  });
+  const fakeGuild = {
+    id: GID,
+    name: 'TanieBoty',
+    channels: { fetch: async (id) => channels[id] ?? null },
+    members: { fetch: async (id) => member(id, id === STAFF) },
+  };
+  const fakeClient = {
+    users: { fetch: async (id) => users[id] },
+    channels: { fetch: async (id) => channels[id] ?? null },
+    guilds: { cache: { has: (id) => id === GID } },
+  };
+  const interaction = (userId, extra = {}) => ({
+    guildId: GID,
+    channelId: TICKET_CH,
+    channel: channels[TICKET_CH],
+    guild: fakeGuild,
+    client: fakeClient,
+    user: users[userId],
+    member: member(userId, userId === STAFF),
+    replies: [],
+    reply(p) {
+      this.replies.push(p);
+      log.push(['reply', userId, p]);
+      return Promise.resolve();
+    },
+    showModal(m) {
+      this.modal = m;
+      return Promise.resolve();
+    },
+    ...extra,
+  });
+  makeTranscript = async () => ({ name: 'transcript.html' });
+
+  // Przygotowanie: serwer, ticket przejęty przez staff.
+  const g = guild(GID);
+  Object.assign(g.settings, { staffRoleId: 'staff-role', logChannelId: LOG_CH, lcChannelId: null });
+  g.tickets[TICKET_CH] = { channelId: TICKET_CH, number: 1, type: 'bot', userId: CLIENT, openedAt: Date.now(), claimedBy: STAFF, form: { desc: 'x', budget: '50' }, messageId: 'card' };
+  const doneFields = {
+    getTextInputValue: (id) => ({ product: 'Bot do exchange', price: '50 PLN' })[id],
+    getStringSelectValues: () => ['ltc'],
+  };
+
+  // 1. Karta ticketu nie ma menu statusu.
+  const cardJson = JSON.stringify(ticketMessage(g.tickets[TICKET_CH], users[CLIENT]).toJSON());
+  assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
+
+  // 2. Klient nie może kliknąć „Zrealizowane”.
+  const iClientDone = interaction(CLIENT);
+  const { error } = staffTicket(iClientDone);
+  assert(error, 'klient nie może oznaczyć zrealizowania');
+
+  // 3. „Zrealizowane” bez kanału LC → błąd, ticket dalej otwarty.
+  let i = interaction(STAFF, { fields: doneFields });
+  await onDoneSubmit(i);
+  assert(!getTicket(GID, TICKET_CH).awaitingRep && !getTicket(GID, TICKET_CH).closedAt, 'bez kanału LC ticket nie może się zamknąć');
+
+  // 4. „Zrealizowane” z kanałem LC → karta repa, ticket czeka.
+  g.settings.lcChannelId = LC_CH;
+  i = interaction(STAFF, { fields: doneFields });
+  await onDoneSubmit(i);
+  let t = getTicket(GID, TICKET_CH);
+  assert(t.awaitingRep && !t.closedAt, 'po „Zrealizowane” ticket czeka na repa');
+  assert(t.deal.product === 'Bot do exchange' && t.deal.payment === 'ltc' && t.deal.sellerId === STAFF, 'dane zamówienia zapisane');
+
+  // 5. „Skopiuj wzór” nie zamyka ticketu.
+  i = interaction(CLIENT, { customId: 'tk:copyrep', isChatInputCommand: () => false, inGuild: () => true, inCachedGuild: () => true, isRepliable: () => true, isButton: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false });
+  await route(i);
+  assert(i.replies[0]?.content === `+rep <@${STAFF}> Bot do exchange | 50 PLN | LTC`, 'wzór repa do skopiowania');
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'kopiowanie nie zamyka ticketu');
+
+  const lcMessage = (authorId, content, mentions) => ({
+    guild: fakeGuild,
+    channelId: LC_CH,
+    author: users[authorId] ?? mkUser(authorId),
+    content,
+    url: `https://discord.com/channels/${GID}/${LC_CH}/rep`,
+    mentions: { users: { has: (id) => mentions.includes(id) } },
+    client: fakeClient,
+    react: async (e) => log.push(['react', e]),
+    reply: async (p) => (log.push(['lcreply', p]), { delete: async () => {} }),
+  });
+
+  // 6. Wiadomość innej osoby na LC → nic.
+  await onLegitCheckMessage(lcMessage('ktos', `+rep <@${STAFF}>`, [STAFF]));
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'rep innej osoby nie zamyka ticketu');
+
+  // 7. Klient pisze coś innego niż rep → podpowiedź, ticket otwarty.
+  messageContentOn = true;
+  await onLegitCheckMessage(lcMessage(CLIENT, 'hej, dzięki!', []));
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'zwykła wiadomość nie zamyka ticketu');
+  await onLegitCheckMessage(lcMessage(CLIENT, 'polecam', [STAFF]));
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'bez „+rep” ticket się nie zamyka');
+  assert(log.some(([type]) => type === 'lcreply'), 'bot podpowiada poprawny wzór');
+
+  // 8. Poprawny rep → reakcja, karta LC, zamknięcie, logi, DM.
+  const before = log.length;
+  await onLegitCheckMessage(lcMessage(CLIENT, `+rep <@${STAFF}> Bot do exchange | 50 PLN | LTC`, [STAFF]));
+  t = getTicket(GID, TICKET_CH);
+  assert(t.closedAt && t.result === 'done' && !t.awaitingRep && t.lcUrl, 'poprawny rep zamyka ticket jako zrealizowany');
+  const after = log.slice(before);
+  assert(after.some(([type, e]) => type === 'react' && e === '✅'), 'reakcja ✅ pod repem');
+  assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'log zamknięcia na kanale logów');
+  assert(after.some(([type, id]) => type === 'dm' && id === CLIENT), 'transcript do klienta w DM');
+  assert(g.stats.lc === 1 && g.stats.done === 1, 'statystyki LC i zrealizowanych');
+
+  // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
+  messageContentOn = false;
+  assert(isValidRep({ content: '', mentions: { users: { has: (id) => id === STAFF } } }, t), 'bez intentu: oznaczenie sprzedawcy wystarcza');
+  messageContentOn = true;
+
+  // 10. „Czy legit?” — głosy zapisują się od razu, ❌ wycisza.
+  g.panels.legit = { channelId: LEGIT_CH, messageId: 'legit-msg' };
+  const reactions = new Map([
+    ['✅', { count: 405, me: true }],
+    ['❌', { count: 2, me: true }],
+  ]);
+  const reaction = (name) => ({
+    partial: false,
+    emoji: { name },
+    message: { id: 'legit-msg', partial: false, guildId: GID, guild: fakeGuild, channelId: LEGIT_CH, client: fakeClient, reactions: { cache: reactions } },
+  });
+  await onLegitReaction(reaction('✅'), mkUser('fan'), true);
+  assert(g.legitVotes.yes === 404 && g.legitVotes.no === 1, 'głosy zapisane w bazie bez reakcji bota');
+  await onLegitReaction(reaction('❌'), mkUser('hater'), true);
+  assert(log.some(([type, id]) => type === 'timeout' && id === 'hater'), '❌ wycisza użytkownika');
+  const timeoutsBefore = log.filter(([type]) => type === 'timeout').length;
+  await onLegitReaction(reaction('❌'), mkUser(STAFF), true);
+  assert(log.filter(([type]) => type === 'timeout').length === timeoutsBefore, 'staff nie jest wyciszany');
+
+  // 11. Liczniki kanałów: nazwy z bazy.
+  g.settings.reviewChannelId = null;
+  await updateCounters(fakeClient);
+  assert(channels[LEGIT_CH].name === '🤔┃czy-legit→404', `licznik czy legit (${channels[LEGIT_CH].name})`);
+  assert(channels[LC_CH].name === '✅┃legit-check→1', `licznik legit check (${channels[LC_CH].name})`);
+  const renames = log.filter(([type]) => type === 'rename').length;
+  await updateCounters(fakeClient);
+  assert(log.filter(([type]) => type === 'rename').length === renames, 'bez zmian liczby nie zmieniamy nazwy');
+
+  delete store.guilds[GID];
+  console.log('✅ Test przepływu: 11 scenariuszy OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
   selfTest();
+  await flowTest();
   process.exit(0);
 }
 
@@ -1765,17 +1938,20 @@ if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
   process.exit(1);
 }
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
-});
 
-client.once(Events.ClientReady, async (ready) => {
+async function onReady(ready) {
   console.log(`✅ Zalogowano jako ${ready.user.tag}`);
   console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
   console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak — zaproś bota linkiem powyżej'}`);
+  if (!messageContentOn) {
+    console.warn('⚠️ „Message Content Intent” jest wyłączony — bot nie sprawdzi „+rep”, tylko oznaczenie sprzedawcy. Włącz go w Developer Portal → Bot.');
+  }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
-  giveawayTicker(ready);
+  if (!loopsStarted) {
+    loopsStarted = true;
+    giveawayTicker(ready);
+    counterLoop(ready);
+  }
 
   const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
   const rest = new REST().setToken(DISCORD_TOKEN);
@@ -1797,22 +1973,42 @@ client.once(Events.ClientReady, async (ready) => {
     console.warn(`⚠️ Brak dostępu do serwera ${guildId} — rejestruję komendy globalnie.`);
     await registerGlobal().catch((e) => console.error('Rejestracja komend nie powiodła się:', e.message));
   }
-});
+}
 
-client.on(Events.InteractionCreate, onInteraction);
-client.on(Events.MessageCreate, (m) => onMessage(m).catch(console.error));
-client.on(Events.MessageReactionAdd, (r, u) => onLegitReaction(r, u, true).catch(console.error));
-client.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
+const isDisallowedIntents = (err) => err?.code === 4014 || /disallowed|privileged intent/i.test(String(err?.message));
+
+function start(withContent) {
+  messageContentOn = withContent;
+  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions];
+  if (withContent) intents.push(GatewayIntentBits.MessageContent);
+  botClient = new Client({ intents, partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User] });
+
+  botClient.once(Events.ClientReady, onReady);
+  botClient.on(Events.InteractionCreate, onInteraction);
+  botClient.on(Events.MessageCreate, (m) => onMessage(m).catch(console.error));
+  botClient.on(Events.MessageReactionAdd, (r, u) => onLegitReaction(r, u, true).catch(console.error));
+  botClient.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
+
+  const fallback = () => {
+    if (!messageContentOn) return;
+    console.warn('⚠️ „Message Content Intent” nie jest włączony w Developer Portal — uruchamiam bota bez niego.');
+    botClient.destroy();
+    start(false);
+  };
+  botClient.on(Events.ShardDisconnect, (ev) => ev?.code === 4014 && fallback());
+  botClient.login(DISCORD_TOKEN).catch((err) => {
+    if (withContent && (isDisallowedIntents(err) || !messageContentOn)) return fallback();
+    console.error('Logowanie nie powiodło się:', err.message);
+    process.exit(1);
+  });
+}
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     flush();
-    client.destroy();
+    botClient?.destroy();
     process.exit(0);
   });
 }
 
-client.login(DISCORD_TOKEN).catch((err) => {
-  console.error('Logowanie nie powiodło się:', err.message);
-  process.exit(1);
-});
+start(true);
