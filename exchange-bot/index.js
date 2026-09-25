@@ -1135,12 +1135,30 @@ client.once(Events.ClientReady, async (c) => {
 
   // Rejestracja komend przy każdym starcie: na serwerze GUILD_ID (od razu) albo globalnie.
   const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
-  const target = GUILD_ID ? Routes.applicationGuildCommands(c.user.id, GUILD_ID) : Routes.applicationCommands(c.user.id);
+  const rest = new REST().setToken(DISCORD_TOKEN);
+  const registerGlobal = async () => {
+    await rest.put(Routes.applicationCommands(c.user.id), { body });
+    console.log(`✅ Zarejestrowano ${body.length} komend globalnie (mogą pojawić się z opóźnieniem do ~1h)`);
+  };
+
+  let guildId = GUILD_ID;
+  if (guildId === c.user.id) {
+    console.warn('⚠️ guildId to ID bota, a nie serwera. Kliknij PPM na ikonę serwera → „Kopiuj ID serwera”.');
+    guildId = null;
+  }
   try {
-    await new REST().setToken(DISCORD_TOKEN).put(target, { body });
-    console.log(`✅ Zarejestrowano ${body.length} komend ${GUILD_ID ? `na serwerze ${GUILD_ID}` : 'globalnie'}`);
+    if (!guildId) return await registerGlobal();
+    await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), { body });
+    console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId}`);
   } catch (err) {
-    console.error('Rejestracja komend nie powiodła się:', err);
+    if (err.code === 50001) {
+      console.warn(
+        `⚠️ Brak dostępu do serwera ${guildId}. Sprawdź, czy to ID serwera i czy bot jest na nim ` +
+          'z zakresem applications.commands. Rejestruję komendy globalnie.',
+      );
+      return registerGlobal().catch((e) => console.error('Rejestracja komend nie powiodła się:', e.message));
+    }
+    console.error('Rejestracja komend nie powiodła się:', err.message);
   }
 });
 
