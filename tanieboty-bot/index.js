@@ -1,0 +1,1602 @@
+// TanieBoty — bot Discord dla sklepu z botami, cały w jednym pliku (Components V2).
+// Uruchomienie: npm install && node index.js   (sprawdzenie offline: node index.js --check)
+import 'dotenv/config';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  ActivityType,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  Client,
+  ContainerBuilder,
+  Events,
+  GatewayIntentBits,
+  LabelBuilder,
+  MessageFlags,
+  MessageType,
+  ModalBuilder,
+  Partials,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SeparatorSpacingSize,
+  SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
+import { createTranscript } from 'discord-html-transcripts';
+
+// ═══ KONFIGURACJA ══════════════════════════════════════════════════════
+// Wszystko, co widać w wiadomościach bota, zmienisz tutaj.
+// Emoji może być zwykłe (🤖) albo własne: '<:nazwa:123456789012345678>' (Developer Portal → Emojis).
+
+const brand = {
+  name: 'TanieBoty',
+  emoji: '🤖',
+  tagline: 'Tanie i solidne boty Discord na zamówienie',
+  footerEmoji: '💙',
+};
+
+const style = {
+  chevron: '»',
+  cross: '×',
+  arrow: '➜',
+  barFull: '🟦',
+  barEmpty: '⬛',
+};
+
+const colors = {
+  brand: 0x00b0f4,
+  success: 0x23a55a,
+  warning: 0xf0b232,
+  danger: 0xf23f43,
+  neutral: 0x2b2d31,
+  gold: 0xf5c542,
+  boost: 0xf47fff,
+};
+
+// Kategorie ticketów (maks. 25). "fields" to pola formularza (maks. 5).
+const ticketTypes = {
+  bot: {
+    label: 'Bot discord',
+    emoji: '💻',
+    description: 'Kliknij, aby zamówić bota discord.',
+    prefix: 'bot',
+    order: true,
+    fields: [
+      { id: 'desc', label: 'Opisz bota', style: 'long', placeholder: 'Tickety, weryfikacja, konkursy, ekonomia…', min: 10 },
+      { id: 'budget', label: 'Budżet (PLN)', placeholder: 'np. 50' },
+      { id: 'deadline', label: 'Na kiedy?', placeholder: 'np. do piątku / bez pośpiechu', required: false },
+    ],
+  },
+  hosting: {
+    label: 'Hosting bota discord',
+    emoji: '🖥️',
+    description: 'Kliknij, aby zakupić hosting bota.',
+    prefix: 'hosting',
+    order: true,
+    fields: [
+      { id: 'bot', label: 'Jaki bot? (język / biblioteka)', placeholder: 'np. discord.js, Python' },
+      {
+        id: 'period',
+        label: 'Okres hostingu',
+        select: [
+          ['1 miesiąc', '1m'],
+          ['3 miesiące', '3m'],
+          ['6 miesięcy', '6m'],
+          ['12 miesięcy', '12m'],
+        ],
+      },
+      { id: 'notes', label: 'Uwagi', style: 'long', required: false },
+    ],
+  },
+  question: {
+    label: 'Pytanie',
+    emoji: '❓',
+    description: 'Kliknij, aby zadać nam pytanie.',
+    prefix: 'pytanie',
+    fields: [{ id: 'question', label: 'Twoje pytanie', style: 'long', min: 5 }],
+  },
+  partner: {
+    label: 'Współpraca',
+    emoji: '🤝',
+    description: 'Kliknij, aby zaproponować współpracę.',
+    prefix: 'wspolpraca',
+    fields: [
+      { id: 'server', label: 'Link do serwera / strony', required: false },
+      { id: 'offer', label: 'Twoja propozycja', style: 'long', min: 10 },
+    ],
+  },
+};
+
+// Etapy zamówienia (bot/hosting) — pokazywane z paskiem postępu.
+const statuses = {
+  waiting: { label: 'Oczekuje na obsługę', emoji: '🕓' },
+  quote: { label: 'Wycena', emoji: '💬' },
+  payment: { label: 'Oczekuje na płatność', emoji: '💸' },
+  progress: { label: 'W realizacji', emoji: '⚙️' },
+  testing: { label: 'Testy', emoji: '🧪' },
+  done: { label: 'Gotowe', emoji: '✅' },
+};
+
+// Regulamin: sekcje wybierane z menu.
+const rules = [
+  {
+    title: 'Postanowienia ogólne',
+    points: [
+      'Serwer **TanieBoty** zajmuje się tworzeniem i hostingiem botów Discord.',
+      'Składając zamówienie, akceptujesz niniejszy regulamin.',
+      'Obowiązuje kultura osobista — obrażanie, spam i scam kończą się banem.',
+      'Administracja może zmienić regulamin; zmiany ogłaszamy na serwerze.',
+    ],
+  },
+  {
+    title: 'Polityka zwrotów',
+    points: [
+      'Zwrot jest możliwy, **dopóki prace nad botem się nie rozpoczęły**.',
+      'Po rozpoczęciu prac zwracamy część kwoty proporcjonalną do niewykonanej pracy.',
+      'Gotowy i przekazany bot nie podlega zwrotowi.',
+      'Za niedziałający hosting z naszej winy zwracamy środki za niewykorzystany okres.',
+    ],
+  },
+  {
+    title: 'Polityka zamówień',
+    points: [
+      'Zamówienia składasz wyłącznie przez **ticket**.',
+      'Przed startem ustalamy funkcje, cenę i termin — to jest wiążąca wycena.',
+      'Dodatkowe funkcje spoza wyceny są płatne osobno.',
+      'Po oddaniu bota masz **7 dni** na zgłoszenie błędów, które poprawiamy za darmo.',
+    ],
+  },
+  {
+    title: 'Polityka płatności',
+    points: [
+      'Akceptujemy: BLIK, przelew, PayPal, PSC i krypto.',
+      'Przy większych zamówieniach pobieramy **zaliczkę 50%**.',
+      'Hosting opłacasz z góry za wybrany okres.',
+      'Płatności przyjmuje wyłącznie administracja — **nigdy nie płać w DM osobom spoza staffu**.',
+    ],
+  },
+];
+
+// Cennik (/panel typ:cennik).
+const pricing = [
+  {
+    emoji: '🤖',
+    title: 'Boty Discord',
+    items: [
+      ['Bot z ticketami', 'od 25 PLN'],
+      ['Bot weryfikacyjny', 'od 20 PLN'],
+      ['Bot z konkursami', 'od 25 PLN'],
+      ['Bot „wszystko w jednym”', 'od 60 PLN'],
+      ['Bot na zamówienie', 'wycena indywidualna'],
+    ],
+  },
+  {
+    emoji: '🖥️',
+    title: 'Hosting',
+    items: [
+      ['1 miesiąc', '5 PLN'],
+      ['3 miesiące', '13 PLN'],
+      ['12 miesięcy', '45 PLN'],
+    ],
+  },
+];
+
+// Oceny w opiniach.
+const reviewCriteria = [
+  { id: 'quality', label: 'Jakość bota', emoji: '🤖' },
+  { id: 'time', label: 'Czas realizacji', emoji: '⏱️' },
+  { id: 'service', label: 'Obsługa klienta', emoji: '💬' },
+];
+const reviewProducts = {
+  bot: { label: 'Bot discord', emoji: '💻' },
+  hosting: { label: 'Hosting bota', emoji: '🖥️' },
+  other: { label: 'Inna usługa', emoji: '📦' },
+};
+// Jak często jedna osoba może dodać opinię (minuty).
+const reviewCooldownMinutes = 60;
+
+// „Czy legit?”: wyciszenie za ❌ (minuty, 0 = wyłączone). Staff nie jest wyciszany.
+const legitTimeoutMinutes = 10;
+// Nazwy kanałów z licznikiem ({n} = liczba). Zmiana nazwy maks. co 5 minut (limit Discorda).
+const counterNames = {
+  legit: '🤔┃czy-legit→{n}',
+  reviews: '⭐┃opinie→{n}',
+};
+
+// ═══ BAZA DANYCH (data/db.json) ════════════════════════════════════════
+
+const dbFile = join(dirname(fileURLToPath(import.meta.url)), 'data', 'db.json');
+let store = { guilds: {} };
+if (existsSync(dbFile)) store = JSON.parse(readFileSync(dbFile, 'utf8'));
+
+let saveTimer = null;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 250);
+}
+function flush() {
+  clearTimeout(saveTimer);
+  mkdirSync(dirname(dbFile), { recursive: true });
+  writeFileSync(`${dbFile}.tmp`, JSON.stringify(store, null, 2));
+  renameSync(`${dbFile}.tmp`, dbFile);
+}
+
+function guild(id) {
+  const g = (store.guilds[id] ??= {});
+  g.settings ??= {};
+  g.settings.banners ??= {};
+  g.settings.maxOpen ??= 1;
+  g.counter ??= 0;
+  g.tickets ??= {};
+  g.reviews ??= [];
+  g.giveaways ??= {};
+  g.panels ??= {};
+  g.stats ??= { opened: 0, closed: 0 };
+  return g;
+}
+
+function updateGuild(id, fn) {
+  const g = guild(id);
+  fn(g);
+  save();
+  return g;
+}
+
+const getTicket = (guildId, channelId) => guild(guildId).tickets[channelId] ?? null;
+const openTicketsOf = (guildId, userId) => Object.values(guild(guildId).tickets).filter((t) => t.userId === userId && !t.closedAt);
+
+// ═══ STYL I POMOCNIKI ══════════════════════════════════════════════════
+
+const V2 = MessageFlags.IsComponentsV2;
+const V2_EPHEMERAL = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
+
+const ts = (ms, fmt = 'R') => `<t:${Math.floor(ms / 1000)}:${fmt}>`;
+const pad = (n) => `#${String(n).padStart(4, '0')}`;
+const upper = (s) => s.toLocaleUpperCase('pl-PL');
+const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
+const c = style.chevron;
+const x = style.cross;
+
+/** Tytuł w ramce: # `🤖 TanieBoty × TEKST`. Własne emoji stoi przed ramką (w kodzie się nie wyświetla). */
+function title(text, emoji = brand.emoji) {
+  const body = `${brand.name} ${x} ${upper(text)}`;
+  return emoji.startsWith('<') ? `# ${emoji} \`${body}\`` : `# \`${emoji} ${body}\``;
+}
+/** Linia „» × Etykieta: wartość”. */
+const row = (label, value) => `${c} ${x} **${label}:** ${value}`;
+/** Punkt „» × tekst”. */
+const point = (text) => `${c} ${x} ${text}`;
+const stars = (n) => `${'⭐'.repeat(n)}${'✩'.repeat(5 - n)}`;
+const progressBar = (step, total) => `${style.barFull.repeat(step)}${style.barEmpty.repeat(total - step)}`;
+/** Bezpieczny blok kodu (usuwa ``` z tekstu użytkownika). */
+const codeBlock = (text) => `\`\`\`\n${String(text).replace(/```/g, 'ˋˋˋ').slice(0, 1500)}\n\`\`\``;
+
+const sep = (container, large = false) =>
+  container.addSeparatorComponents((s) => s.setDivider(true).setSpacing(large ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small));
+const text = (container, content) => container.addTextDisplayComponents((t) => t.setContent(content));
+const footer = (container) => text(container, `-# ${brand.emoji} ${brand.name} ${brand.footerEmoji} • ${brand.tagline}`);
+
+/** Nagłówek z miniaturką po prawej (jeśli jest obrazek). */
+function header(container, content, thumbUrl) {
+  if (thumbUrl) {
+    container.addSectionComponents((s) => s.addTextDisplayComponents((t) => t.setContent(content)).setThumbnailAccessory((th) => th.setURL(thumbUrl)));
+  } else {
+    text(container, content);
+  }
+  return container;
+}
+
+function banner(container, url) {
+  if (url) container.addMediaGalleryComponents((g) => g.addItems((i) => i.setURL(url)));
+  return container;
+}
+
+const box = (color = colors.brand) => new ContainerBuilder().setAccentColor(color);
+const notice = (content, color = colors.brand) => text(box(color), content);
+const ok = (content) => notice(`### ✅ ${content}`, colors.success);
+const fail = (content) => notice(`### ❌ ${x} ${content}`, colors.danger);
+
+/** Obrazek do nagłówków: ikona serwera, a gdy jej brak — avatar bota. */
+const logoOf = (g, client) => g?.iconURL?.({ size: 256 }) ?? client?.user?.displayAvatarURL?.({ size: 256 }) ?? null;
+
+const placeholderNone = `❌ ${x} Nie wybrałeś/aś żadnej kategorii.`;
+
+// ═══ PANELE ════════════════════════════════════════════════════════════
+
+function ticketsPanel(g, logo) {
+  const b = box();
+  header(
+    b,
+    [title('Tickety', '🎫'), `>>> 📩 ${x} **Wybierz odpowiednią kategorię, aby utworzyć ticketa.**`, '', ...Object.values(ticketTypes).map((t) => `${t.emoji} ${x} **${t.label}**`)].join('\n'),
+    logo,
+  );
+  text(b, '> -# Prosimy o zachowanie cierpliwości na ticketach — odpowiadamy najszybciej, jak to możliwe.');
+  banner(b, g.settings.banners.tickety);
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('tk:open')
+        .setPlaceholder(placeholderNone)
+        .addOptions(Object.entries(ticketTypes).map(([value, t]) => ({ label: t.label, value, description: t.description, emoji: t.emoji }))),
+    ),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function rulesPanel(g, logo) {
+  const b = box();
+  header(b, [title('Regulamin', '📜'), '>>> ' + rules.map((r, i) => `**§${i + 1}. ${r.title}.**`).join('\n')].join('\n'), logo);
+  text(b, `> -# Korzystając z serwera, akceptujesz regulamin. Ostatnia aktualizacja: ${ts(Date.now(), 'D')}`);
+  banner(b, g.settings.banners.regulamin);
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('rules:show')
+        .setPlaceholder(placeholderNone)
+        .addOptions(
+          rules.map((rule, idx) => ({ label: `§${idx + 1}. ${rule.title}`, value: String(idx), description: 'Kliknij, aby wyświetlić tą sekcję regulaminu.', emoji: '📄' })),
+        ),
+    ),
+  );
+  if (g.settings.rulesRoleId) {
+    b.addActionRowComponents((r) =>
+      r.setComponents(new ButtonBuilder().setCustomId('rules:accept').setLabel('Akceptuję regulamin').setEmoji('✅').setStyle(ButtonStyle.Success)),
+    );
+  }
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function rulesSection(index) {
+  const r = rules[index];
+  const b = box();
+  text(b, title(`§${index + 1}. ${r.title}`, '📜'));
+  sep(b);
+  text(b, '>>> ' + r.points.map((p, i) => `\`${index + 1}.${i + 1}\` ${p}`).join('\n'));
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function reviewSummary(reviews) {
+  if (!reviews.length) return { count: 0, avg: 0, per: {} };
+  const per = {};
+  for (const cr of reviewCriteria) per[cr.id] = reviews.reduce((a, r) => a + r.ratings[cr.id], 0) / reviews.length;
+  const avg = Object.values(per).reduce((a, v) => a + v, 0) / reviewCriteria.length;
+  return { count: reviews.length, avg, per };
+}
+
+function reviewsPanel(g, logo) {
+  const s = reviewSummary(g.reviews);
+  const b = box();
+  header(
+    b,
+    [
+      title('Wystaw nam opinię', '⭐'),
+      '>>> ' +
+        [
+          point('Twoje **zdanie ma znaczenie!** Podziel się wrażeniami z zakupu bota lub hostingu.'),
+          point('Każda opinia pomaga nam w budowaniu **rzetelnej reputacji.**'),
+          point('Kliknij **przycisk niżej**, aby dodać swoją ocenę.'),
+        ].join('\n'),
+    ].join('\n'),
+    logo,
+  );
+  sep(b);
+  text(
+    b,
+    [
+      `### 📊 ${x} Nasze oceny`,
+      row('Opinii', `\`${s.count}\``),
+      row('Średnia', s.count ? `\`${s.avg.toFixed(2)}/5\` ${stars(Math.round(s.avg))}` : '`—`'),
+      ...reviewCriteria.map((cr) => row(`${cr.emoji} ${cr.label}`, s.count ? `\`${s.per[cr.id].toFixed(1)}/5\`` : '`—`')),
+    ].join('\n'),
+  );
+  banner(b, g.settings.banners.opinie);
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(new ButtonBuilder().setCustomId('rev:open').setLabel('Wystaw opinię').setEmoji('⭐').setStyle(ButtonStyle.Primary)),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function reviewCard(review, user) {
+  const avg = reviewCriteria.reduce((a, cr) => a + review.ratings[cr.id], 0) / reviewCriteria.length;
+  const product = reviewProducts[review.product] ?? reviewProducts.other;
+  const b = box(avg >= 4 ? colors.brand : avg >= 3 ? colors.warning : colors.danger);
+  header(
+    b,
+    [
+      title(`Opinia ${pad(review.number)}`, '⭐'),
+      '>>> ' +
+        [
+          row('Twórca opinii', `<@${review.userId}>`),
+          row('Produkt', `${product.emoji} ${product.label}`),
+          row('Średnia ocena', `\`${avg.toFixed(1)}/5\``),
+          row('Dodano', ts(review.at)),
+        ].join('\n'),
+    ].join('\n'),
+    user?.displayAvatarURL({ size: 256 }),
+  );
+  sep(b);
+  text(b, `${point('**Treść opinii:**')}\n${codeBlock(review.content)}`);
+  sep(b);
+  text(b, '>>> ' + reviewCriteria.map((cr) => row(`${cr.emoji} ${cr.label}`, `\`${stars(review.ratings[cr.id])}\``)).join('\n'));
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function legitPanel(logo) {
+  const b = box();
+  header(
+    b,
+    [
+      title('Czy legit?', '🤔'),
+      `## ❓ Czy nasz serwer __${brand.name}__ jest LEGIT?`,
+      `- ✅ Jeżeli uważasz, że __**TAK**__ zaznacz reakcję ✅ poniżej!`,
+      `- ❌ Jeżeli uważasz, że __**NIE**__ zaznacz reakcję ❌ poniżej!`,
+    ].join('\n'),
+    logo,
+  );
+  if (legitTimeoutMinutes > 0) {
+    text(b, `> -# Zaznaczenie reakcji ❌ bez dowodu skutkuje **automatycznym tymczasowym wyciszeniem!**`);
+  }
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function pricingPanel(g, logo) {
+  const b = box();
+  header(b, [title('Cennik', '💰'), `>>> ${point('Poniżej znajdziesz **orientacyjne ceny** naszych usług.')}\n${point('Dokładną wycenę dostaniesz w **tickecie**.')}`].join('\n'), logo);
+  for (const cat of pricing) {
+    sep(b);
+    text(b, [`### ${cat.emoji} ${x} ${cat.title}`, ...cat.items.map(([name, price]) => row(name, `\`${price}\``))].join('\n'));
+  }
+  banner(b, g.settings.banners.cennik);
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder().setCustomId('tk:quick:bot').setLabel('Zamów bota').setEmoji('💻').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('tk:quick:hosting').setLabel('Kup hosting').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+// ─── Konkursy ──────────────────────────────────────────────────────────
+
+function giveawayView(gw, memberCount) {
+  const n = gw.entrants.length;
+  const pct = memberCount ? ((n / memberCount) * 100).toFixed(2) : '0.00';
+  const b = box(gw.ended ? colors.neutral : colors.gold);
+  const lines = [
+    `🎁 ${x} **Nagroda:** \`${gw.prize}\``,
+    gw.ended
+      ? `👑 ${x} **${gw.winners > 1 ? 'Zwycięzcy' : 'Zwycięzca'}:** ${gw.winnerIds?.length ? gw.winnerIds.map((id) => `<@${id}>`).join(', ') : '*brak uczestników*'}`
+      : `👑 ${x} **Liczba zwycięzców:** \`${gw.winners}\``,
+    gw.ended ? `⏰ ${x} **Zakończono:** ${ts(gw.endsAt, 'f')}` : `⏰ ${x} **Koniec:** ${ts(gw.endsAt)} (${ts(gw.endsAt, 'f')})`,
+    `👤 ${x} **Organizator:** <@${gw.hostId}>`,
+    `📋 ${x} **Wymagania:** ${gw.requirements || 'Bez wymagań!'}`,
+  ];
+  text(b, [title(gw.ended ? 'Konkurs zakończony' : 'Konkurs', '🎉'), '', '>>> ' + lines.join('\n')].join('\n'));
+  if (gw.image) banner(b, gw.image);
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder()
+        .setCustomId('gw:join')
+        .setLabel(`Dołącz [ ${n} ${n === 1 ? 'osoba' : 'osób'} | ${pct}% ]`)
+        .setEmoji('🎉')
+        .setStyle(gw.ended ? ButtonStyle.Secondary : ButtonStyle.Primary)
+        .setDisabled(Boolean(gw.ended)),
+      new ButtonBuilder().setCustomId('gw:list').setLabel('Lista uczestników').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function entrantsView(gw) {
+  const shown = gw.entrants.slice(0, 60).map((id, i) => `\`${i + 1}.\` <@${id}>`);
+  const more = gw.entrants.length - shown.length;
+  return notice(
+    [`### 👥 ${x} Uczestnicy (${gw.entrants.length})`, shown.length ? shown.join('\n') : '*Nikt jeszcze nie dołączył.*', more > 0 ? `-# …i ${more} więcej` : null]
+      .filter(Boolean)
+      .join('\n'),
+    colors.gold,
+  );
+}
+
+// ─── Boosty ────────────────────────────────────────────────────────────
+
+function boostView(member, count, tier) {
+  const now = Date.now();
+  const b = box(colors.boost);
+  header(
+    b,
+    [
+      title('Nowy boost', '🚀'),
+      `## 🎉 Nowe wzmocnienie serwera!`,
+      `${member} właśnie **wzmocnił/a** serwer! Dziękujemy! 💜`,
+    ].join('\n'),
+    member.displayAvatarURL({ size: 256 }),
+  );
+  sep(b);
+  text(
+    b,
+    '>>> ' +
+      [
+        row('👤 Użytkownik', `${member} (\`${member.id}\`)`),
+        row('📅 Data wzmocnienia', `${ts(now, 'F')} (${ts(now)})`),
+        row('🚀 Łączna liczba wzmocnień', `\`${count}\``),
+        row('💎 Poziom serwera', `\`${tier}\``),
+      ].join('\n'),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+// ═══ TICKETY ═══════════════════════════════════════════════════════════
+
+const statusOrder = Object.keys(statuses);
+const replyV2 = (i, container) => i.reply({ components: [container], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+
+function isStaff(member, settings) {
+  return member?.permissions?.has(PermissionFlagsBits.Administrator) || (settings.staffRoleId && member?.roles?.cache?.has(settings.staffRoleId));
+}
+
+function ticketModal(type) {
+  const t = ticketTypes[type];
+  return new ModalBuilder()
+    .setCustomId(`tk:form:${type}`)
+    .setTitle(`${t.emoji} ${t.label}`.slice(0, 45))
+    .addLabelComponents(
+      t.fields.map((f) => {
+        const label = new LabelBuilder().setLabel(f.label);
+        if (f.select) {
+          return label.setStringSelectMenuComponent(
+            new StringSelectMenuBuilder()
+              .setCustomId(f.id)
+              .setPlaceholder('Wybierz…')
+              .addOptions(f.select.map(([name, value]) => ({ label: name, value }))),
+          );
+        }
+        const input = new TextInputBuilder()
+          .setCustomId(f.id)
+          .setStyle(f.style === 'long' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+          .setRequired(f.required !== false)
+          .setMaxLength(f.style === 'long' ? 1000 : 100);
+        if (f.placeholder) input.setPlaceholder(f.placeholder);
+        if (f.min) input.setMinLength(f.min);
+        return label.setTextInputComponent(input);
+      }),
+    );
+}
+
+function ticketMessage(ticket, user) {
+  const t = ticketTypes[ticket.type];
+  const status = statuses[ticket.status] ?? statuses.waiting;
+  const b = box(ticket.status === 'done' ? colors.success : colors.brand);
+  header(
+    b,
+    [
+      title(`Ticket ${pad(ticket.number)}`, t.emoji),
+      `👋 Witaj <@${ticket.userId}>! Dziękujemy za kontakt z **${brand.name}**.`,
+      `-# Zespół odpowie najszybciej, jak to możliwe • otwarto ${ts(ticket.openedAt)}`,
+    ].join('\n'),
+    user.displayAvatarURL({ size: 256 }),
+  );
+  sep(b);
+  const answers = t.fields
+    .filter((f) => ticket.form[f.id])
+    .map((f) => {
+      const value = f.select ? (f.select.find(([, v]) => v === ticket.form[f.id])?.[0] ?? ticket.form[f.id]) : ticket.form[f.id];
+      return f.style === 'long' ? `${point(`**${f.label}:**`)}\n${codeBlock(value)}` : row(f.label, `\`${value}\``);
+    });
+  text(b, [`### ${t.emoji} ${x} ${t.label}`, ...answers].join('\n'));
+  sep(b);
+  const statusLines = [`### 📍 ${x} Status`];
+  if (t.order) {
+    const step = statusOrder.indexOf(ticket.status) + 1;
+    statusLines.push(`${progressBar(step, statusOrder.length)} \`${step}/${statusOrder.length}\``);
+  }
+  statusLines.push(row('Etap', `${status.emoji} ${status.label}`), row('Obsługuje', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '*czeka na przejęcie*'));
+  text(b, statusLines.join('\n'));
+  if (t.order) {
+    b.addActionRowComponents((r) =>
+      r.setComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('tk:status')
+          .setPlaceholder('🛠️ Zmień etap zamówienia (staff)')
+          .addOptions(Object.entries(statuses).map(([value, s]) => ({ label: s.label, value, emoji: s.emoji, default: value === ticket.status }))),
+      ),
+    );
+  }
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder()
+        .setCustomId('tk:claim')
+        .setLabel(ticket.claimedBy ? 'Przejęty' : 'Przejmij')
+        .setEmoji('🙋')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(Boolean(ticket.claimedBy)),
+      new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tk:transcript').setLabel('Transcript').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(4, '0')}.html`;
+
+function closedView(ticket, subtitle, withReviewButton, guildId) {
+  const t = ticketTypes[ticket.type];
+  const b = box(colors.neutral);
+  text(
+    b,
+    [
+      title(`Ticket ${pad(ticket.number)} zamknięty`, '🔒'),
+      subtitle ? `-# ${subtitle}` : null,
+      '>>> ' +
+        [
+          row('Autor', `<@${ticket.userId}>`),
+          row('Kategoria', `${t.emoji} ${t.label}`),
+          row('Obsługiwał', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—'),
+          row('Zamknął', `<@${ticket.closedBy}>`),
+          row('Powód', ticket.closeReason ?? '*brak*'),
+          row('Otwarty', ts(ticket.openedAt, 'f')),
+          row('Zamknięty', ts(ticket.closedAt, 'f')),
+        ].join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+  sep(b);
+  text(b, `### 📜 ${x} Transcript rozmowy`);
+  b.addFileComponents((f) => f.setURL(`attachment://${transcriptName(ticket)}`));
+  if (withReviewButton) {
+    sep(b, true);
+    text(b, `### ⭐ ${x} Jak nam poszło?\n-# Wystaw opinię — oceń jakość bota, czas realizacji i obsługę klienta`);
+    b.addActionRowComponents((r) =>
+      r.setComponents(new ButtonBuilder().setCustomId(`rev:open:${guildId}`).setLabel('Wystaw opinię').setEmoji('⭐').setStyle(ButtonStyle.Primary)),
+    );
+  }
+  sep(b);
+  footer(b);
+  return b;
+}
+
+async function onTicketSelect(i, type) {
+  const { settings } = guild(i.guildId);
+  if (!settings.categoryId) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup`.'));
+  const open = openTicketsOf(i.guildId, i.user.id);
+  if (open.length >= settings.maxOpen) return replyV2(i, fail(`Masz już otwarty ticket: ${open.map((t) => `<#${t.channelId}>`).join(', ')}`));
+  await i.showModal(ticketModal(type));
+}
+
+async function onTicketForm(i, type) {
+  const g = guild(i.guildId);
+  const { settings } = g;
+  if (openTicketsOf(i.guildId, i.user.id).length >= settings.maxOpen) return replyV2(i, fail('Osiągnięto limit otwartych ticketów.'));
+
+  const form = {};
+  for (const f of ticketTypes[type].fields) {
+    form[f.id] = f.select ? (i.fields.getStringSelectValues(f.id)[0] ?? null) : i.fields.getTextInputValue(f.id) || null;
+  }
+
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  const number = updateGuild(i.guildId, (gg) => gg.counter++).counter;
+  const t = ticketTypes[type];
+  const allowUser = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.ReadMessageHistory,
+  ];
+  const overwrites = [
+    { id: i.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: i.user.id, allow: allowUser },
+    { id: i.client.user.id, allow: [...allowUser, PermissionFlagsBits.ManageChannels] },
+  ];
+  if (settings.staffRoleId) overwrites.push({ id: settings.staffRoleId, allow: [...allowUser, PermissionFlagsBits.ManageMessages] });
+
+  let channel;
+  try {
+    channel = await i.guild.channels.create({
+      name: `${t.prefix}-${String(number).padStart(4, '0')}`,
+      type: ChannelType.GuildText,
+      parent: settings.categoryId,
+      topic: `${t.emoji} ${t.label} • ${i.user.tag} (${i.user.id})`,
+      permissionOverwrites: overwrites,
+    });
+  } catch (err) {
+    console.error(err);
+    return i.editReply({ components: [fail('Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.')], flags: V2 });
+  }
+
+  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), status: 'waiting', claimedBy: null, form };
+  const message = await channel.send({ components: [ticketMessage(ticket, i.user)], flags: V2, allowedMentions: { parse: [] } });
+  ticket.messageId = message.id;
+  await message.pin().catch(() => {});
+  updateGuild(i.guildId, (gg) => {
+    gg.tickets[channel.id] = ticket;
+    gg.stats.opened++;
+  });
+
+  const ping = await channel.send({
+    content: [`<@${i.user.id}>`, settings.staffRoleId && `<@&${settings.staffRoleId}>`].filter(Boolean).join(' '),
+    allowedMentions: { users: [i.user.id], roles: [settings.staffRoleId].filter(Boolean) },
+  });
+  setTimeout(() => ping.delete().catch(() => {}), 3000);
+  await i.editReply({ components: [ok(`Ticket utworzony: ${channel}`)], flags: V2 });
+}
+
+function staffTicket(i) {
+  const ticket = getTicket(i.guildId, i.channelId);
+  if (!ticket || ticket.closedAt) return { error: 'To nie jest aktywny kanał ticketu.' };
+  if (!isStaff(i.member, guild(i.guildId).settings)) return { error: 'Tylko staff może to zrobić.' };
+  return { ticket };
+}
+
+async function onClaim(i) {
+  const { ticket, error } = staffTicket(i);
+  if (error) return replyV2(i, fail(error));
+  if (ticket.claimedBy) return replyV2(i, fail(`Ticket jest już przejęty przez <@${ticket.claimedBy}>.`));
+  updateGuild(i.guildId, (g) => {
+    const tk = g.tickets[i.channelId];
+    tk.claimedBy = i.user.id;
+    if (tk.status === 'waiting') tk.status = ticketTypes[tk.type].order ? 'quote' : 'progress';
+  });
+  const user = await i.client.users.fetch(ticket.userId);
+  await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
+  await i.channel.send({ components: [notice(`### 🙋 ${x} Ticket przejęty\n<@${i.user.id}> zajmie się Twoją sprawą.`)], flags: V2 });
+}
+
+async function onStatus(i) {
+  const { ticket, error } = staffTicket(i);
+  if (error) return replyV2(i, fail(error));
+  const status = i.values[0];
+  updateGuild(i.guildId, (g) => {
+    g.tickets[i.channelId].status = status;
+    g.tickets[i.channelId].claimedBy ??= i.user.id;
+  });
+  const user = await i.client.users.fetch(ticket.userId);
+  await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
+  const s = statuses[status];
+  const step = statusOrder.indexOf(status) + 1;
+  await i.channel.send({
+    components: [
+      notice(
+        `### ${s.emoji} ${x} ${s.label}\n${progressBar(step, statusOrder.length)}\n-# <@${ticket.userId}>, etap Twojego zamówienia został zaktualizowany`,
+        status === 'done' ? colors.success : colors.brand,
+      ),
+    ],
+    flags: V2,
+  });
+}
+
+async function onTranscript(i) {
+  const { ticket, error } = staffTicket(i);
+  if (error) return replyV2(i, fail(error));
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  const file = await createTranscript(i.channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
+  await i.editReply({ components: [ok('Transcript wygenerowany.')], files: [file], flags: V2 });
+}
+
+async function onCloseRequest(i) {
+  const ticket = getTicket(i.guildId, i.channelId);
+  if (!ticket || ticket.closedAt) return replyV2(i, fail('To nie jest aktywny kanał ticketu.'));
+  if (ticket.userId !== i.user.id && !isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+  const b = box(colors.danger);
+  text(
+    b,
+    [`## 🔒 ${x} Zamknąć ticket?`, point('Kanał zostanie **usunięty**.'), point('Transcript trafi do **logów** i do autora.'), point('Autor dostanie prośbę o **opinię**.')].join('\n'),
+  );
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder().setCustomId('tk:closeyes').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tk:closewhy').setLabel('Zamknij z powodem').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  await replyV2(i, b);
+}
+
+async function closeTicket(i, reason = null) {
+  const ticket = getTicket(i.guildId, i.channelId);
+  if (!ticket || ticket.closedAt) return replyV2(i, fail('Ten ticket jest już zamykany.'));
+  const { settings } = guild(i.guildId);
+  if (ticket.userId !== i.user.id && !isStaff(i.member, settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+
+  updateGuild(i.guildId, (g) => {
+    Object.assign(g.tickets[i.channelId], { closedAt: Date.now(), closedBy: i.user.id, closeReason: reason });
+    g.stats.closed++;
+  });
+  await i.reply({
+    components: [notice([`## 🔒 ${x} Ticket zamykany`, row('Zamknął', `<@${i.user.id}>`), reason ? row('Powód', reason) : null, '-# Kanał zniknie za kilka sekund…'].filter(Boolean).join('\n'), colors.danger)],
+    flags: V2,
+    allowedMentions: { parse: [] },
+  });
+
+  const closed = getTicket(i.guildId, i.channelId);
+  const channel = i.channel;
+  const transcript = await createTranscript(channel, { filename: transcriptName(closed), poweredBy: false, saveImages: true });
+  if (settings.logChannelId) {
+    const log = await i.guild.channels.fetch(settings.logChannelId).catch(() => null);
+    await log?.send({ components: [closedView(closed, i.guild.name, false)], files: [transcript], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
+  }
+  const user = await i.client.users.fetch(closed.userId).catch(() => null);
+  await user
+    ?.send({ components: [closedView(closed, `Dziękujemy za skorzystanie z ${brand.name}!`, true, i.guildId)], files: [transcript], flags: V2 })
+    .catch(() => {});
+  setTimeout(() => channel.delete(`Ticket zamknięty przez ${i.user.tag}`).catch(console.error), 5000);
+}
+
+// ═══ OPINIE ════════════════════════════════════════════════════════════
+
+function reviewModal(guildId) {
+  const starOptions = [5, 4, 3, 2, 1].map((n) => ({
+    label: `${'⭐'.repeat(n)} ${['', 'Słabo', 'Może być', 'Dobrze', 'Bardzo dobrze', 'Rewelacja'][n]}`,
+    value: String(n),
+  }));
+  return new ModalBuilder()
+    .setCustomId(`rev:submit:${guildId}`)
+    .setTitle(`⭐ Opinia o ${brand.name}`.slice(0, 45))
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Co kupiłeś/aś?')
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId('product')
+            .setPlaceholder('Wybierz produkt…')
+            .addOptions(Object.entries(reviewProducts).map(([value, p]) => ({ label: p.label, value, emoji: p.emoji }))),
+        ),
+      ...reviewCriteria.map((cr) =>
+        new LabelBuilder()
+          .setLabel(`${cr.emoji} ${cr.label}`)
+          .setStringSelectMenuComponent(new StringSelectMenuBuilder().setCustomId(cr.id).setPlaceholder('Twoja ocena…').addOptions(starOptions)),
+      ),
+      new LabelBuilder()
+        .setLabel('Treść opinii')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('content')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Jak przebiegła współpraca? Czy bot działa tak, jak chciałeś/aś?')
+            .setMinLength(5)
+            .setMaxLength(800),
+        ),
+    );
+}
+
+async function onReviewOpen(i, guildId) {
+  const g = guild(guildId);
+  if (!g.settings.reviewChannelId) return replyV2(i, fail('Kanał opinii nie jest ustawiony. Administrator musi użyć `/setup`.'));
+  const last = [...g.reviews].reverse().find((r) => r.userId === i.user.id);
+  if (last && Date.now() - last.at < reviewCooldownMinutes * 60_000) {
+    return replyV2(i, fail(`Możesz dodać kolejną opinię ${ts(last.at + reviewCooldownMinutes * 60_000)}.`));
+  }
+  await i.showModal(reviewModal(guildId));
+}
+
+async function onReviewSubmit(i, guildId) {
+  const g = guild(guildId);
+  const ratings = Object.fromEntries(reviewCriteria.map((cr) => [cr.id, Number(i.fields.getStringSelectValues(cr.id)[0])]));
+  const review = {
+    number: g.reviews.length + 1,
+    userId: i.user.id,
+    product: i.fields.getStringSelectValues('product')[0],
+    content: i.fields.getTextInputValue('content'),
+    ratings,
+    at: Date.now(),
+  };
+  const channel = await i.client.channels.fetch(g.settings.reviewChannelId).catch(() => null);
+  if (!channel) return replyV2(i, fail('Nie znaleziono kanału opinii.'));
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  const msg = await channel.send({ components: [reviewCard(review, i.user)], flags: V2, allowedMentions: { parse: [] } });
+  review.messageId = msg.id;
+  updateGuild(guildId, (gg) => gg.reviews.push(review));
+  await i.editReply({ components: [ok(`Dziękujemy za opinię! ${msg.url}`)], flags: V2 });
+  await refreshPanel(i.client, guildId, 'opinie');
+  scheduleCounter(i.client, channel.id, counterNames.reviews, guild(guildId).reviews.length, 'reviews', guildId);
+}
+
+// ═══ PANELE: WYSYŁANIE I ODŚWIEŻANIE ══════════════════════════════════
+
+const panelBuilders = {
+  tickety: (g, logo) => ticketsPanel(g, logo),
+  regulamin: (g, logo) => rulesPanel(g, logo),
+  opinie: (g, logo) => reviewsPanel(g, logo),
+  legit: (g, logo) => legitPanel(logo),
+  cennik: (g, logo) => pricingPanel(g, logo),
+};
+
+/** Przebudowuje zapisany panel (np. po nowej opinii albo zmianie baneru). */
+async function refreshPanel(client, guildId, type) {
+  const g = guild(guildId);
+  const ref = g.panels[type];
+  if (!ref) return;
+  const channel = await client.channels.fetch(ref.channelId).catch(() => null);
+  const message = await channel?.messages.fetch(ref.messageId).catch(() => null);
+  if (!message) return;
+  const logo = logoOf(channel.guild, client);
+  await message.edit({ components: [panelBuilders[type](g, logo)], flags: V2 }).catch((err) => console.error(`Panel ${type}:`, err.message));
+}
+
+// ─── Liczniki w nazwach kanałów (np. ⭐┃opinie→9) ───────────────────────
+// Discord pozwala zmienić nazwę kanału ~2 razy na 10 minut, więc zmiany zbieramy i wysyłamy maks. co 5 minut.
+
+const counterState = new Map();
+function scheduleCounter(client, channelId, pattern, n, key, guildId) {
+  if (!pattern || guild(guildId).settings.counters === false) return;
+  const state = counterState.get(channelId) ?? { last: 0, timer: null, name: null };
+  state.name = pattern.replace('{n}', n);
+  counterState.set(channelId, state);
+  if (state.timer) return;
+  const wait = Math.max(0, state.last + 5 * 60_000 - Date.now()) + 3000;
+  state.timer = setTimeout(async () => {
+    state.timer = null;
+    state.last = Date.now();
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (channel && channel.name !== state.name) await channel.setName(state.name, `Licznik: ${key}`).catch((err) => console.warn('Licznik:', err.message));
+  }, wait);
+}
+
+// ═══ CZY LEGIT ═════════════════════════════════════════════════════════
+
+async function onLegitReaction(reaction, user, added) {
+  if (user.bot) return;
+  if (reaction.partial) await reaction.fetch().catch(() => null);
+  const message = reaction.message;
+  if (!message.guildId) return;
+  const g = guild(message.guildId);
+  if (g.panels.legit?.messageId !== message.id) return;
+  const emoji = reaction.emoji.name;
+
+  if (emoji === '✅') {
+    const count = Math.max(0, (message.reactions.cache.get('✅')?.count ?? 1) - 1);
+    scheduleCounter(message.client, message.channelId, counterNames.legit, count, 'legit', message.guildId);
+  }
+  if (emoji === '❌' && added && legitTimeoutMinutes > 0) {
+    const member = await message.guild.members.fetch(user.id).catch(() => null);
+    if (!member || isStaff(member, g.settings) || !member.moderatable) return;
+    await member.timeout(legitTimeoutMinutes * 60_000, 'Czy legit: reakcja ❌ bez dowodu').catch((err) => console.warn('Wyciszenie:', err.message));
+    await user
+      .send({
+        components: [
+          notice(
+            `### 🔇 ${x} Zostałeś/aś wyciszony/a na ${legitTimeoutMinutes} min\nReakcja ❌ na **czy legit** wymaga dowodu. Jeśli go masz — otwórz ticket.`,
+            colors.warning,
+          ),
+        ],
+        flags: V2,
+      })
+      .catch(() => {});
+  }
+}
+
+// ═══ KONKURSY ══════════════════════════════════════════════════════════
+
+/** "1d 2h 30m", "2h", "90m", "45s" → milisekundy. */
+function parseDuration(input) {
+  const units = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
+  let total = 0;
+  const re = /(\d+)\s*([dhms])/gi;
+  let match;
+  while ((match = re.exec(input))) total += Number(match[1]) * units[match[2].toLowerCase()];
+  return total;
+}
+
+const giveawayEditTimers = new Map();
+/** Odświeża wiadomość konkursu z opóźnieniem, żeby wiele kliknięć = jedna edycja. */
+function scheduleGiveawayEdit(client, guildId, messageId) {
+  if (giveawayEditTimers.has(messageId)) return;
+  giveawayEditTimers.set(
+    messageId,
+    setTimeout(async () => {
+      giveawayEditTimers.delete(messageId);
+      const gw = guild(guildId).giveaways[messageId];
+      const channel = await client.channels.fetch(gw.channelId).catch(() => null);
+      const message = await channel?.messages.fetch(messageId).catch(() => null);
+      await message?.edit({ components: [giveawayView(gw, channel.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } }).catch(() => {});
+    }, 2000),
+  );
+}
+
+function pickWinners(entrants, count, exclude = []) {
+  const pool = entrants.filter((id) => !exclude.includes(id));
+  const winners = [];
+  while (pool.length && winners.length < count) winners.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  return winners;
+}
+
+async function endGiveaway(client, guildId, messageId, reroll = false) {
+  const g = guild(guildId);
+  const gw = g.giveaways[messageId];
+  if (!gw) return null;
+  const winnerIds = pickWinners(gw.entrants, gw.winners, reroll ? (gw.winnerIds ?? []) : []);
+  updateGuild(guildId, () => Object.assign(gw, { ended: true, winnerIds, endsAt: reroll ? gw.endsAt : Date.now() }));
+  const channel = await client.channels.fetch(gw.channelId).catch(() => null);
+  const message = await channel?.messages.fetch(messageId).catch(() => null);
+  await message?.edit({ components: [giveawayView(gw, channel.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } }).catch(() => {});
+  if (channel) {
+    await channel
+      .send({
+        content: winnerIds.length
+          ? `🎉 ${x} Gratulacje ${winnerIds.map((id) => `<@${id}>`).join(', ')}! Wygrałeś/aś: **${gw.prize}**${reroll ? ' *(ponowne losowanie)*' : ''}`
+          : `😢 ${x} Konkurs o **${gw.prize}** zakończył się bez uczestników.`,
+        reply: message ? { messageReference: message.id, failIfNotExists: false } : undefined,
+        allowedMentions: { users: winnerIds },
+      })
+      .catch(() => {});
+  }
+  return winnerIds;
+}
+
+function giveawayTicker(client) {
+  setInterval(() => {
+    for (const [guildId, g] of Object.entries(store.guilds)) {
+      for (const [messageId, gw] of Object.entries(g.giveaways ?? {})) {
+        if (!gw.ended && gw.endsAt <= Date.now()) endGiveaway(client, guildId, messageId).catch(console.error);
+      }
+    }
+  }, 10_000);
+}
+
+async function onGiveawayJoin(i) {
+  const g = guild(i.guildId);
+  const gw = g.giveaways[i.message.id];
+  if (!gw || gw.ended) return replyV2(i, fail('Ten konkurs już się zakończył.'));
+  const joined = gw.entrants.includes(i.user.id);
+  updateGuild(i.guildId, () => {
+    if (joined) gw.entrants = gw.entrants.filter((id) => id !== i.user.id);
+    else gw.entrants.push(i.user.id);
+  });
+  scheduleGiveawayEdit(i.client, i.guildId, i.message.id);
+  await replyV2(
+    i,
+    joined
+      ? notice(`### 👋 ${x} Opuściłeś/aś konkurs\nKliknij **Dołącz** ponownie, jeśli zmienisz zdanie.`, colors.neutral)
+      : notice(`### 🎉 ${x} Dołączyłeś/aś do konkursu!\nNagroda: **${gw.prize}** • losowanie ${ts(gw.endsAt)}\n-# Kliknij ponownie, aby się wypisać.`, colors.gold),
+  );
+}
+
+// ═══ BOOSTY ════════════════════════════════════════════════════════════
+
+const boostTypes = [MessageType.GuildBoost, MessageType.GuildBoostTier1, MessageType.GuildBoostTier2, MessageType.GuildBoostTier3];
+
+async function onMessage(message) {
+  if (!message.guild || !boostTypes.includes(message.type)) return;
+  const { settings } = guild(message.guild.id);
+  if (!settings.boostChannelId) return;
+  const channel = await message.guild.channels.fetch(settings.boostChannelId).catch(() => null);
+  const fresh = await message.guild.fetch().catch(() => message.guild);
+  await channel
+    ?.send({
+      components: [boostView(message.author, fresh.premiumSubscriptionCount ?? 0, fresh.premiumTier ?? 0)],
+      flags: V2,
+      allowedMentions: { users: [message.author.id] },
+    })
+    .catch((err) => console.error('Boost:', err.message));
+}
+
+// ═══ KOMENDY SLASH ═════════════════════════════════════════════════════
+
+const replyOk = (i, content, flags = V2_EPHEMERAL) => i.reply({ components: [ok(content)], flags, allowedMentions: { parse: [] } });
+const replyFail = (i, content) => replyV2(i, fail(content));
+const commands = new Map();
+const command = (data, execute) => commands.set(data.name, { data, execute });
+
+command(
+  new SlashCommandBuilder()
+    .setName('setup')
+    .setDescription('Konfiguracja bota TanieBoty')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria ticketów').addChannelTypes(ChannelType.GuildCategory).setRequired(true))
+    .addRoleOption((o) => o.setName('staff').setDescription('Rola obsługująca tickety').setRequired(true))
+    .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów i transcriptów').addChannelTypes(ChannelType.GuildText).setRequired(true))
+    .addChannelOption((o) => o.setName('opinie').setDescription('Kanał, na który trafiają opinie').addChannelTypes(ChannelType.GuildText))
+    .addChannelOption((o) => o.setName('boosty').setDescription('Kanał podziękowań za boosty').addChannelTypes(ChannelType.GuildText))
+    .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
+    .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
+    .addIntegerOption((o) => o.setName('limit').setDescription('Maks. otwartych ticketów na osobę').setMinValue(1).setMaxValue(10)),
+  async (i) => {
+    const s = updateGuild(i.guildId, (g) => {
+      const st = g.settings;
+      st.categoryId = i.options.getChannel('kategoria').id;
+      st.staffRoleId = i.options.getRole('staff').id;
+      st.logChannelId = i.options.getChannel('logi').id;
+      st.reviewChannelId = i.options.getChannel('opinie')?.id ?? st.reviewChannelId ?? null;
+      st.boostChannelId = i.options.getChannel('boosty')?.id ?? st.boostChannelId ?? null;
+      st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
+      st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
+      st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
+    }).settings;
+    const ch = (id) => (id ? `<#${id}>` : '`—`');
+    await i.reply({
+      components: [
+        notice(
+          [
+            title('Konfiguracja', '⚙️'),
+            '>>> ' +
+              [
+                row('📁 Kategoria ticketów', ch(s.categoryId)),
+                row('🛡️ Staff', `<@&${s.staffRoleId}>`),
+                row('📜 Logi', ch(s.logChannelId)),
+                row('⭐ Opinie', ch(s.reviewChannelId)),
+                row('🚀 Boosty', ch(s.boostChannelId)),
+                row('✅ Rola za regulamin', s.rulesRoleId ? `<@&${s.rulesRoleId}>` : '`—`'),
+                row('🔢 Liczniki kanałów', s.counters ? '`włączone`' : '`wyłączone`'),
+                row('🎫 Limit ticketów', `\`${s.maxOpen}\``),
+              ].join('\n'),
+            '',
+            '-# 💡 Teraz wyślij panele: `/panel typ:tickety`, `regulamin`, `opinie`, `legit`, `cennik`',
+          ].join('\n'),
+          colors.success,
+        ),
+      ],
+      flags: V2_EPHEMERAL,
+      allowedMentions: { parse: [] },
+    });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('panel')
+    .setDescription('Wyślij panel na kanał')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o
+        .setName('typ')
+        .setDescription('Który panel')
+        .setRequired(true)
+        .addChoices(
+          { name: '🎫 Tickety', value: 'tickety' },
+          { name: '📜 Regulamin', value: 'regulamin' },
+          { name: '⭐ Opinie', value: 'opinie' },
+          { name: '🤔 Czy legit?', value: 'legit' },
+          { name: '💰 Cennik', value: 'cennik' },
+        ),
+    )
+    .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
+    .addStringOption((o) => o.setName('baner').setDescription('Link do obrazka pod panelem (zapamiętywany)')),
+  async (i) => {
+    const type = i.options.getString('typ');
+    const bannerUrl = i.options.getString('baner');
+    if (bannerUrl && !isUrl(bannerUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https).');
+    if (type === 'tickety' && !guild(i.guildId).settings.categoryId) return replyFail(i, 'Najpierw użyj `/setup`.');
+    if (bannerUrl) updateGuild(i.guildId, (g) => (g.settings.banners[type] = bannerUrl));
+
+    const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
+    const channel = await i.guild.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) return replyFail(i, 'Bot nie widzi tego kanału.');
+    const perms = channel.permissionsFor(i.client.user);
+    const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', AddReactions: 'Dodawanie reakcji' };
+    const missing = Object.entries(needed).filter(([flag]) => !perms?.has(PermissionFlagsBits[flag]));
+    if (missing.length) return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, n]) => `> • ${n}`).join('\n')}`);
+
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const g = guild(i.guildId);
+    const logo = logoOf(i.guild, i.client);
+    let message;
+    let warning = '';
+    try {
+      message = await channel.send({ components: [panelBuilders[type](g, logo)], flags: V2 });
+    } catch (err) {
+      // 50035 = Discord odrzucił treść — zwykle zły link do baneru. Próbujemy bez niego.
+      if (err.code !== 50035 || !g.settings.banners[type]) throw err;
+      updateGuild(i.guildId, (gg) => delete gg.settings.banners[type]);
+      message = await channel.send({ components: [panelBuilders[type](guild(i.guildId), logo)], flags: V2 });
+      warning = '\n⚠️ Link do baneru był nieprawidłowy — panel wysłano bez niego.';
+    }
+    updateGuild(i.guildId, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
+    if (type === 'legit') {
+      await message.react('✅').catch(() => {});
+      await message.react('❌').catch(() => {});
+    }
+    await i.editReply({ components: [ok(`Panel wysłany na ${channel}${warning}`)], flags: V2 });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('konkurs')
+    .setDescription('Konkursy (giveaway)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('start')
+        .setDescription('Rozpocznij konkurs')
+        .addStringOption((o) => o.setName('nagroda').setDescription('np. 20% zniżki na zamówienie za min. 50 PLN').setMaxLength(150).setRequired(true))
+        .addStringOption((o) => o.setName('czas').setDescription('np. 1d, 12h, 2d 6h, 30m').setRequired(true))
+        .addIntegerOption((o) => o.setName('zwyciezcy').setDescription('Liczba zwycięzców (domyślnie 1)').setMinValue(1).setMaxValue(20))
+        .addStringOption((o) => o.setName('wymagania').setDescription('np. Bez wymagań! / Zaproś 2 osoby').setMaxLength(200))
+        .addStringOption((o) => o.setName('obrazek').setDescription('Link do obrazka konkursu'))
+        .addChannelOption((o) => o.setName('kanal').setDescription('Kanał konkursu (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
+        .addBooleanOption((o) => o.setName('ping').setDescription('Oznaczyć @everyone?')),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('zakoncz')
+        .setDescription('Zakończ konkurs teraz')
+        .addStringOption((o) => o.setName('id').setDescription('ID wiadomości konkursu').setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('reroll')
+        .setDescription('Wylosuj ponownie zwycięzców')
+        .addStringOption((o) => o.setName('id').setDescription('ID wiadomości konkursu').setRequired(true)),
+    ),
+  async (i) => {
+    const sub = i.options.getSubcommand();
+    if (sub !== 'start') {
+      const id = i.options.getString('id').trim();
+      const gw = guild(i.guildId).giveaways[id];
+      if (!gw) return replyFail(i, 'Nie znaleziono konkursu o takim ID (kliknij PPM na wiadomość konkursu → Kopiuj ID).');
+      if (sub === 'zakoncz' && gw.ended) return replyFail(i, 'Ten konkurs już się zakończył.');
+      if (sub === 'reroll' && !gw.ended) return replyFail(i, 'Najpierw zakończ konkurs.');
+      await i.deferReply({ flags: V2_EPHEMERAL });
+      const winners = await endGiveaway(i.client, i.guildId, id, sub === 'reroll');
+      return i.editReply({ components: [ok(winners.length ? `Zwycięzcy: ${winners.map((w) => `<@${w}>`).join(', ')}` : 'Brak uczestników.')], flags: V2 });
+    }
+
+    const duration = parseDuration(i.options.getString('czas'));
+    if (duration < 10_000) return replyFail(i, 'Podaj czas, np. `1d`, `12h`, `2d 6h` albo `30m`.');
+    const image = i.options.getString('obrazek');
+    if (image && !isUrl(image)) return replyFail(i, 'Obrazek musi być linkiem http(s).');
+    const channel = i.options.getChannel('kanal') ? await i.guild.channels.fetch(i.options.getChannel('kanal').id) : i.channel;
+    const gw = {
+      channelId: channel.id,
+      prize: i.options.getString('nagroda'),
+      winners: i.options.getInteger('zwyciezcy') ?? 1,
+      requirements: i.options.getString('wymagania'),
+      image,
+      hostId: i.user.id,
+      endsAt: Date.now() + duration,
+      entrants: [],
+      ended: false,
+    };
+    const message = await channel.send({ components: [giveawayView(gw, i.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } });
+    updateGuild(i.guildId, (g) => (g.giveaways[message.id] = gw));
+    if (i.options.getBoolean('ping')) await channel.send({ content: '@everyone', allowedMentions: { parse: ['everyone'] } }).catch(() => {});
+    await replyOk(i, `Konkurs wystartował: ${message.url}\n-# ID: \`${message.id}\``);
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('ticket')
+    .setDescription('Zarządzanie bieżącym ticketem')
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('dodaj')
+        .setDescription('Dodaj osobę do ticketu')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Kogo dodać').setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('usun')
+        .setDescription('Usuń osobę z ticketu')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Kogo usunąć').setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('nazwa')
+        .setDescription('Zmień nazwę kanału ticketu')
+        .addStringOption((o) => o.setName('nazwa').setDescription('Nowa nazwa').setMaxLength(90).setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('zamknij')
+        .setDescription('Zamknij ticket')
+        .addStringOption((o) => o.setName('powod').setDescription('Powód zamknięcia').setMaxLength(300)),
+    ),
+  async (i) => {
+    const ticket = getTicket(i.guildId, i.channelId);
+    if (!ticket || ticket.closedAt) return replyFail(i, 'Tej komendy używa się w kanale ticketu.');
+    const sub = i.options.getSubcommand();
+    if (sub === 'zamknij') return closeTicket(i, i.options.getString('powod'));
+    if (!isStaff(i.member, guild(i.guildId).settings)) return replyFail(i, 'Tylko staff może to zrobić.');
+    if (sub === 'nazwa') {
+      await i.channel.setName(i.options.getString('nazwa'));
+      return replyOk(i, `Zmieniono nazwę na **${i.channel.name}**`, V2);
+    }
+    const user = i.options.getUser('uzytkownik');
+    if (sub === 'dodaj') {
+      await i.channel.permissionOverwrites.edit(user.id, { ViewChannel: true, SendMessages: true, AttachFiles: true, ReadMessageHistory: true });
+      return replyOk(i, `Dodano ${user} do ticketu`, V2);
+    }
+    if (user.id === ticket.userId) return replyFail(i, 'Nie można usunąć autora ticketu.');
+    await i.channel.permissionOverwrites.delete(user.id);
+    return replyOk(i, `Usunięto ${user} z ticketu`, V2);
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('opinie')
+    .setDescription('Zarządzanie opiniami')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('usun')
+        .setDescription('Usuń opinię (np. spam)')
+        .addIntegerOption((o) => o.setName('numer').setDescription('Numer opinii, np. 12').setMinValue(1).setRequired(true)),
+    ),
+  async (i) => {
+    const number = i.options.getInteger('numer');
+    const g = guild(i.guildId);
+    const review = g.reviews.find((r) => r.number === number);
+    if (!review) return replyFail(i, `Nie ma opinii ${pad(number)}.`);
+    updateGuild(i.guildId, (gg) => (gg.reviews = gg.reviews.filter((r) => r !== review)));
+    const channel = await i.client.channels.fetch(g.settings.reviewChannelId).catch(() => null);
+    await (await channel?.messages.fetch(review.messageId).catch(() => null))?.delete().catch(() => {});
+    await refreshPanel(i.client, i.guildId, 'opinie');
+    return replyOk(i, `Usunięto opinię ${pad(number)}.`);
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('statystyki')
+    .setDescription('Statystyki serwera TanieBoty')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .setDMPermission(false),
+  (i) => {
+    const g = guild(i.guildId);
+    const s = reviewSummary(g.reviews);
+    const open = Object.values(g.tickets).filter((t) => !t.closedAt).length;
+    const gws = Object.values(g.giveaways);
+    const b = box(colors.gold);
+    header(
+      b,
+      [
+        title('Statystyki', '📈'),
+        '>>> ' +
+          [
+            row('🎫 Otwarte tickety', `\`${open}\``),
+            row('📂 Wszystkie tickety', `\`${g.stats.opened}\``),
+            row('🔒 Zamknięte', `\`${g.stats.closed}\``),
+            row('⭐ Opinie', `\`${s.count}\`${s.count ? ` · średnia \`${s.avg.toFixed(2)}/5\`` : ''}`),
+            row('🎉 Konkursy', `\`${gws.length}\` · aktywne \`${gws.filter((gw) => !gw.ended).length}\``),
+          ].join('\n'),
+      ].join('\n'),
+      logoOf(i.guild, i.client),
+    );
+    return i.reply({ components: [b], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+  },
+);
+
+// ═══ ROUTING INTERAKCJI ════════════════════════════════════════════════
+
+const inviteUrl = (clientId) => `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=8&scope=bot%20applications.commands`;
+
+async function route(i) {
+  if (i.inGuild() && !i.inCachedGuild() && i.isRepliable()) {
+    return replyV2(
+      i,
+      notice(`### ⚠️ Bot nie jest członkiem tego serwera\nZaproś go ponownie (zakresy \`bot\` + \`applications.commands\`):\n${inviteUrl(i.client.user.id)}`, colors.warning),
+    );
+  }
+  if (i.isChatInputCommand()) return commands.get(i.commandName)?.execute(i);
+
+  const [scope, action, arg] = i.customId?.split(':') ?? [];
+
+  // Opinie działają też w DM (przycisk po zamknięciu ticketu), więc guildId bierzemy z customId.
+  if (scope === 'rev') {
+    const guildId = arg ?? i.guildId;
+    if (action === 'open' && i.isButton()) return onReviewOpen(i, guildId);
+    if (action === 'submit' && i.isModalSubmit()) return onReviewSubmit(i, guildId);
+  }
+  if (!i.inGuild()) return;
+
+  if (scope === 'tk') {
+    if (i.isStringSelectMenu() && action === 'open') {
+      await onTicketSelect(i, i.values[0]);
+      // Odświeżamy panel, żeby menu wróciło do „Nie wybrałeś/aś żadnej kategorii”.
+      return i.message.edit({ components: [ticketsPanel(guild(i.guildId), logoOf(i.guild, i.client))], flags: V2 }).catch(() => {});
+    }
+    if (i.isStringSelectMenu() && action === 'status') return onStatus(i);
+    if (i.isModalSubmit() && action === 'form') return onTicketForm(i, arg);
+    if (i.isModalSubmit() && action === 'closereason') return closeTicket(i, i.fields.getTextInputValue('reason'));
+    if (i.isButton()) {
+      if (action === 'quick') return onTicketSelect(i, arg);
+      if (action === 'claim') return onClaim(i);
+      if (action === 'close') return onCloseRequest(i);
+      if (action === 'closeyes') return closeTicket(i);
+      if (action === 'transcript') return onTranscript(i);
+      if (action === 'closewhy') {
+        return i.showModal(
+          new ModalBuilder()
+            .setCustomId('tk:closereason')
+            .setTitle('🔒 Zamknij ticket')
+            .addLabelComponents(
+              new LabelBuilder()
+                .setLabel('Powód zamknięcia')
+                .setTextInputComponent(new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setMaxLength(300)),
+            ),
+        );
+      }
+    }
+  }
+
+  if (scope === 'rules') {
+    if (i.isStringSelectMenu() && action === 'show') {
+      await replyV2(i, rulesSection(Number(i.values[0])));
+      return i.message.edit({ components: [rulesPanel(guild(i.guildId), logoOf(i.guild, i.client))], flags: V2 }).catch(() => {});
+    }
+    if (i.isButton() && action === 'accept') {
+      const roleId = guild(i.guildId).settings.rulesRoleId;
+      if (!roleId) return replyFail(i, 'Rola za regulamin nie jest ustawiona.');
+      if (i.member.roles.cache.has(roleId)) return replyV2(i, notice(`### ✅ ${x} Regulamin już zaakceptowany`, colors.success));
+      await i.member.roles.add(roleId, 'Akceptacja regulaminu');
+      return replyV2(i, notice(`### ✅ ${x} Dziękujemy!\nZaakceptowałeś/aś regulamin i otrzymałeś/aś rolę <@&${roleId}>.`, colors.success));
+    }
+  }
+
+  if (scope === 'gw' && i.isButton()) {
+    if (action === 'join') return onGiveawayJoin(i);
+    if (action === 'list') {
+      const gw = guild(i.guildId).giveaways[i.message.id];
+      return gw ? replyV2(i, entrantsView(gw)) : replyFail(i, 'Nie znaleziono konkursu.');
+    }
+  }
+}
+
+const knownErrors = {
+  50001: 'Bot nie ma dostępu do tego kanału lub serwera.',
+  50013: 'Bot nie ma wymaganych uprawnień. Najprościej nadaj mu rolę z Administratorem i przesuń ją wyżej.',
+  50035: 'Discord odrzucił wiadomość (np. zły link do obrazka).',
+  10003: 'Kanał nie istnieje. Sprawdź `/setup`.',
+};
+function describeError(err) {
+  const hint = knownErrors[err?.code] ?? 'Coś poszło nie tak. Spróbuj ponownie.';
+  return `${hint}\n-# Szczegóły: \`${err?.code ?? 'brak kodu'}\` ${String(err?.message ?? err).slice(0, 300).replace(/`/g, "'")}`;
+}
+
+async function onInteraction(i) {
+  try {
+    await route(i);
+  } catch (err) {
+    console.error(err);
+    if (!i.isRepliable()) return;
+    const payload = { components: [fail(describeError(err))], flags: V2_EPHEMERAL };
+    if (i.deferred || i.replied) await i.followUp(payload).catch(() => {});
+    else await i.reply(payload).catch(() => {});
+  }
+}
+
+// ═══ SPRAWDZENIE OFFLINE (node index.js --check) ═══════════════════════
+
+function selfTest() {
+  const img = 'https://cdn.discordapp.com/embed/avatars/0.png';
+  const user = { id: '2', displayAvatarURL: () => img, toString: () => '<@2>' };
+  const g = guild('selftest');
+  Object.assign(g.settings, { rulesRoleId: '1', banners: { tickety: img, regulamin: img, opinie: img, cennik: img } });
+  const review = { number: 3, userId: '2', product: 'bot', content: 'Świetny bot ```test```', ratings: { quality: 5, time: 4, service: 5 }, at: Date.now() };
+  g.reviews.push(review);
+  const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), claimedBy: '3' };
+  const tickets = [
+    { ...base, type: 'bot', status: 'progress', form: { desc: 'Bot z ticketami', budget: '50', deadline: null } },
+    { ...base, type: 'hosting', status: 'waiting', claimedBy: null, form: { bot: 'discord.js', period: '3m', notes: 'x' } },
+    { ...base, type: 'question', status: 'waiting', form: { question: 'Ile kosztuje?' } },
+    { ...base, type: 'partner', status: 'waiting', form: { server: null, offer: 'Reklama' } },
+  ];
+  const closed = { ...tickets[0], closedAt: Date.now(), closedBy: '3', closeReason: 'Gotowe' };
+  const gw = { channelId: '1', prize: '20% zniżki', winners: 1, requirements: null, image: img, hostId: '2', endsAt: Date.now() + 1e6, entrants: ['1', '2'], ended: false };
+
+  const built = [
+    ...[...commands.values()].map((cmd) => cmd.data),
+    ...Object.values(panelBuilders).flatMap((fn) => [fn(g, img), fn(guild('empty'), null)]),
+    ...rules.map((_, idx) => rulesSection(idx)),
+    reviewCard(review, user),
+    reviewModal('9'),
+    ...Object.keys(ticketTypes).map(ticketModal),
+    ...tickets.map((t) => ticketMessage(t, user)),
+    closedView(closed, 'Serwer', false),
+    closedView(closed, 'Dzięki', true, '9'),
+    giveawayView(gw, 300),
+    giveawayView({ ...gw, ended: true, winnerIds: ['2'] }, 300),
+    giveawayView({ ...gw, ended: true, winnerIds: [], entrants: [] }, 0),
+    entrantsView(gw),
+    boostView(user, 23, 2),
+  ];
+  for (const item of built) item.toJSON();
+  if (parseDuration('1d 2h 30m') !== 95_400_000) throw new Error('parseDuration');
+  console.log(`✅ ${built.length} komponentów/komend przeszło walidację`);
+}
+
+// ═══ START ═════════════════════════════════════════════════════════════
+
+if (process.argv.includes('--check')) {
+  selfTest();
+  process.exit(0);
+}
+
+// Token i ID serwera: config.json obok index.js albo zmienne środowiskowe (DISCORD_TOKEN, GUILD_ID).
+const configFile = join(dirname(fileURLToPath(import.meta.url)), 'config.json');
+const fileConfig = existsSync(configFile) ? JSON.parse(readFileSync(configFile, 'utf8')) : {};
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || fileConfig.token;
+const GUILD_ID = process.env.GUILD_ID || fileConfig.guildId;
+if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
+  console.error('Brak tokena. Wpisz go w config.json w polu "token" (albo ustaw DISCORD_TOKEN).');
+  process.exit(1);
+}
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
+});
+
+client.once(Events.ClientReady, async (ready) => {
+  console.log(`✅ Zalogowano jako ${ready.user.tag}`);
+  console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
+  console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak — zaproś bota linkiem powyżej'}`);
+  ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
+  giveawayTicker(ready);
+
+  const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
+  const rest = new REST().setToken(DISCORD_TOKEN);
+  const registerGlobal = async () => {
+    await rest.put(Routes.applicationCommands(ready.user.id), { body });
+    console.log(`✅ Zarejestrowano ${body.length} komend globalnie (mogą pojawić się z opóźnieniem do ~1h)`);
+  };
+  let guildId = GUILD_ID;
+  if (guildId === ready.user.id) {
+    console.warn('⚠️ guildId to ID bota, a nie serwera. Kliknij PPM na ikonę serwera → „Kopiuj ID serwera”.');
+    guildId = null;
+  }
+  try {
+    if (!guildId) return await registerGlobal();
+    await rest.put(Routes.applicationGuildCommands(ready.user.id, guildId), { body });
+    console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId}`);
+  } catch (err) {
+    if (err.code !== 50001) return console.error('Rejestracja komend nie powiodła się:', err.message);
+    console.warn(`⚠️ Brak dostępu do serwera ${guildId} — rejestruję komendy globalnie.`);
+    await registerGlobal().catch((e) => console.error('Rejestracja komend nie powiodła się:', e.message));
+  }
+});
+
+client.on(Events.InteractionCreate, onInteraction);
+client.on(Events.MessageCreate, (m) => onMessage(m).catch(console.error));
+client.on(Events.MessageReactionAdd, (r, u) => onLegitReaction(r, u, true).catch(console.error));
+client.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    flush();
+    client.destroy();
+    process.exit(0);
+  });
+}
+
+client.login(DISCORD_TOKEN).catch((err) => {
+  console.error('Logowanie nie powiodło się:', err.message);
+  process.exit(1);
+});

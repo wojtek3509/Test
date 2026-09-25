@@ -1,5 +1,9 @@
 # Test
 
+## TanieBoty bot
+
+Bot dla sklepu z botami Discord (tickety, regulamin, opinie, konkursy, boosty, czy legit, cennik) znajdziesz w [`tanieboty-bot/`](tanieboty-bot/README.md).
+
 ## Exchange bot
 
 Bot na Discorda do exchange'u z ticketami na Components V2 znajdziesz w [`exchange-bot/`](exchange-bot/README.md).
