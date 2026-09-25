@@ -30,10 +30,27 @@ import { createTranscript } from 'discord-html-transcripts';
 
 // ═══ KONFIGURACJA ══════════════════════════════════════════════════════
 
-// Branding and static options. Adjust to your server.
+// Nazwa, hasło i zalety widoczne w panelu. Zmień pod swój serwer.
 const brand = {
   name: 'CompV2 Exchange',
-  footer: 'CompV2 Exchange • Szybko • Bezpiecznie • 24/7',
+  emoji: '💱',
+  tagline: 'Najszybszy i najbezpieczniejszy exchange na Discordzie',
+  footer: '💱 CompV2 Exchange • ⚡ Szybko • 🔒 Bezpiecznie • 🕐 24/7',
+  // [emoji, hasło, opis]
+  perks: [
+    ['⚡', 'Błyskawicznie', 'realizacja nawet w kilka minut'],
+    ['🔒', 'Bezpiecznie', 'obsługuje tylko zweryfikowany staff'],
+    ['📜', 'Przejrzyście', 'zapis każdej rozmowy w transcripcie'],
+    ['🕐', '24/7', 'jesteśmy dostępni cały czas'],
+  ],
+};
+
+// Ozdobniki używane w tekstach.
+const style = {
+  arrow: '➜',
+  bullet: '▸',
+  barFull: '🟩',
+  barEmpty: '⬛',
 };
 
 const colors = {
@@ -155,9 +172,10 @@ function feeFor(guildId, from, to, fallback) {
 const V2 = MessageFlags.IsComponentsV2;
 const V2_EPHEMERAL = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
-const ts = (ms, style = 'R') => `<t:${Math.floor(ms / 1000)}:${style}>`;
+const ts = (ms, fmt = 'R') => `<t:${Math.floor(ms / 1000)}:${fmt}>`;
 const money = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const methodName = (key) => (methods[key] ? `${methods[key].emoji} ${methods[key].label}` : key);
+const ticketNo = (ticket) => `#${String(ticket.number).padStart(4, '0')}`;
 
 function parseAmount(raw) {
   const n = Number(String(raw).replace(/\s/g, '').replace(',', '.'));
@@ -169,18 +187,45 @@ function quote(amount, fee) {
   return { amount, fee, receive: Math.max(0, Math.round(receive * 100) / 100) };
 }
 
+// ─── Typografia ────────────────────────────────────────────────────────
+// Discord Markdown: "# " duży tytuł, "## " średni, "### " mały, "-# " drobny szary tekst, "> " cytat.
+
+/** Duży tytuł wielkimi literami z opcjonalnym szarym podtytułem. */
+const title = (emoji, text, subtitle) => [`# ${emoji} ${text.toLocaleUpperCase('pl-PL')}`, subtitle && `-# ${subtitle}`].filter(Boolean).join('\n');
+/** Nagłówek sekcji, np. "## ✨ DLACZEGO MY?". */
+const heading = (emoji, text) => `## ${emoji} ${text.toLocaleUpperCase('pl-PL')}`;
+/** Mniejszy nagłówek. */
+const subheading = (emoji, text) => `### ${emoji} ${text}`;
+/** Lista w formie drzewka: ╭ ├ ╰ ze strzałkami. rows = [[etykieta, wartość], …] */
+function tree(rows) {
+  const list = rows.filter(Boolean);
+  return list
+    .map(([label, value], idx) => {
+      const branch = list.length === 1 ? '╰' : idx === 0 ? '╭' : idx === list.length - 1 ? '╰' : '├';
+      return `${branch} **${label}** ${style.arrow} ${value}`;
+    })
+    .join('\n');
+}
+/** Punktor z pogrubionym hasłem i opisem. */
+const bullet = (emoji, strong, text) => `${style.bullet} ${emoji} **${strong}**${text ? ` — ${text}` : ''}`;
+/** Plakietki w stylu `BLIK` `PayPal`. */
+const badges = (items) => items.map((x) => `\`${x}\``).join(' ');
+/** Pasek postępu z kwadratów. */
+const progressBar = (step, total) => `${style.barFull.repeat(step)}${style.barEmpty.repeat(total - step)}`;
+const starBar = (n) => `${'⭐'.repeat(n)}${'✩'.repeat(5 - n)}`;
+
 const separator = (c, large = false) =>
   c.addSeparatorComponents((s) => s.setDivider(true).setSpacing(large ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small));
 
 const footer = (c) => c.addTextDisplayComponents((t) => t.setContent(`-# ${brand.footer}`));
 
-/** Small single-color notice, used for replies and errors. */
+/** Mała jednokolorowa wiadomość, używana w odpowiedziach i błędach. */
 function notice(text, color = colors.primary) {
   return new ContainerBuilder().setAccentColor(color).addTextDisplayComponents((t) => t.setContent(text));
 }
 
 const ok = (text) => notice(`### ✅ ${text}`, colors.success);
-const fail = (text) => notice(`### ❌ Błąd\n${text}`, colors.danger);
+const fail = (text) => notice(`### ❌ Ups, błąd\n${text}`, colors.danger);
 
 // ─── Panel ─────────────────────────────────────────────────────────────
 
@@ -189,13 +234,10 @@ function panel(settings, server) {
   if (settings.bannerUrl) c.addMediaGalleryComponents((g) => g.addItems((i) => i.setURL(settings.bannerUrl)));
 
   const header = [
-    `# ${brand.name}`,
-    'Profesjonalna wymiana środków pomiędzy metodami płatności.',
+    title(brand.emoji, brand.name, brand.tagline),
     '',
-    '**Dlaczego my?**',
-    '> ⚡ Realizacja nawet w kilka minut',
-    '> 🔒 Każda transakcja obsługiwana przez zweryfikowany staff',
-    '> 📜 Pełna historia rozmowy zapisywana w transcriptach',
+    heading('✨', 'Dlaczego my?'),
+    ...brand.perks.map(([emoji, strong, text]) => bullet(emoji, strong, text)),
   ].join('\n');
 
   if (server?.iconURL()) {
@@ -210,16 +252,21 @@ function panel(settings, server) {
   c.addTextDisplayComponents((t) =>
     t.setContent(
       [
-        '### 🎫 Kategorie',
-        ...Object.values(ticketTypes).map((tt) => `${tt.emoji} **${tt.label}** — ${tt.description}`),
+        heading('🎫', 'Kategorie ticketów'),
+        ...Object.values(ticketTypes).map((tt) => `> ${tt.emoji} **${tt.label}**\n> -# ${tt.description}`),
       ].join('\n'),
     ),
   );
+  c.addTextDisplayComponents((t) =>
+    t.setContent([heading('💳', 'Obsługiwane metody'), badges(Object.values(methods).map((m) => m.label))].join('\n')),
+  );
+  separator(c);
+  c.addTextDisplayComponents((t) => t.setContent(subheading('📂', 'Otwórz ticket') + '\n-# Wybierz kategorię z listy poniżej'));
   c.addActionRowComponents((row) =>
     row.setComponents(
       new StringSelectMenuBuilder()
         .setCustomId('tk:open')
-        .setPlaceholder('📂 Wybierz kategorię, aby otworzyć ticket')
+        .setPlaceholder('📂 Wybierz kategorię…')
         .addOptions(
           Object.entries(ticketTypes).map(([value, tt]) => ({
             label: tt.label,
@@ -243,20 +290,24 @@ function panel(settings, server) {
 
 function ratesView(rates) {
   const entries = Object.entries(rates);
-  const lines = entries.length
-    ? entries.map(([k, fee]) => {
-        const [from, to] = k.split('>');
-        return `${methodName(from)} ➜ ${methodName(to)} · **${fee}%**`;
-      })
-    : ['*Brak indywidualnych kursów.*'];
+  const body = entries.length
+    ? tree(
+        entries.map(([k, fee]) => {
+          const [from, to] = k.split('>');
+          return [`${methodName(from)} → ${methodName(to)}`, `\`${fee}%\``];
+        }),
+      )
+    : '*Brak indywidualnych kursów — obowiązuje prowizja domyślna.*';
   return new ContainerBuilder()
     .setAccentColor(colors.primary)
-    .addTextDisplayComponents((t) => t.setContent(`## 📊 Kursy i prowizje\n${lines.join('\n')}`))
+    .addTextDisplayComponents((t) => t.setContent(`${title('📊', 'Kursy i prowizje', 'Aktualne stawki za wymianę')}\n\n${body}`))
     .addSeparatorComponents((s) => s.setDivider(true))
-    .addTextDisplayComponents((t) => t.setContent(`-# Pozostałe kierunki: **${defaultFee}%** prowizji • użyj \`/kalkulator\`, aby policzyć kwotę`));
+    .addTextDisplayComponents((t) =>
+      t.setContent(`-# Pozostałe kierunki: **${defaultFee}%** prowizji • policz kwotę komendą \`/kalkulator\``),
+    );
 }
 
-// ─── Modals ────────────────────────────────────────────────────────────
+// ─── Modale ────────────────────────────────────────────────────────────
 
 const methodSelect = (id, placeholder) =>
   new StringSelectMenuBuilder()
@@ -323,6 +374,14 @@ function closeReasonModal() {
     );
 }
 
+const announcementColors = {
+  primary: { label: 'Niebieski', emoji: '🔵' },
+  success: { label: 'Zielony', emoji: '🟢' },
+  gold: { label: 'Złoty', emoji: '🟡' },
+  warning: { label: 'Pomarańczowy', emoji: '🟠' },
+  danger: { label: 'Czerwony', emoji: '🔴' },
+};
+
 function announcementModal() {
   return new ModalBuilder()
     .setCustomId('ann:send')
@@ -330,26 +389,58 @@ function announcementModal() {
     .addLabelComponents(
       new LabelBuilder()
         .setLabel('Tytuł')
-        .setTextInputComponent(new TextInputBuilder().setCustomId('title').setStyle(TextInputStyle.Short).setMaxLength(100)),
+        .setDescription('Zostanie wyświetlony dużymi literami, możesz dodać emoji na początku')
+        .setTextInputComponent(
+          new TextInputBuilder().setCustomId('title').setStyle(TextInputStyle.Short).setPlaceholder('🎉 Nowość na serwerze').setMaxLength(100),
+        ),
       new LabelBuilder()
-        .setLabel('Treść (Markdown)')
-        .setTextInputComponent(new TextInputBuilder().setCustomId('body').setStyle(TextInputStyle.Paragraph).setMaxLength(3000)),
+        .setLabel('Podtytuł')
+        .setDescription('Mały szary tekst pod tytułem')
+        .setTextInputComponent(
+          new TextInputBuilder().setCustomId('subtitle').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(150),
+        ),
+      new LabelBuilder()
+        .setLabel('Treść')
+        .setDescription('## nagłówek, ### mniejszy, -# drobny tekst, > cytat, **pogrubienie**')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('body')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('## 🔥 Co nowego?\n> Szybsze wymiany\n-# Obowiązuje od dziś')
+            .setMaxLength(3000),
+        ),
+      new LabelBuilder()
+        .setLabel('Kolor paska')
+        .setStringSelectMenuComponent(
+          new StringSelectMenuBuilder()
+            .setCustomId('color')
+            .setRequired(false)
+            .setPlaceholder('Niebieski')
+            .addOptions(Object.entries(announcementColors).map(([value, o]) => ({ label: o.label, value, emoji: o.emoji }))),
+        ),
       new LabelBuilder()
         .setLabel('Link do obrazka')
         .setTextInputComponent(
-          new TextInputBuilder().setCustomId('image').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('https://…'),
+          new TextInputBuilder().setCustomId('image').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('https://…/obrazek.png'),
         ),
     );
 }
 
-function announcement({ title, body, image, color = colors.primary, author }) {
-  const c = new ContainerBuilder().setAccentColor(color).addTextDisplayComponents((t) => t.setContent(`# ${title}\n${body}`));
+function announcement({ title: head, subtitle, body, image, color = colors.primary, author }) {
+  const c = new ContainerBuilder().setAccentColor(color);
   if (image) c.addMediaGalleryComponents((g) => g.addItems((i) => i.setURL(image)));
+  c.addTextDisplayComponents((t) =>
+    t.setContent([`# ${head.toLocaleUpperCase('pl-PL')}`, subtitle && `-# ${subtitle}`].filter(Boolean).join('\n')),
+  );
   separator(c);
-  return c.addTextDisplayComponents((t) => t.setContent(`-# 📣 ${author} • ${brand.name}`));
+  c.addTextDisplayComponents((t) => t.setContent(body));
+  separator(c);
+  return c.addTextDisplayComponents((t) => t.setContent(`-# 📣 Ogłoszenie od **${author}** • ${brand.name} • ${ts(Date.now(), 'f')}`));
 }
 
 // ─── Ticket ────────────────────────────────────────────────────────────
+
+const statusOrder = Object.keys(statuses);
 
 function ticketMessage(ticket, user) {
   const tt = ticketTypes[ticket.type];
@@ -362,9 +453,10 @@ function ticketMessage(ticket, user) {
       .addTextDisplayComponents((t) =>
         t.setContent(
           [
-            `## ${tt.emoji} ${tt.label} · #${String(ticket.number).padStart(4, '0')}`,
-            `Witaj <@${ticket.userId}>! Zespół odpowie najszybciej, jak to możliwe.`,
-            `-# Otwarto ${ts(ticket.openedAt)}`,
+            title(tt.emoji, `${tt.label} ${ticketNo(ticket)}`, `Otwarto ${ts(ticket.openedAt)} • ${tt.description}`),
+            '',
+            `👋 Witaj <@${ticket.userId}>!`,
+            'Dziękujemy za kontakt — zespół odpowie najszybciej, jak to możliwe.',
           ].join('\n'),
         ),
       )
@@ -377,31 +469,39 @@ function ticketMessage(ticket, user) {
     c.addTextDisplayComponents((t) =>
       t.setContent(
         [
-          '### 🧾 Szczegóły wymiany',
-          `> **Wysyłasz:** ${methodName(from)}`,
-          `> **Otrzymujesz:** ${methodName(to)}`,
-          `> **Kwota:** \`${money(amount)} PLN\``,
-          `> **Prowizja:** \`${fee}%\``,
-          `> **Otrzymasz ok.:** \`${money(receive)} PLN\``,
-          notes ? `\n**Uwagi:**\n${notes}` : null,
+          heading('🧾', 'Szczegóły wymiany'),
+          tree([
+            ['Wysyłasz', methodName(from)],
+            ['Otrzymujesz', methodName(to)],
+            ['Kwota', `\`${money(amount)} PLN\``],
+            ['Prowizja', `\`${fee}%\``],
+            ['Otrzymasz ok.', `**\`${money(receive)} PLN\`**`],
+          ]),
+          notes && `\n${subheading('📝', 'Uwagi')}\n>>> ${notes}`,
         ]
-          .filter((x) => x !== null)
+          .filter(Boolean)
           .join('\n'),
       ),
     );
   } else {
-    c.addTextDisplayComponents((t) => t.setContent(`### ${ticket.form.subject}\n${ticket.form.details}`));
+    c.addTextDisplayComponents((t) =>
+      t.setContent([heading('📝', 'Zgłoszenie'), subheading('📌', ticket.form.subject), `>>> ${ticket.form.details}`].join('\n')),
+    );
   }
 
   separator(c);
-  c.addTextDisplayComponents((t) =>
-    t.setContent(
-      [
-        `**Status:** ${status.emoji} ${status.label}`,
-        `**Obsługuje:** ${ticket.claimedBy ? `<@${ticket.claimedBy}>` : '*nikt — czeka na przejęcie*'}`,
-      ].join('\n'),
-    ),
+  const statusLines = [heading('📍', 'Status')];
+  if (ticket.type === 'exchange') {
+    const step = statusOrder.indexOf(ticket.status) + 1;
+    statusLines.push(`${progressBar(step, statusOrder.length)}  \`${step}/${statusOrder.length}\``);
+  }
+  statusLines.push(
+    tree([
+      ['Etap', `${status.emoji} ${status.label}`],
+      ['Obsługuje', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '*czeka na przejęcie*'],
+    ]),
   );
+  c.addTextDisplayComponents((t) => t.setContent(statusLines.join('\n')));
 
   if (ticket.type === 'exchange') {
     c.addActionRowComponents((row) =>
@@ -433,6 +533,7 @@ function ticketMessage(ticket, user) {
       new ButtonBuilder().setCustomId('tk:transcript').setLabel('Transcript').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     ),
   );
+  separator(c);
   footer(c);
   return c;
 }
@@ -441,50 +542,53 @@ function closeConfirm() {
   return new ContainerBuilder()
     .setAccentColor(colors.danger)
     .addTextDisplayComponents((t) =>
-      t.setContent('### 🔒 Zamknąć ticket?\nKanał zostanie usunięty, a transcript trafi do logów i do autora ticketu.'),
+      t.setContent(
+        [
+          heading('🔒', 'Zamknąć ticket?'),
+          bullet('🗑️', 'Kanał', 'zostanie usunięty'),
+          bullet('📜', 'Transcript', 'trafi do logów i do autora'),
+          bullet('⭐', 'Ocena', 'autor dostanie prośbę o ocenę'),
+        ].join('\n'),
+      ),
     )
     .addActionRowComponents((row) =>
       row.setComponents(
-        new ButtonBuilder().setCustomId('tk:closeyes').setLabel('Zamknij').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('tk:closewhy').setLabel('Zamknij z powodem').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('tk:closeyes').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('tk:closewhy').setLabel('Zamknij z powodem').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
       ),
     );
 }
 
 function closingNotice(by, reason) {
-  return new ContainerBuilder()
-    .setAccentColor(colors.danger)
-    .addTextDisplayComponents((t) =>
-      t.setContent(
-        [`### 🔒 Ticket zamykany przez <@${by}>`, reason ? `**Powód:** ${reason}` : null, `-# Kanał zniknie za kilka sekund…`]
-          .filter(Boolean)
-          .join('\n'),
-      ),
-    );
+  return notice(
+    [
+      title('🔒', 'Ticket zamknięty', 'Kanał zniknie za kilka sekund…'),
+      tree([['Zamknął', `<@${by}>`], reason && ['Powód', reason]]),
+    ].join('\n'),
+    colors.danger,
+  );
 }
 
-function closedLog(ticket, guildName) {
+function closedLog(ticket, subtitle) {
   const tt = ticketTypes[ticket.type];
-  const lines = [
-    `## ${tt.emoji} Ticket #${String(ticket.number).padStart(4, '0')} zamknięty`,
-    `-# ${guildName}`,
-    '',
-    `**Autor:** <@${ticket.userId}>`,
-    `**Kategoria:** ${tt.label}`,
-    `**Obsługiwał:** ${ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—'}`,
-    `**Zamknął:** <@${ticket.closedBy}>`,
-    `**Powód:** ${ticket.closeReason ?? 'brak'}`,
-    `**Otwarty:** ${ts(ticket.openedAt, 'f')}`,
-    `**Zamknięty:** ${ts(ticket.closedAt, 'f')}`,
+  const rows = [
+    ['Autor', `<@${ticket.userId}>`],
+    ['Kategoria', `${tt.emoji} ${tt.label}`],
+    ['Obsługiwał', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—'],
+    ['Zamknął', `<@${ticket.closedBy}>`],
+    ['Powód', ticket.closeReason ?? '*brak*'],
+    ['Otwarty', ts(ticket.openedAt, 'f')],
+    ['Zamknięty', ts(ticket.closedAt, 'f')],
   ];
   if (ticket.type === 'exchange') {
     const f = ticket.form;
-    lines.push(`**Wymiana:** ${methodName(f.from)} ➜ ${methodName(f.to)} · \`${money(f.amount)} PLN\``);
+    rows.push(['Wymiana', `${methodName(f.from)} → ${methodName(f.to)} · \`${money(f.amount)} PLN\``]);
   }
   return new ContainerBuilder()
     .setAccentColor(colors.neutral)
-    .addTextDisplayComponents((t) => t.setContent(lines.join('\n')))
+    .addTextDisplayComponents((t) => t.setContent(`${title('📁', `Ticket ${ticketNo(ticket)}`, subtitle)}\n\n${tree(rows)}`))
     .addSeparatorComponents((s) => s.setDivider(true))
+    .addTextDisplayComponents((t) => t.setContent(subheading('📜', 'Transcript rozmowy')))
     .addFileComponents((f) => f.setURL(`attachment://${transcriptName(ticket)}`));
 }
 
@@ -493,7 +597,7 @@ const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(
 function ratingRequest(ticket, guildId) {
   const c = closedLog(ticket, 'Dziękujemy za skorzystanie z naszych usług!');
   separator(c, true);
-  c.addTextDisplayComponents((t) => t.setContent('### ⭐ Oceń obsługę\nTwoja opinia pomaga nam być lepszymi.'));
+  c.addTextDisplayComponents((t) => t.setContent(`${heading('⭐', 'Oceń obsługę')}\n-# Twoja opinia pomaga nam być jeszcze lepszymi`));
   c.addActionRowComponents((row) =>
     row.setComponents(
       [1, 2, 3, 4, 5].map((n) =>
@@ -507,17 +611,19 @@ function ratingRequest(ticket, guildId) {
   return c;
 }
 
-function ratedView(ticket, stars) {
+function ratedView(ticket, n) {
   const c = closedLog(ticket, 'Dziękujemy za skorzystanie z naszych usług!');
   separator(c, true);
-  return c.addTextDisplayComponents((t) => t.setContent(`### 💛 Dziękujemy za ocenę!\nTwoja ocena: ${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)}`));
+  return c.addTextDisplayComponents((t) => t.setContent(`${heading('💛', 'Dziękujemy za ocenę!')}\n${starBar(n)}`));
 }
 
-function ratingLog(ticket, stars) {
+function ratingLog(ticket, n) {
   return notice(
-    `### ⭐ Nowa ocena: ${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)}\n` +
-      `<@${ticket.userId}> ocenił ticket **#${String(ticket.number).padStart(4, '0')}**` +
-      (ticket.claimedBy ? ` obsługiwany przez <@${ticket.claimedBy}>` : ''),
+    [
+      title('⭐', 'Nowa ocena', `Ticket ${ticketNo(ticket)}`),
+      `# ${starBar(n)}`,
+      tree([['Klient', `<@${ticket.userId}>`], ['Obsługiwał', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—']]),
+    ].join('\n'),
     colors.gold,
   );
 }
@@ -531,30 +637,33 @@ function statsView(g) {
   const top = Object.entries(perStaff)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([id, n], i) => `${['🥇', '🥈', '🥉', '4.', '5.'][i]} <@${id}> — **${n}**`);
+    .map(([id, n], i) => `${['🥇', '🥈', '🥉', '🏅', '🏅'][i]} <@${id}> ${style.arrow} **${n}** ticketów`);
 
   return new ContainerBuilder()
     .setAccentColor(colors.gold)
     .addTextDisplayComponents((t) =>
       t.setContent(
         [
-          '## 📈 Statystyki',
-          `> 🎫 Otwarte teraz: **${open.length}**`,
-          `> 📂 Łącznie otwartych: **${g.stats.opened}**`,
-          `> 🔒 Zamkniętych: **${g.stats.closed}**`,
-          `> ⭐ Średnia ocena: **${avg ? avg.toFixed(2) : '—'}** (${ratings.length} ocen)`,
+          title('📈', 'Statystyki', brand.name),
+          '',
+          tree([
+            ['🎫 Otwarte teraz', `\`${open.length}\``],
+            ['📂 Łącznie otwartych', `\`${g.stats.opened}\``],
+            ['🔒 Zamkniętych', `\`${g.stats.closed}\``],
+            ['⭐ Średnia ocena', `\`${avg ? avg.toFixed(2) : '—'}\` z ${ratings.length} ocen`],
+          ]),
         ].join('\n'),
       ),
     )
     .addSeparatorComponents((s) => s.setDivider(true))
-    .addTextDisplayComponents((t) => t.setContent(`### 🏆 Top staff\n${top.length ? top.join('\n') : '*Brak danych*'}`));
+    .addTextDisplayComponents((t) => t.setContent(`${heading('🏆', 'Top staff')}\n${top.length ? top.join('\n') : '*Brak danych*'}`));
 }
 
 function myTickets(list) {
   const lines = list.length
-    ? list.map((t) => `${ticketTypes[t.type].emoji} <#${t.channelId}> · otwarty ${ts(t.openedAt)}`)
+    ? list.map((t) => bullet(ticketTypes[t.type].emoji, ticketNo(t), `<#${t.channelId}> · otwarty ${ts(t.openedAt)}`))
     : ['*Nie masz otwartych ticketów.*'];
-  return notice(`### 🗂️ Twoje tickety\n${lines.join('\n')}`);
+  return notice(`${heading('🗂️', 'Twoje tickety')}\n${lines.join('\n')}`);
 }
 
 function calculator(from, to, q) {
@@ -563,17 +672,18 @@ function calculator(from, to, q) {
     .addTextDisplayComponents((t) =>
       t.setContent(
         [
-          '## 🧮 Kalkulator wymiany',
-          `${methodName(from)} ➜ ${methodName(to)}`,
+          title('🧮', 'Kalkulator wymiany', `${methodName(from)} → ${methodName(to)}`),
           '',
-          `> Wysyłasz: \`${money(q.amount)} PLN\``,
-          `> Prowizja: \`${q.fee}%\``,
-          `> **Otrzymasz: \`${money(q.receive)} PLN\`**`,
+          tree([
+            ['Wysyłasz', `\`${money(q.amount)} PLN\``],
+            ['Prowizja', `\`${q.fee}%\``],
+            ['Otrzymasz', `**\`${money(q.receive)} PLN\`**`],
+          ]),
         ].join('\n'),
       ),
     )
     .addSeparatorComponents((s) => s.setDivider(true))
-    .addTextDisplayComponents((t) => t.setContent('-# Chcesz wymienić? Otwórz ticket **Exchange** w panelu.'));
+    .addTextDisplayComponents((t) => t.setContent('-# 💡 Chcesz wymienić? Otwórz ticket **Exchange** w panelu.'));
 }
 
 // ═══ TICKETY ═══════════════════════════════════════════════════════════
@@ -720,7 +830,7 @@ async function onClaim(i) {
   });
   const user = await i.client.users.fetch(ticket.userId);
   await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
-  await i.channel.send({ components: [notice(`### 🙋 <@${i.user.id}> przejął ticket i zajmie się Tobą.`)], flags: V2 });
+  await i.channel.send({ components: [notice(`${heading('🙋', 'Ticket przejęty')}\n<@${i.user.id}> zajmie się Twoją sprawą.`, colors.primary)], flags: V2 });
 }
 
 async function onStatus(i) {
@@ -735,7 +845,10 @@ async function onStatus(i) {
   await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
   const s = statuses[status];
   await i.channel.send({
-    components: [notice(`### ${s.emoji} Status: ${s.label}\n<@${ticket.userId}>, status Twojej wymiany został zaktualizowany.`, s.color)],
+    components: [notice(
+        `${heading(s.emoji, s.label)}\n${progressBar(statusOrder.indexOf(status) + 1, statusOrder.length)}\n-# <@${ticket.userId}>, status Twojej wymiany został zaktualizowany`,
+        s.color,
+      )],
     flags: V2,
   });
 }
@@ -854,15 +967,19 @@ command(
       components: [
         notice(
           [
-            '## ⚙️ Konfiguracja zapisana',
-            `> 📁 Kategoria: <#${s.categoryId}>`,
-            `> 🛡️ Staff: <@&${s.staffRoleId}>`,
-            `> 📜 Logi: <#${s.logChannelId}>`,
-            `> 🖼️ Baner: ${s.bannerUrl ? 'ustawiony' : 'brak'}`,
-            `> 🎫 Limit ticketów: **${s.maxOpen}**`,
+            title('⚙️', 'Konfiguracja zapisana', 'Wszystko gotowe do działania'),
             '',
-            '-# Teraz wyślij panel komendą `/panel`.',
+            tree([
+              ['📁 Kategoria', `<#${s.categoryId}>`],
+              ['🛡️ Staff', `<@&${s.staffRoleId}>`],
+              ['📜 Logi', `<#${s.logChannelId}>`],
+              ['🖼️ Baner', s.bannerUrl ? 'ustawiony' : 'brak'],
+              ['🎫 Limit ticketów', `\`${s.maxOpen}\``],
+            ]),
+            '',
+            '-# 💡 Teraz wyślij panel komendą `/panel`',
           ].join('\n'),
+          colors.success,
         ),
       ],
       flags: V2_EPHEMERAL,
@@ -1052,7 +1169,9 @@ async function onAnnouncement(i) {
     components: [
       announcement({
         title: i.fields.getTextInputValue('title'),
+        subtitle: i.fields.getTextInputValue('subtitle') || null,
         body: i.fields.getTextInputValue('body'),
+        color: colors[i.fields.getStringSelectValues('color')[0] ?? 'primary'],
         image: image || null,
         author: i.user.displayName,
       }),
@@ -1139,7 +1258,7 @@ function selfTest() {
     ...others.map(generalModal),
     closeReasonModal(),
     announcementModal(),
-    announcement({ title: 'T', body: 'B', image: 'https://example.com/a.png', author: 'x' }),
+    announcement({ title: 'T', subtitle: 'S', body: 'B', image: 'https://example.com/a.png', color: colors.gold, author: 'x' }),
     closeConfirm(),
     closingNotice('3', 'powód'),
     closedLog(closed, 'Serwer'),

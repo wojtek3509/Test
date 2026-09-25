@@ -69,4 +69,4 @@ Komendy rejestrują się same przy każdym starcie: na serwerze z `GUILD_ID` od 
 
 - Dane (ustawienia, tickety, oceny) są w `data/db.json`. Plik nie trafia do gita.
 - Transcript zapisuje zwykłe wiadomości z kanału. Kontenery Components V2 (np. karta ticketu) nie są w nim renderowane, ale ich dane są w logu zamknięcia.
-- Nazwę, stopkę i kolory zmienisz w sekcji KONFIGURACJA w `index.js`.
+- Nazwę, hasło, zalety w panelu, stopkę, kolory i ozdobniki (`➜`, `▸`, pasek postępu) zmienisz w sekcji KONFIGURACJA w `index.js` (obiekty `brand` i `style`).
