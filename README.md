@@ -1,5 +1,9 @@
 # Test
 
+## Exchange bot
+
+Bot na Discorda do exchange'u z ticketami na Components V2 znajdziesz w [`exchange-bot/`](exchange-bot/README.md).
+
 ## Claude Code plugins
 
 `.claude/settings.json` registers these marketplaces and plugins for everyone working in this repo. Claude Code asks you to trust and install them the first time you open the project.
