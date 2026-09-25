@@ -16,6 +16,22 @@ Bot na Discorda do obsługi exchange'u z zaawansowanymi ticketami. Cały interfe
 - `/statystyki`: otwarte i zamknięte tickety, średnia ocena, top staff.
 - `/ogloszenie`: ładne ogłoszenia (tytuł, treść w Markdown, obrazek) przez formularz.
 - `/ticket dodaj|usun|nazwa|zamknij`.
+- **Lista prowizji** (`/prowizje`): panel z listą metod, banerem i menu. Po wybraniu metody użytkownik widzi prywatnie wszystkie kierunki i prowizje (np. SKRILL → BLIK 9%) oraz minimalną prowizję.
+- **Powitania i pożegnania** (`/powitania ustaw|test|wylacz`): avatar, numer członka, kto zaprosił, wiek konta i opcjonalny baner.
+- **Zaproszenia** (`/zaproszenia sprawdz|ranking|bonus|reset`): liczy prawdziwe, fałszywe (konto młodsze niż 7 dni) i te, które wyszły, oraz bonusy.
+
+## Prowizje
+
+- `/kurs ustaw od:SKRILL prowizja:9` ustawia 9% na **wszystkie** kierunki z SKRILL.
+- `/kurs ustaw od:SKRILL do:LTC prowizja:10` ustawia jeden kierunek.
+- `/kurs minimum kwota:3` ustawia minimalną prowizję w PLN.
+- Jeśli dla metody nic nie ustawisz, lista pokaże wszystkie kierunki z prowizją domyślną (10%).
+
+## Własne emoji (logo BLIK, PayPal itd.)
+
+1. Developer Portal → Twoja aplikacja → **Emojis** → wgraj logo.
+2. Skopiuj kod emoji w formacie `<:blik:123456789012345678>`.
+3. W `index.js`, w obiekcie `methods`, podmień emoji metody na ten kod. To samo działa dla `style.chevron` (np. animowane strzałki `<a:strzalki:…>`).
 
 ## Instalacja
 
@@ -32,7 +48,8 @@ Wymagany Node.js 18.17+.
    npm start                           # albo: node index.js
    ```
 
-4. Na serwerze:
+4. Powitania i zaproszenia: w Developer Portal → **Bot** włącz **Server Members Intent**. Bez tego bot wystartuje, ale bez tych funkcji. Do liczenia zaproszeń bot potrzebuje uprawnienia **Zarządzanie serwerem**.
+5. Na serwerze:
    - `/setup kategoria:<kategoria> staff:<rola> logi:<#kanał> [baner:<link>] [limit:<liczba>]`
    - `/panel`, aby wysłać panel ticketów
    - opcjonalnie `/kurs ustaw od:BLIK do:Litecoin prowizja:8`

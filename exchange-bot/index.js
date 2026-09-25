@@ -49,6 +49,11 @@ const brand = {
 const style = {
   arrow: '➜',
   bullet: '▸',
+  chevron: '»', // np. własne emoji '<a:strzalki:123…>'
+  cross: '×',
+  copyright: '©',
+  // true = tytuły w ramce jak `# \`💱 Nazwa × TYTUŁ\``
+  codeTitles: true,
   barFull: '🟩',
   barEmpty: '⬛',
 };
@@ -60,6 +65,7 @@ const colors = {
   danger: 0xf23f43,
   neutral: 0x2b2d31,
   gold: 0xf5c542,
+  lime: 0x7ed957,
 };
 
 const ticketTypes = {
@@ -93,21 +99,34 @@ const ticketTypes = {
   },
 };
 
-// Payment methods offered in the exchange form (max 25).
+// Metody płatności (maks. 25). Emoji może być zwykłe (📱) albo własne z serwera/aplikacji: '<:blik:123456789012345678>'.
+// Własne emoji dodasz w Developer Portal → Twoja aplikacja → Emojis (wgrywasz logo, kopiujesz kod <:nazwa:id>).
 const methods = {
   blik: { label: 'BLIK', emoji: '📱' },
-  bank: { label: 'Przelew bankowy', emoji: '🏦' },
-  paypal: { label: 'PayPal', emoji: '🅿️' },
-  revolut: { label: 'Revolut', emoji: '💳' },
-  psc: { label: 'Paysafecard', emoji: '🎫' },
-  btc: { label: 'Bitcoin (BTC)', emoji: '🪙' },
-  ltc: { label: 'Litecoin (LTC)', emoji: '🪙' },
-  eth: { label: 'Ethereum (ETH)', emoji: '🪙' },
-  usdt: { label: 'USDT (TRC20)', emoji: '💵' },
+  kodblik: { label: 'KOD BLIK', emoji: '🔢' },
+  psc: { label: 'PSC', emoji: '🎫' },
+  pscnp: { label: 'PSC BEZ PARAGONU', emoji: '🧾' },
+  mypsc: { label: 'MYPSC', emoji: '🔐' },
+  crypto: { label: 'KRYPTO', emoji: '🪙' },
+  ltc: { label: 'LTC', emoji: '💠' },
+  paypal: { label: 'PAYPAL', emoji: '🅿️' },
+  vinted: { label: 'VINTED', emoji: '👕' },
+  zen: { label: 'ZEN', emoji: '⭕' },
+  revolut: { label: 'REVOLUT', emoji: '💳' },
+  skrill: { label: 'SKRILL', emoji: '💜' },
+  neteller: { label: 'NETELLER', emoji: '💚' },
+  wplatomat: { label: 'WPŁATOMAT', emoji: '🏧' },
+  express: { label: 'PRZELEW EXPRESS', emoji: '⚡' },
+  bank: { label: 'PRZELEW TRADYCYJNY', emoji: '🏦' },
+  vcc: { label: 'VCC', emoji: '🌈' },
 };
 
-// Default fee (%) when no specific rate is set with /kurs.
+// Domyślna prowizja (%), gdy dla kierunku nie ustawiono własnej w /kurs.
 const defaultFee = 10;
+// Domyślna minimalna prowizja w PLN (zmienisz komendą /kurs minimum).
+const defaultMinFee = 3;
+// Konto młodsze niż tyle dni liczy się jako fałszywe zaproszenie.
+const fakeAccountDays = 7;
 
 const statuses = {
   waiting: { label: 'Oczekuje na obsługę', emoji: '🕓', color: colors.neutral },
@@ -138,14 +157,20 @@ function flush() {
 }
 
 function guild(id) {
-  store.guilds[id] ??= {
+  const g = (store.guilds[id] ??= {
     settings: { categoryId: null, staffRoleId: null, logChannelId: null, bannerUrl: null, maxOpen: 1 },
     counter: 0,
     rates: {},
     tickets: {},
     stats: { opened: 0, closed: 0, ratings: [] },
-  };
-  return store.guilds[id];
+  });
+  // Pola dodane w nowszych wersjach — uzupełniamy w starych bazach.
+  g.settings.feeBannerUrl ??= null;
+  g.settings.minFee ??= defaultMinFee;
+  g.settings.welcome ??= { channelId: null, leaveChannelId: null, bannerUrl: null };
+  g.invites ??= {};
+  g.joins ??= {};
+  return g;
 }
 
 function updateGuild(id, fn) {
@@ -182,16 +207,27 @@ function parseAmount(raw) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function quote(amount, fee) {
-  const receive = amount * (1 - fee / 100);
-  return { amount, fee, receive: Math.max(0, Math.round(receive * 100) / 100) };
+function quote(amount, fee, minFee = 0) {
+  const feeAmount = Math.round(Math.max((amount * fee) / 100, minFee) * 100) / 100;
+  return { amount, fee, feeAmount, receive: Math.max(0, Math.round((amount - feeAmount) * 100) / 100) };
 }
+
+const minFeeOf = (guildId) => guild(guildId).settings.minFee ?? defaultMinFee;
 
 // ─── Typografia ────────────────────────────────────────────────────────
 // Discord Markdown: "# " duży tytuł, "## " średni, "### " mały, "-# " drobny szary tekst, "> " cytat.
 
 /** Duży tytuł wielkimi literami z opcjonalnym szarym podtytułem. */
-const title = (emoji, text, subtitle) => [`# ${emoji} ${text.toLocaleUpperCase('pl-PL')}`, subtitle && `-# ${subtitle}`].filter(Boolean).join('\n');
+function title(emoji, text, subtitle) {
+  const upper = text.toLocaleUpperCase('pl-PL');
+  // Własne emoji (<:x:id>) nie renderują się w ramce kodu, więc stawiamy je przed nią.
+  const head = !style.codeTitles ? `# ${emoji} ${upper}` : emoji.startsWith('<') ? `# ${emoji} \`${upper}\`` : `# \`${emoji} ${upper}\``;
+  return [head, subtitle && `-# ${subtitle}`].filter(Boolean).join('\n');
+}
+/** Tytuł z nazwą marki, np. `💱 CompV2 Exchange × PROWIZJE`. */
+const brandTitle = (text, subtitle) => title(brand.emoji, `${brand.name} ${style.cross} ${text}`, subtitle);
+const copyright = (c) =>
+  c.addTextDisplayComponents((t) => t.setContent(`-# ${style.copyright} ${new Date().getFullYear()} ${brand.name}`));
 /** Nagłówek sekcji, np. "## ✨ DLACZEGO MY?". */
 const heading = (emoji, text) => `## ${emoji} ${text.toLocaleUpperCase('pl-PL')}`;
 /** Mniejszy nagłówek. */
@@ -288,7 +324,7 @@ function panel(settings, server) {
   return c;
 }
 
-function ratesView(rates) {
+function ratesView(rates, minFee = defaultMinFee) {
   const entries = Object.entries(rates);
   const body = entries.length
     ? tree(
@@ -303,7 +339,7 @@ function ratesView(rates) {
     .addTextDisplayComponents((t) => t.setContent(`${title('📊', 'Kursy i prowizje', 'Aktualne stawki za wymianę')}\n\n${body}`))
     .addSeparatorComponents((s) => s.setDivider(true))
     .addTextDisplayComponents((t) =>
-      t.setContent(`-# Pozostałe kierunki: **${defaultFee}%** prowizji • policz kwotę komendą \`/kalkulator\``),
+      t.setContent(`-# Pozostałe kierunki: **${defaultFee}%** • minimalna prowizja: **${money(minFee)} PLN** • policz kwotę: \`/kalkulator\``),
     );
 }
 
@@ -465,7 +501,7 @@ function ticketMessage(ticket, user) {
   separator(c);
 
   if (ticket.type === 'exchange') {
-    const { from, to, amount, fee, receive, notes } = ticket.form;
+    const { from, to, amount, fee, feeAmount, receive, notes } = ticket.form;
     c.addTextDisplayComponents((t) =>
       t.setContent(
         [
@@ -474,7 +510,7 @@ function ticketMessage(ticket, user) {
             ['Wysyłasz', methodName(from)],
             ['Otrzymujesz', methodName(to)],
             ['Kwota', `\`${money(amount)} PLN\``],
-            ['Prowizja', `\`${fee}%\``],
+            ['Prowizja', `\`${fee}%\`${feeAmount != null ? ` · \`${money(feeAmount)} PLN\`` : ''}`],
             ['Otrzymasz ok.', `**\`${money(receive)} PLN\`**`],
           ]),
           notes && `\n${subheading('📝', 'Uwagi')}\n>>> ${notes}`,
@@ -676,7 +712,7 @@ function calculator(from, to, q) {
           '',
           tree([
             ['Wysyłasz', `\`${money(q.amount)} PLN\``],
-            ['Prowizja', `\`${q.fee}%\``],
+            ['Prowizja', `\`${q.fee}%\` · \`${money(q.feeAmount)} PLN\``],
             ['Otrzymasz', `**\`${money(q.receive)} PLN\`**`],
           ]),
         ].join('\n'),
@@ -684,6 +720,197 @@ function calculator(from, to, q) {
     )
     .addSeparatorComponents((s) => s.setDivider(true))
     .addTextDisplayComponents((t) => t.setContent('-# 💡 Chcesz wymienić? Otwórz ticket **Exchange** w panelu.'));
+}
+
+// ─── Lista prowizji ────────────────────────────────────────────────────
+
+/** Kierunki wymiany z danej metody: ustawione przez /kurs albo — gdy brak — wszystkie z prowizją domyślną. */
+function feeRoutes(rates, from) {
+  const set = Object.entries(rates)
+    .filter(([k]) => k.startsWith(`${from}>`))
+    .map(([k, fee]) => [k.split('>')[1], fee]);
+  return set.length ? set : Object.keys(methods).filter((to) => to !== from).map((to) => [to, defaultFee]);
+}
+
+function feesPanel(settings) {
+  const c = new ContainerBuilder().setAccentColor(colors.lime);
+  c.addTextDisplayComponents((t) => t.setContent(brandTitle('Prowizje')));
+  separator(c);
+  c.addTextDisplayComponents((t) =>
+    t.setContent(
+      [
+        `>>> ${style.chevron} Chcesz sprawdzić jakie są **nasze prowizje wymian?**`,
+        `${style.chevron} Wybierz w menu poniżej **odpowiednią opcję.**`,
+        '',
+        ...Object.values(methods).map((m) => `${style.chevron} ${m.emoji} ${style.cross} **${m.label}**`),
+      ].join('\n'),
+    ),
+  );
+  if (settings.feeBannerUrl) {
+    separator(c);
+    c.addMediaGalleryComponents((g) => g.addItems((i) => i.setURL(settings.feeBannerUrl)));
+  }
+  separator(c);
+  c.addActionRowComponents((row) =>
+    row.setComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('fee:show')
+        .setPlaceholder(`❌ ${style.cross} Nie wybrałeś/aś żadnej opcji.`)
+        .addOptions(Object.entries(methods).map(([value, m]) => ({ label: `${style.cross} ${m.label}`, value, emoji: m.emoji }))),
+    ),
+  );
+  separator(c);
+  copyright(c);
+  return c;
+}
+
+function feesFor(from, routes, minFee) {
+  const m = methods[from];
+  const c = new ContainerBuilder().setAccentColor(colors.lime);
+  c.addTextDisplayComponents((t) => t.setContent(brandTitle(`Prowizje wymiany ${m.label}`)));
+  separator(c);
+  c.addTextDisplayComponents((t) =>
+    t.setContent(
+      '>>> ' +
+        routes
+          .filter(([to]) => methods[to])
+          .map(([to, fee]) => `- ${m.emoji} **${m.label}** → ${methods[to].emoji} **${methods[to].label}** - Prowizja wynosi: **${fee}%**`)
+          .join('\n'),
+    ),
+  );
+  c.addTextDisplayComponents((t) => t.setContent(`> ${style.chevron} Minimalna prowizja **wynosi: ${Number.isInteger(minFee) ? minFee : money(minFee)} PLN.**`));
+  separator(c);
+  copyright(c);
+  return c;
+}
+
+// ─── Powitania ─────────────────────────────────────────────────────────
+
+const inviteTotal = (s) => (s ? s.regular - s.left + s.bonus : 0);
+
+function inviterLine(g, entry) {
+  if (!entry) return null;
+  if (entry.vanity) return `${style.chevron} **Dołączył(a) przez:** link własny serwera`;
+  if (!entry.inviterId) return `${style.chevron} **Zaprosił(a):** *nie udało się ustalić*`;
+  return `${style.chevron} **Zaprosił(a):** <@${entry.inviterId}> · teraz ma **${inviteTotal(g.invites[entry.inviterId])}** zaproszeń`;
+}
+
+function welcomeView(member, g) {
+  const s = g.settings.welcome;
+  const entry = g.joins[member.id];
+  const c = new ContainerBuilder().setAccentColor(colors.lime);
+  c.addSectionComponents((sec) =>
+    sec
+      .addTextDisplayComponents((t) =>
+        t.setContent(
+          [
+            brandTitle('Witamy'),
+            '',
+            `👋 Hej ${member}! Witaj na **${member.guild.name}**`,
+            `${style.chevron} Jesteś naszym **${member.guild.memberCount}.** członkiem!`,
+          ].join('\n'),
+        ),
+      )
+      .setThumbnailAccessory((th) => th.setURL(member.user.displayAvatarURL({ size: 256 }))),
+  );
+  separator(c);
+  c.addTextDisplayComponents((t) =>
+    t.setContent(
+      '>>> ' +
+        [
+          inviterLine(g, entry),
+          `${style.chevron} **Konto założone:** ${ts(member.user.createdTimestamp)}`,
+          entry?.fake ? `${style.chevron} ⚠️ **Nowe konto** — młodsze niż ${fakeAccountDays} dni` : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+    ),
+  );
+  if (s.bannerUrl) c.addMediaGalleryComponents((gal) => gal.addItems((i) => i.setURL(s.bannerUrl)));
+  separator(c);
+  copyright(c);
+  return c;
+}
+
+function leaveView(member, g) {
+  const entry = g.joins[member.id];
+  const c = new ContainerBuilder().setAccentColor(colors.danger);
+  c.addSectionComponents((sec) =>
+    sec
+      .addTextDisplayComponents((t) =>
+        t.setContent(
+          [
+            brandTitle('Do zobaczenia'),
+            '',
+            `😢 **${member.user.username}** opuścił(a) serwer.`,
+            `${style.chevron} Zostało nas **${member.guild.memberCount}**.`,
+            inviterLine(g, entry),
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        ),
+      )
+      .setThumbnailAccessory((th) => th.setURL(member.user.displayAvatarURL({ size: 256 }))),
+  );
+  separator(c);
+  copyright(c);
+  return c;
+}
+
+// ─── Zaproszenia ───────────────────────────────────────────────────────
+
+function invitesView(user, s) {
+  const stats = s ?? { regular: 0, left: 0, fake: 0, bonus: 0 };
+  const c = new ContainerBuilder().setAccentColor(colors.lime);
+  c.addSectionComponents((sec) =>
+    sec
+      .addTextDisplayComponents((t) =>
+        t.setContent(
+          [
+            brandTitle('Zaproszenia'),
+            '',
+            `${style.chevron} ${user} ma **${inviteTotal(stats)}** zaproszeń`,
+          ].join('\n'),
+        ),
+      )
+      .setThumbnailAccessory((th) => th.setURL(user.displayAvatarURL({ size: 256 }))),
+  );
+  separator(c);
+  c.addTextDisplayComponents((t) =>
+    t.setContent(
+      tree([
+        ['✅ Prawdziwe', `\`${stats.regular}\``],
+        ['🚪 Wyszło', `\`${stats.left}\``],
+        ['⚠️ Fałszywe', `\`${stats.fake}\``],
+        ['🎁 Bonus', `\`${stats.bonus}\``],
+      ]),
+    ),
+  );
+  separator(c);
+  copyright(c);
+  return c;
+}
+
+function invitesRanking(g) {
+  const top = Object.entries(g.invites)
+    .map(([id, s]) => [id, inviteTotal(s)])
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  const medals = ['🥇', '🥈', '🥉'];
+  const c = new ContainerBuilder().setAccentColor(colors.gold);
+  c.addTextDisplayComponents((t) => t.setContent(brandTitle('Ranking zaproszeń')));
+  separator(c);
+  c.addTextDisplayComponents((t) =>
+    t.setContent(
+      top.length
+        ? '>>> ' + top.map(([id, n], idx) => `${medals[idx] ?? `\`${idx + 1}.\``} <@${id}> ${style.arrow} **${n}** zaproszeń`).join('\n')
+        : '*Nikt jeszcze nikogo nie zaprosił.*',
+    ),
+  );
+  separator(c);
+  copyright(c);
+  return c;
 }
 
 // ═══ TICKETY ═══════════════════════════════════════════════════════════
@@ -723,7 +950,7 @@ async function onForm(i, type) {
     const amount = parseAmount(i.fields.getTextInputValue('amount'));
     if (!amount) return replyV2(i, fail('Podaj poprawną kwotę, np. `250` lub `99,50`.'));
     if (from === to) return replyV2(i, fail('Metoda wysyłki i odbioru muszą być różne.'));
-    const q = quote(amount, feeFor(i.guildId, from, to, defaultFee));
+    const q = quote(amount, feeFor(i.guildId, from, to, defaultFee), minFeeOf(i.guildId));
     form = { from, to, ...q, notes: i.fields.getTextInputValue('notes') || null };
   } else {
     form = { subject: i.fields.getTextInputValue('subject'), details: i.fields.getTextInputValue('details') };
@@ -935,6 +1162,46 @@ const methodOption = (o, name, description) => o.setName(name).setDescription(de
 const replyOk = (i, text, flags = V2_EPHEMERAL) => i.reply({ components: [ok(text)], flags, allowedMentions: { parse: [] } });
 const replyFail = (i, text) => i.reply({ components: [fail(text)], flags: V2_EPHEMERAL });
 
+/**
+ * Wysyła panel na kanał z opcji "kanal" (albo bieżący): sprawdza uprawnienia bota,
+ * a gdy Discord odrzuci baner (zły link), wysyła panel bez niego.
+ */
+async function sendPanel(i, build, hasBanner) {
+  const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
+  const channel = await i.guild.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased()) return replyFail(i, 'Bot nie widzi tego kanału. Sprawdź, czy ma do niego dostęp.');
+
+  const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', ReadMessageHistory: 'Czytanie historii' };
+  const perms = channel.permissionsFor(i.client.user);
+  const missing = Object.entries(needed).filter(([flag]) => !perms?.has(PermissionFlagsBits[flag]));
+  if (missing.length) {
+    return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, name]) => `> • ${name}`).join('\n')}`);
+  }
+
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  try {
+    await channel.send({ components: [build(false)], flags: V2 });
+  } catch (err) {
+    // 50035 = Discord odrzucił treść, najczęściej przez link do baneru, który nie jest bezpośrednim obrazkiem.
+    if (err.code !== 50035 || !hasBanner) throw err;
+    console.warn('Panel odrzucony z banerem, wysyłam bez niego:', err.message);
+    await channel.send({ components: [build(true)], flags: V2 });
+    return i.editReply({
+      components: [
+        notice(
+          `### ⚠️ Panel wysłany bez baneru\nLink do baneru jest nieprawidłowy. Podaj bezpośredni link do obrazka (kończący się na .png/.jpg/.gif).`,
+          colors.warning,
+        ),
+      ],
+      flags: V2,
+    });
+  }
+  await i.editReply({ components: [ok(`Panel wysłany na ${channel}`)], flags: V2 });
+}
+
+const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
+const isManager = (i) => i.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+
 const commands = new Map();
 const command = (data, execute) => commands.set(data.name, { data, execute });
 
@@ -998,36 +1265,7 @@ command(
   async (i) => {
     const { settings } = guild(i.guildId);
     if (!settings.categoryId) return replyFail(i, 'Najpierw użyj `/setup`.');
-    const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
-    const channel = await i.guild.channels.fetch(channelId).catch(() => null);
-    if (!channel?.isTextBased()) return replyFail(i, 'Bot nie widzi tego kanału. Sprawdź, czy ma do niego dostęp.');
-
-    const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', ReadMessageHistory: 'Czytanie historii' };
-    const perms = channel.permissionsFor(i.client.user);
-    const missing = Object.entries(needed).filter(([flag]) => !perms?.has(PermissionFlagsBits[flag]));
-    if (missing.length) {
-      return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, name]) => `> • ${name}`).join('\n')}`);
-    }
-
-    await i.deferReply({ flags: V2_EPHEMERAL });
-    try {
-      await channel.send({ components: [panel(settings, i.guild)], flags: V2 });
-    } catch (err) {
-      // 50035 = Discord odrzucił treść, najczęściej przez link do baneru, który nie jest bezpośrednim obrazkiem.
-      if (err.code !== 50035 || !settings.bannerUrl) throw err;
-      console.warn('Panel odrzucony z banerem, wysyłam bez niego:', err.message);
-      await channel.send({ components: [panel({ ...settings, bannerUrl: null }, i.guild)], flags: V2 });
-      return i.editReply({
-        components: [
-          notice(
-            `### ⚠️ Panel wysłany bez baneru\nLink do baneru jest nieprawidłowy. Podaj bezpośredni link do obrazka (kończący się na .png/.jpg/.gif) w \`/setup\`.`,
-            colors.warning,
-          ),
-        ],
-        flags: V2,
-      });
-    }
-    await i.editReply({ components: [ok(`Panel wysłany na ${channel}`)], flags: V2 });
+    await sendPanel(i, (noBanner) => panel(noBanner ? { ...settings, bannerUrl: null } : settings, i.guild), Boolean(settings.bannerUrl));
   },
 );
 
@@ -1040,33 +1278,159 @@ command(
     .addSubcommand((s) =>
       s
         .setName('ustaw')
-        .setDescription('Ustaw prowizję dla kierunku wymiany')
+        .setDescription('Ustaw prowizję dla kierunku wymiany (bez "do" = na wszystkie metody)')
         .addStringOption((o) => methodOption(o, 'od', 'Metoda wysyłki'))
-        .addStringOption((o) => methodOption(o, 'do', 'Metoda odbioru'))
-        .addNumberOption((o) => o.setName('prowizja').setDescription('Prowizja w %').setMinValue(0).setMaxValue(100).setRequired(true)),
+        .addNumberOption((o) => o.setName('prowizja').setDescription('Prowizja w %').setMinValue(0).setMaxValue(100).setRequired(true))
+        .addStringOption((o) => methodOption(o, 'do', 'Metoda odbioru (puste = wszystkie)').setRequired(false)),
     )
     .addSubcommand((s) =>
       s
         .setName('usun')
-        .setDescription('Usuń indywidualną prowizję')
+        .setDescription('Usuń prowizję (bez "do" = wszystkie kierunki z tej metody)')
         .addStringOption((o) => methodOption(o, 'od', 'Metoda wysyłki'))
-        .addStringOption((o) => methodOption(o, 'do', 'Metoda odbioru')),
+        .addStringOption((o) => methodOption(o, 'do', 'Metoda odbioru (puste = wszystkie)').setRequired(false)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('minimum')
+        .setDescription('Ustaw minimalną prowizję w PLN')
+        .addNumberOption((o) => o.setName('kwota').setDescription('Minimalna prowizja w PLN').setMinValue(0).setRequired(true)),
     )
     .addSubcommand((s) => s.setName('lista').setDescription('Pokaż wszystkie prowizje')),
   async (i) => {
     const sub = i.options.getSubcommand();
-    if (sub === 'lista') return i.reply({ components: [ratesView(guild(i.guildId).rates)], flags: V2_EPHEMERAL });
+    const g = guild(i.guildId);
+    if (sub === 'lista') return i.reply({ components: [ratesView(g.rates, minFeeOf(i.guildId))], flags: V2_EPHEMERAL });
+    if (sub === 'minimum') {
+      const amount = i.options.getNumber('kwota');
+      updateGuild(i.guildId, (gg) => (gg.settings.minFee = amount));
+      return replyOk(i, `Minimalna prowizja: **${money(amount)} PLN**`);
+    }
     const from = i.options.getString('od');
     const to = i.options.getString('do');
     if (from === to) return replyFail(i, 'Metody muszą być różne.');
-    const key = `${from}>${to}`;
+    const targets = to ? [to] : Object.keys(methods).filter((k) => k !== from);
     if (sub === 'ustaw') {
       const fee = i.options.getNumber('prowizja');
-      updateGuild(i.guildId, (g) => (g.rates[key] = fee));
-      return replyOk(i, `${methodName(from)} ➜ ${methodName(to)}: **${fee}%**`);
+      updateGuild(i.guildId, (gg) => targets.forEach((t) => (gg.rates[`${from}>${t}`] = fee)));
+      return replyOk(i, `${methodName(from)} ➜ ${to ? methodName(to) : '**wszystkie metody**'}: **${fee}%**`);
     }
-    updateGuild(i.guildId, (g) => delete g.rates[key]);
-    return replyOk(i, `Usunięto prowizję ${methodName(from)} ➜ ${methodName(to)}`);
+    updateGuild(i.guildId, (gg) => targets.forEach((t) => delete gg.rates[`${from}>${t}`]));
+    return replyOk(i, `Usunięto prowizje ${methodName(from)} ➜ ${to ? methodName(to) : 'wszystkie metody'}`);
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('prowizje')
+    .setDescription('Wyślij panel z listą prowizji')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
+    .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
+    .addStringOption((o) => o.setName('baner').setDescription('Link do baneru panelu (zapamiętywany)')),
+  async (i) => {
+    const banner = i.options.getString('baner');
+    if (banner && !isUrl(banner)) return replyFail(i, 'Baner musi być linkiem http(s).');
+    const { settings } = updateGuild(i.guildId, (g) => banner && (g.settings.feeBannerUrl = banner));
+    await sendPanel(i, (noBanner) => feesPanel(noBanner ? { ...settings, feeBannerUrl: null } : settings), Boolean(settings.feeBannerUrl));
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('powitania')
+    .setDescription('Powitania i pożegnania nowych osób')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('ustaw')
+        .setDescription('Włącz powitania na wybranym kanale')
+        .addChannelOption((o) => o.setName('kanal').setDescription('Kanał powitań').addChannelTypes(ChannelType.GuildText).setRequired(true))
+        .addChannelOption((o) => o.setName('pozegnania').setDescription('Kanał pożegnań (opcjonalnie)').addChannelTypes(ChannelType.GuildText))
+        .addStringOption((o) => o.setName('baner').setDescription('Link do obrazka pod powitaniem (opcjonalnie)')),
+    )
+    .addSubcommand((s) => s.setName('test').setDescription('Podgląd powitania na Twoim przykładzie'))
+    .addSubcommand((s) => s.setName('wylacz').setDescription('Wyłącz powitania i pożegnania')),
+  async (i) => {
+    const sub = i.options.getSubcommand();
+    if (sub === 'wylacz') {
+      updateGuild(i.guildId, (g) => (g.settings.welcome = { channelId: null, leaveChannelId: null, bannerUrl: null }));
+      return replyOk(i, 'Powitania i pożegnania wyłączone.');
+    }
+    if (sub === 'test') {
+      return i.reply({ components: [welcomeView(i.member, guild(i.guildId))], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+    }
+    const banner = i.options.getString('baner');
+    if (banner && !isUrl(banner)) return replyFail(i, 'Baner musi być linkiem http(s).');
+    const { settings } = updateGuild(i.guildId, (g) => {
+      g.settings.welcome.channelId = i.options.getChannel('kanal').id;
+      g.settings.welcome.leaveChannelId = i.options.getChannel('pozegnania')?.id ?? null;
+      if (banner) g.settings.welcome.bannerUrl = banner;
+    });
+    const w = settings.welcome;
+    const warn = membersIntentOn
+      ? ''
+      : '\n\n⚠️ **Włącz „Server Members Intent”** w Developer Portal → Bot i zrestartuj bota, inaczej powitania nie zadziałają.';
+    return i.reply({
+      components: [
+        notice(
+          [
+            title('👋', 'Powitania włączone'),
+            '',
+            tree([
+              ['Powitania', `<#${w.channelId}>`],
+              ['Pożegnania', w.leaveChannelId ? `<#${w.leaveChannelId}>` : 'wyłączone'],
+              ['Baner', w.bannerUrl ? 'ustawiony' : 'brak'],
+            ]),
+            '-# 💡 Podgląd: `/powitania test`' + warn,
+          ].join('\n'),
+          colors.success,
+        ),
+      ],
+      flags: V2_EPHEMERAL,
+    });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('zaproszenia')
+    .setDescription('Licznik zaproszeń')
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('sprawdz')
+        .setDescription('Ile osób zaprosił użytkownik')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Kogo sprawdzić (domyślnie Ty)')),
+    )
+    .addSubcommand((s) => s.setName('ranking').setDescription('Top 10 zapraszających'))
+    .addSubcommand((s) =>
+      s
+        .setName('bonus')
+        .setDescription('Dodaj lub odejmij zaproszenia (admin)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Komu').setRequired(true))
+        .addIntegerOption((o) => o.setName('ilosc').setDescription('Ile (ujemna liczba odejmuje)').setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('reset')
+        .setDescription('Wyzeruj zaproszenia użytkownika (admin)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Komu').setRequired(true)),
+    ),
+  async (i) => {
+    const sub = i.options.getSubcommand();
+    if (sub === 'ranking') return i.reply({ components: [invitesRanking(guild(i.guildId))], flags: V2, allowedMentions: { parse: [] } });
+    const user = i.options.getUser('uzytkownik') ?? i.user;
+    if (sub === 'sprawdz') {
+      return i.reply({ components: [invitesView(user, guild(i.guildId).invites[user.id])], flags: V2, allowedMentions: { parse: [] } });
+    }
+    if (!isManager(i)) return replyFail(i, 'Potrzebujesz uprawnienia **Zarządzanie serwerem**.');
+    updateGuild(i.guildId, (g) => {
+      if (sub === 'reset') g.invites[user.id] = { regular: 0, left: 0, fake: 0, bonus: 0 };
+      else (g.invites[user.id] ??= { regular: 0, left: 0, fake: 0, bonus: 0 }).bonus += i.options.getInteger('ilosc');
+    });
+    return i.reply({ components: [invitesView(user, guild(i.guildId).invites[user.id])], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
   },
 );
 
@@ -1082,7 +1446,7 @@ command(
     const from = i.options.getString('od');
     const to = i.options.getString('do');
     if (from === to) return replyFail(i, 'Metody muszą być różne.');
-    const q = quote(i.options.getNumber('kwota'), feeFor(i.guildId, from, to, defaultFee));
+    const q = quote(i.options.getNumber('kwota'), feeFor(i.guildId, from, to, defaultFee), minFeeOf(i.guildId));
     await i.reply({ components: [calculator(from, to, q)], flags: V2_EPHEMERAL });
   },
 );
@@ -1207,6 +1571,12 @@ async function route(i) {
 
   if (scope === 'rate' && i.isButton()) return onRate(i, action, args[0], Number(args[1]));
   if (scope === 'ann' && i.isModalSubmit()) return onAnnouncement(i);
+  if (scope === 'fee' && i.isStringSelectMenu()) {
+    const from = i.values[0];
+    await i.reply({ components: [feesFor(from, feeRoutes(guild(i.guildId).rates, from), minFeeOf(i.guildId))], flags: V2_EPHEMERAL });
+    // Odświeżamy panel, żeby menu wróciło do "Nie wybrałeś/aś żadnej opcji".
+    return i.message.edit({ components: [feesPanel(guild(i.guildId).settings)], flags: V2 }).catch(() => {});
+  }
   if (scope !== 'tk' || !i.inGuild()) return;
 
   if (i.isStringSelectMenu()) {
@@ -1220,7 +1590,7 @@ async function route(i) {
   if (i.isButton()) {
     switch (action) {
       case 'rates':
-        return i.reply({ components: [ratesView(guild(i.guildId).rates)], flags: V2_EPHEMERAL });
+        return i.reply({ components: [ratesView(guild(i.guildId).rates, minFeeOf(i.guildId))], flags: V2_EPHEMERAL });
       case 'mine':
         return i.reply({ components: [myTickets(openTicketsOf(i.guildId, i.user.id))], flags: V2_EPHEMERAL });
       case 'claim':
@@ -1243,9 +1613,15 @@ function selfTest() {
   const fakeUser = { displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' };
   const fakeGuild = { iconURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png' };
   const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), status: 'payment', claimedBy: '3' };
-  const exchange = { ...base, type: 'exchange', form: { from: 'blik', to: 'ltc', ...quote(250, 8), notes: 'adres' } };
+  const exchange = { ...base, type: 'exchange', form: { from: 'blik', to: 'ltc', ...quote(250, 8, 3), notes: 'adres' } };
   const closed = { ...exchange, closedAt: Date.now(), closedBy: '3', closeReason: 'ok' };
   const others = Object.keys(ticketTypes).filter((t) => t !== 'exchange');
+  const avatarUser = { ...fakeUser, username: 'test', createdTimestamp: Date.now(), toString: () => '<@5>' };
+  const fakeMember = { id: '5', user: avatarUser, guild: { name: 'Serwer', memberCount: 42 }, toString: () => '<@5>' };
+  const testGuild = guild('selftest');
+  testGuild.settings.welcome.bannerUrl = 'https://example.com/w.png';
+  testGuild.invites['3'] = { regular: 5, left: 1, fake: 1, bonus: 2 };
+  testGuild.joins['5'] = { inviterId: '3', fake: true };
 
   const built = [
     ...[...commands.values()].map((c) => c.data),
@@ -1267,7 +1643,17 @@ function selfTest() {
     ratingLog(closed, 5),
     statsView({ tickets: { 1: closed }, stats: { opened: 1, closed: 1, ratings: [{ stars: 5 }] } }),
     myTickets([exchange]),
-    calculator('blik', 'ltc', quote(100, 8)),
+    calculator('blik', 'ltc', quote(100, 8, 3)),
+    feesPanel({ feeBannerUrl: 'https://example.com/fees.png' }),
+    feesPanel({}),
+    feesFor('skrill', feeRoutes({ 'skrill>blik': 9, 'skrill>ltc': 10 }, 'skrill'), 3),
+    feesFor('blik', feeRoutes({}, 'blik'), 3),
+    welcomeView(fakeMember, testGuild),
+    leaveView(fakeMember, testGuild),
+    invitesView(fakeMember.user, testGuild.invites['3']),
+    invitesView(fakeMember.user, undefined),
+    invitesRanking(testGuild),
+    ratesView({ 'blik>ltc': 8 }, 3),
   ];
   for (const b of built) b.toJSON();
   console.log(`✅ ${built.length} komponentów/komend przeszło walidację`);
@@ -1290,13 +1676,87 @@ if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// ─── Zaproszenia: pamięć użyć linków, żeby wiedzieć, którym ktoś wszedł ───
 
-client.once(Events.ClientReady, async (c) => {
+const inviteCache = new Map(); // guildId → Map(code → uses)
+const vanityCache = new Map(); // guildId → uses
+
+async function cacheInvites(g) {
+  const invites = await g.invites.fetch().catch(() => null);
+  if (!invites) return null;
+  inviteCache.set(g.id, new Map(invites.map((inv) => [inv.code, inv.uses ?? 0])));
+  if (g.vanityURLCode) {
+    const vanity = await g.fetchVanityData().catch(() => null);
+    if (vanity) vanityCache.set(g.id, vanity.uses);
+  }
+  return invites;
+}
+
+async function findUsedInvite(g) {
+  const before = inviteCache.get(g.id) ?? new Map();
+  const vanityBefore = vanityCache.get(g.id);
+  const invites = await cacheInvites(g);
+  if (!invites) return { unknown: true };
+  const used = invites.find((inv) => (inv.uses ?? 0) > (before.get(inv.code) ?? 0));
+  if (used) return { inviterId: used.inviter?.id ?? null, code: used.code };
+  // Jednorazowy link znika po użyciu — jeśli zniknął dokładnie jeden, to on.
+  const gone = [...before.keys()].filter((code) => !invites.has(code));
+  if (gone.length === 1) return { code: gone[0], inviterId: null, gone: true };
+  if (vanityBefore != null && (vanityCache.get(g.id) ?? 0) > vanityBefore) return { vanity: true };
+  return { unknown: true };
+}
+
+async function onMemberAdd(member) {
+  if (member.user.bot) return;
+  const found = await findUsedInvite(member.guild);
+  const fake = Date.now() - member.user.createdTimestamp < fakeAccountDays * 86_400_000;
+  const g = updateGuild(member.guild.id, (gg) => {
+    gg.joins[member.id] = { inviterId: found.inviterId ?? null, vanity: Boolean(found.vanity), fake, at: Date.now() };
+    if (found.inviterId && found.inviterId !== member.id) {
+      const st = (gg.invites[found.inviterId] ??= { regular: 0, left: 0, fake: 0, bonus: 0 });
+      if (fake) st.fake++;
+      else st.regular++;
+    }
+  });
+  const channelId = g.settings.welcome.channelId;
+  if (!channelId) return;
+  const channel = await member.guild.channels.fetch(channelId).catch(() => null);
+  await channel
+    ?.send({ components: [welcomeView(member, g)], flags: V2, allowedMentions: { users: [member.id] } })
+    .catch((err) => console.error('Powitanie nie wysłane:', err.message));
+}
+
+async function onMemberRemove(member) {
+  if (member.user.bot) return;
+  const g = updateGuild(member.guild.id, (gg) => {
+    const entry = gg.joins[member.id];
+    if (entry?.inviterId && !entry.left && !entry.fake && gg.invites[entry.inviterId]) gg.invites[entry.inviterId].left++;
+    if (entry) entry.left = true;
+  });
+  const channelId = g.settings.welcome.leaveChannelId;
+  if (!channelId) return;
+  const channel = await member.guild.channels.fetch(channelId).catch(() => null);
+  await channel
+    ?.send({ components: [leaveView(member, g)], flags: V2, allowedMentions: { parse: [] } })
+    .catch((err) => console.error('Pożegnanie nie wysłane:', err.message));
+}
+
+// Powitania i zaproszenia wymagają „Server Members Intent” (Developer Portal → Bot → Privileged Gateway Intents).
+// Jeśli nie jest włączony, bot i tak wystartuje — tylko bez tych funkcji.
+let membersIntentOn = true;
+let client;
+
+async function onReady(c) {
   console.log(`✅ Zalogowano jako ${c.user.tag}`);
   console.log(`🔗 Link zaproszenia: ${inviteUrl(c.user.id)}`);
   console.log(`🏠 Serwery bota: ${c.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak — zaproś bota linkiem powyżej'}`);
   c.user.setActivity({ name: '💱 Exchange • /kalkulator', type: ActivityType.Custom });
+  if (!membersIntentOn) {
+    console.warn('⚠️ Powitania i zaproszenia wyłączone: włącz „Server Members Intent” w Developer Portal → Bot i zrestartuj bota.');
+  }
+  for (const g of c.guilds.cache.values()) {
+    if (!(await cacheInvites(g))) console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie policzy zaproszeń.`);
+  }
 
   // Rejestracja komend przy każdym starcie: na serwerze GUILD_ID (od razu) albo globalnie.
   const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
@@ -1325,7 +1785,7 @@ client.once(Events.ClientReady, async (c) => {
     }
     console.error('Rejestracja komend nie powiodła się:', err.message);
   }
-});
+}
 
 const knownErrors = {
   50001: 'Bot nie ma dostępu do tego kanału lub serwera.',
@@ -1340,7 +1800,7 @@ function describeError(err) {
   return `${hint}\n-# Szczegóły: \`${err?.code ?? 'brak kodu'}\` ${detail.replace(/`/g, "'")}`;
 }
 
-client.on(Events.InteractionCreate, async (i) => {
+async function onInteraction(i) {
   try {
     await route(i);
   } catch (err) {
@@ -1350,14 +1810,46 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.deferred || i.replied) await i.followUp(payload).catch(() => {});
     else await i.reply(payload).catch(() => {});
   }
-});
+}
+
+const isDisallowedIntents = (err) => err?.code === 4014 || /disallowed|privileged intent/i.test(String(err?.message));
+
+function start(withMembers) {
+  membersIntentOn = withMembers;
+  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildInvites];
+  if (withMembers) intents.push(GatewayIntentBits.GuildMembers);
+  client = new Client({ intents });
+
+  client.once(Events.ClientReady, onReady);
+  client.on(Events.InteractionCreate, onInteraction);
+  client.on(Events.InviteCreate, (inv) => inviteCache.get(inv.guild?.id)?.set(inv.code, inv.uses ?? 0));
+  client.on(Events.InviteDelete, (inv) => inviteCache.get(inv.guild?.id)?.delete(inv.code));
+  client.on(Events.GuildCreate, (g) => cacheInvites(g));
+  if (withMembers) {
+    client.on(Events.GuildMemberAdd, (m) => onMemberAdd(m).catch(console.error));
+    client.on(Events.GuildMemberRemove, (m) => onMemberRemove(m).catch(console.error));
+  }
+
+  const fallback = () => {
+    if (!membersIntentOn) return;
+    console.warn('⚠️ „Server Members Intent” nie jest włączony — uruchamiam bota bez powitań i zaproszeń.');
+    client.destroy();
+    start(false);
+  };
+  client.on(Events.ShardDisconnect, (ev) => ev?.code === 4014 && fallback());
+  client.login(DISCORD_TOKEN).catch((err) => {
+    if (withMembers && (isDisallowedIntents(err) || !membersIntentOn)) return fallback();
+    console.error('Logowanie nie powiodło się:', err.message);
+    process.exit(1);
+  });
+}
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     flush();
-    client.destroy();
+    client?.destroy();
     process.exit(0);
   });
 }
 
-client.login(DISCORD_TOKEN);
+start(true);
