@@ -212,6 +212,71 @@ const counterNames = {
   reviews: '⭐┃opinie→{n}',
 };
 
+// Układ serwera tworzony przez /generuj.
+// mode: 'readonly' = tylko czytanie (piszą Administracja i Staff), 'reactions' = bez pisania, z reakcjami,
+//       'open' = wszyscy piszą, 'voice' = kanał głosowy.
+// counter: nazwa z licznikiem z counterNames. panel: panel wysyłany na kanał. setting: pole w /setup.
+const serverLayout = {
+  categoryName: (emoji, name) => `━━ ${emoji} ${name} ━━`,
+  channelName: (emoji, name) => `${emoji}┃${name}`,
+  roles: {
+    admin: { name: '👑 Administracja', color: 0xe74c3c, hoist: true, permissions: [PermissionFlagsBits.Administrator] },
+    staff: { name: '🛡️ Staff', color: 0x3498db, hoist: true, permissions: [] },
+    client: { name: '💎 Klient', color: 0x9b59b6, hoist: true, permissions: [] },
+    verified: { name: '✅ Zweryfikowany', color: 0x2ecc71, hoist: false, permissions: [] },
+  },
+  categories: [
+    {
+      emoji: '📢',
+      name: 'INFORMACJE',
+      channels: [
+        { emoji: '📜', name: 'regulamin', mode: 'readonly', panel: 'regulamin' },
+        { emoji: '📢', name: 'ogłoszenia', mode: 'readonly' },
+        { emoji: '💰', name: 'cennik', mode: 'readonly', panel: 'cennik' },
+        { emoji: '🚀', name: 'boosty', mode: 'readonly', setting: 'boostChannelId' },
+      ],
+    },
+    {
+      emoji: '🛒',
+      name: 'SKLEP',
+      channels: [
+        { emoji: '🎫', name: 'tickety', mode: 'readonly', panel: 'tickety' },
+        { counter: 'reviews', mode: 'readonly', panel: 'opinie', setting: 'reviewChannelId' },
+        { counter: 'legitCheck', mode: 'open', setting: 'lcChannelId' },
+        { counter: 'legit', mode: 'reactions', panel: 'legit' },
+      ],
+    },
+    { emoji: '🎉', name: 'EVENTY', channels: [{ emoji: '🎉', name: 'konkursy', mode: 'readonly' }] },
+    {
+      emoji: '💬',
+      name: 'SPOŁECZNOŚĆ',
+      channels: [
+        { emoji: '💬', name: 'czat', mode: 'open' },
+        { emoji: '📸', name: 'media', mode: 'open' },
+        { emoji: '🤖', name: 'komendy', mode: 'open' },
+      ],
+    },
+    {
+      emoji: '🔊',
+      name: 'GŁOSOWE',
+      channels: [
+        { emoji: '🔊', name: 'rozmowy', mode: 'voice' },
+        { emoji: '🎵', name: 'muzyka', mode: 'voice' },
+      ],
+    },
+    { emoji: '🎫', name: 'TICKETY', private: true, setting: 'categoryId', channels: [] },
+    {
+      emoji: '🛡️',
+      name: 'ADMINISTRACJA',
+      private: true,
+      channels: [
+        { emoji: '📁', name: 'logi', mode: 'open', setting: 'logChannelId' },
+        { emoji: '💬', name: 'staff-czat', mode: 'open', report: true },
+      ],
+    },
+  ],
+};
+
 // ═══ BAZA DANYCH (data/db.json) ════════════════════════════════════════
 
 const dbFile = join(dirname(fileURLToPath(import.meta.url)), 'data', 'db.json');
@@ -1100,6 +1165,29 @@ const panelBuilders = {
   cennik: (g, logo) => pricingPanel(g, logo),
 };
 
+/** Wysyła panel na kanał i zapamiętuje go. Zły link do baneru → wysyła bez baneru. */
+async function postPanel(client, discordGuild, channel, type) {
+  const logo = logoOf(discordGuild, client);
+  let message;
+  let warning = '';
+  try {
+    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], flags: V2 });
+  } catch (err) {
+    // 50035 = Discord odrzucił treść — zwykle zły link do baneru. Próbujemy bez niego.
+    if (err.code !== 50035 || !guild(discordGuild.id).settings.banners[type]) throw err;
+    updateGuild(discordGuild.id, (gg) => delete gg.settings.banners[type]);
+    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], flags: V2 });
+    warning = '\n⚠️ Link do baneru był nieprawidłowy — panel wysłano bez niego.';
+  }
+  updateGuild(discordGuild.id, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
+  if (type === 'legit') {
+    updateGuild(discordGuild.id, (gg) => (gg.legitVotes = { yes: 0, no: 0 }));
+    await message.react('✅').catch(() => {});
+    await message.react('❌').catch(() => {});
+  }
+  return { message, warning };
+}
+
 /** Przebudowuje zapisany panel (np. po nowej opinii albo zmianie baneru). */
 async function refreshPanel(client, guildId, type) {
   const g = guild(guildId);
@@ -1291,12 +1379,210 @@ async function onMessage(message) {
     .catch((err) => console.error('Boost:', err.message));
 }
 
+// ═══ GENERATOR SERWERA (/generuj) ══════════════════════════════════════
+
+const F = PermissionFlagsBits;
+const botAllow = [F.ViewChannel, F.SendMessages, F.ReadMessageHistory, F.EmbedLinks, F.AttachFiles, F.AddReactions, F.ManageChannels, F.ManageMessages];
+const writeFlags = [F.SendMessages, F.SendMessagesInThreads, F.CreatePublicThreads, F.CreatePrivateThreads];
+
+/** Uprawnienia kanału: prywatna kategoria + tryb kanału. */
+function layoutOverwrites(discordGuild, roles, botId, { isPrivate, mode }) {
+  const everyone = { id: discordGuild.roles.everyone.id, allow: [], deny: [] };
+  const team = [roles.admin.id, roles.staff.id].map((id) => ({ id, allow: [F.ViewChannel, F.SendMessages, F.ReadMessageHistory, F.AddReactions] }));
+  if (isPrivate) everyone.deny.push(F.ViewChannel);
+  if (mode === 'readonly') everyone.deny.push(...writeFlags);
+  if (mode === 'reactions') {
+    everyone.deny.push(...writeFlags);
+    everyone.allow.push(F.AddReactions);
+  }
+  return [everyone, ...team, { id: botId, allow: botAllow }];
+}
+
+function layoutChannelName(ch, g) {
+  if (!ch.counter) return serverLayout.channelName(ch.emoji, ch.name);
+  const values = { reviews: g.reviews.length, legitCheck: g.stats.lc, legit: 0 };
+  return counterNames[ch.counter].replace('{n}', values[ch.counter]);
+}
+
+function generateConfirmView(userId) {
+  const b = box(colors.danger);
+  text(
+    b,
+    [
+      title('Generuj serwer', '🏗️'),
+      `## ⚠️ ${x} Uwaga — tego nie da się cofnąć!`,
+      '>>> ' +
+        [
+          point('**Usunę wszystkie** obecne kanały i kategorie (razem z wiadomościami).'),
+          point(`Utworzę role: ${Object.values(serverLayout.roles).map((r) => `**${r.name}**`).join(', ')}.`),
+          point(`Utworzę **${serverLayout.categories.length}** kategorii i **${serverLayout.categories.reduce((a, cat) => a + cat.channels.length, 0)}** kanałów z uprawnieniami.`),
+          point('Skonfiguruję bota i wyślę panele: tickety, regulamin, opinie, czy legit, cennik.'),
+          point('Podsumowanie wyślę Ci w **DM** i na kanał staffu.'),
+        ].join('\n'),
+    ].join('\n'),
+  );
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new ButtonBuilder().setCustomId(`gen:confirm:${userId}`).setLabel('Tak, usuń wszystko i wygeneruj').setEmoji('🏗️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`gen:cancel:${userId}`).setLabel('Anuluj').setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return b;
+}
+
+function generateReportView(report) {
+  const b = box(report.errors.length ? colors.warning : colors.success);
+  text(
+    b,
+    [
+      title('Serwer wygenerowany', '🏗️'),
+      '>>> ' +
+        [
+          row('🗑️ Usunięte kanały', `\`${report.deleted}\``),
+          row('🎭 Role', report.roles.map((id) => `<@&${id}>`).join(', ')),
+          row('📁 Kategorie', `\`${report.categories}\``),
+          row('💬 Kanały', `\`${report.channels}\``),
+          row('🧩 Panele', report.panels.length ? report.panels.map((id) => `<#${id}>`).join(', ') : '`—`'),
+          row('⚙️ Bot', 'skonfigurowany (jak `/setup`)'),
+        ].join('\n'),
+    ].join('\n'),
+  );
+  if (report.errors.length) {
+    sep(b);
+    text(b, `### ⚠️ ${x} Nie wszystko się udało\n${report.errors.slice(0, 15).map((e) => `- ${e}`).join('\n')}`);
+  }
+  sep(b);
+  footer(b);
+  return b;
+}
+
+/** Usuwa kanały, tworzy role, kategorie i kanały, konfiguruje bota i wysyła panele. */
+async function generateServer(client, discordGuild, invokerId) {
+  const report = { deleted: 0, roles: [], categories: 0, channels: 0, panels: [], errors: [] };
+  const botId = client.user.id;
+
+  // 1. Usuwanie: najpierw kanały, potem kategorie.
+  const existing = [...(await discordGuild.channels.fetch()).values()].filter(Boolean);
+  const ordered = [...existing.filter((ch) => ch.type !== ChannelType.GuildCategory), ...existing.filter((ch) => ch.type === ChannelType.GuildCategory)];
+  for (const ch of ordered) {
+    try {
+      await ch.delete('/generuj');
+      report.deleted++;
+    } catch (err) {
+      // Np. kanał zasad/aktualizacji na serwerze społeczności (50074) — Discord nie pozwala go usunąć.
+      report.errors.push(`Nie usunięto #${ch.name}: ${err.message}`);
+    }
+  }
+
+  // Stare tickety i konkursy z usuniętych kanałów nie mogą blokować nowych.
+  updateGuild(discordGuild.id, (g) => {
+    for (const t of Object.values(g.tickets)) {
+      if (!t.closedAt) Object.assign(t, { closedAt: Date.now(), result: 'notdone', closeReason: 'Kanał usunięty przez /generuj', awaitingRep: false });
+    }
+    for (const gw of Object.values(g.giveaways)) gw.ended = true;
+    g.panels = {};
+  });
+
+  // 2. Role (istniejące o tej samej nazwie są używane ponownie).
+  const allRoles = [...(await discordGuild.roles.fetch()).values()];
+  const roles = {};
+  for (const [key, def] of Object.entries(serverLayout.roles)) {
+    roles[key] =
+      allRoles.find((r) => r.name === def.name) ??
+      (await discordGuild.roles.create({ name: def.name, color: def.color, hoist: def.hoist, permissions: def.permissions, reason: '/generuj' }));
+    report.roles.push(roles[key].id);
+  }
+  await discordGuild.members
+    .fetch(invokerId)
+    .then((m) => m.roles.add(roles.admin.id, '/generuj'))
+    .catch((err) => report.errors.push(`Nie nadano roli Administracja: ${err.message}`));
+
+  // 3. Kategorie i kanały.
+  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true };
+  const panels = [];
+  let reportChannel = null;
+  for (const cat of serverLayout.categories) {
+    const category = await discordGuild.channels.create({
+      name: serverLayout.categoryName(cat.emoji, cat.name),
+      type: ChannelType.GuildCategory,
+      permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: 'open' }),
+      reason: '/generuj',
+    });
+    report.categories++;
+    if (cat.setting) settings[cat.setting] = category.id;
+    for (const ch of cat.channels) {
+      const channel = await discordGuild.channels.create({
+        name: layoutChannelName(ch, guild(discordGuild.id)),
+        type: ch.mode === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: ch.mode }),
+        reason: '/generuj',
+      });
+      report.channels++;
+      if (ch.setting) settings[ch.setting] = channel.id;
+      if (ch.panel) panels.push([ch.panel, channel]);
+      if (ch.report) reportChannel = channel;
+    }
+  }
+
+  // 4. Konfiguracja bota (to samo, co /setup).
+  updateGuild(discordGuild.id, (g) => Object.assign(g.settings, settings));
+
+  // 5. Panele.
+  for (const [type, channel] of panels) {
+    try {
+      await postPanel(client, discordGuild, channel, type);
+      report.panels.push(channel.id);
+    } catch (err) {
+      report.errors.push(`Panel ${type}: ${err.message}`);
+    }
+  }
+
+  // 6. Podsumowanie: kanał staffu + DM.
+  const view = generateReportView(report);
+  await reportChannel?.send({ components: [view], flags: V2, allowedMentions: { parse: [] } }).catch(() => {});
+  const invoker = await client.users.fetch(invokerId).catch(() => null);
+  await invoker?.send({ components: [generateReportView(report)], flags: V2 }).catch(() => {});
+  return report;
+}
+
+async function onGenerateButton(i, action, ownerId) {
+  if (i.user.id !== ownerId) return replyFail(i, 'Tylko osoba, która wpisała `/generuj`, może to potwierdzić.');
+  if (action === 'cancel') return i.update({ components: [notice(`### ❎ ${x} Anulowano — nic nie zostało zmienione.`, colors.neutral)], flags: V2 });
+  if (!i.memberPermissions?.has(F.Administrator)) return replyFail(i, 'Potrzebujesz uprawnień administratora.');
+  await i.update({
+    components: [notice(`### 🏗️ ${x} Generuję serwer…\nTen kanał za chwilę zniknie. Podsumowanie dostaniesz w **DM** i na kanale staffu.`, colors.brand)],
+    flags: V2,
+  });
+  try {
+    await generateServer(i.client, i.guild, i.user.id);
+  } catch (err) {
+    // Kanał z komendą już nie istnieje, więc błąd wysyłamy w DM.
+    console.error('Generowanie serwera:', err);
+    await i.user.send({ components: [fail(`Generowanie przerwane.\n${describeError(err)}`)], flags: V2 }).catch(() => {});
+  }
+}
+
 // ═══ KOMENDY SLASH ═════════════════════════════════════════════════════
 
 const replyOk = (i, content, flags = V2_EPHEMERAL) => i.reply({ components: [ok(content)], flags, allowedMentions: { parse: [] } });
 const replyFail = (i, content) => replyV2(i, fail(content));
 const commands = new Map();
 const command = (data, execute) => commands.set(data.name, { data, execute });
+
+command(
+  new SlashCommandBuilder()
+    .setName('generuj')
+    .setDescription('Usuwa wszystkie kanały i tworzy gotowy serwer TanieBoty')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false),
+  (i) => {
+    if (!i.guild.members.me?.permissions.has(PermissionFlagsBits.Administrator)) {
+      return replyFail(i, 'Bot potrzebuje uprawnień **Administratora**, żeby usuwać kanały i tworzyć role. Zaproś go linkiem z konsoli.');
+    }
+    return i.reply({ components: [generateConfirmView(i.user.id)], flags: V2_EPHEMERAL });
+  },
+);
 
 command(
   new SlashCommandBuilder()
@@ -1393,24 +1679,7 @@ command(
     if (missing.length) return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, n]) => `> • ${n}`).join('\n')}`);
 
     await i.deferReply({ flags: V2_EPHEMERAL });
-    const g = guild(i.guildId);
-    const logo = logoOf(i.guild, i.client);
-    let message;
-    let warning = '';
-    try {
-      message = await channel.send({ components: [panelBuilders[type](g, logo)], flags: V2 });
-    } catch (err) {
-      // 50035 = Discord odrzucił treść — zwykle zły link do baneru. Próbujemy bez niego.
-      if (err.code !== 50035 || !g.settings.banners[type]) throw err;
-      updateGuild(i.guildId, (gg) => delete gg.settings.banners[type]);
-      message = await channel.send({ components: [panelBuilders[type](guild(i.guildId), logo)], flags: V2 });
-      warning = '\n⚠️ Link do baneru był nieprawidłowy — panel wysłano bez niego.';
-    }
-    updateGuild(i.guildId, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
-    if (type === 'legit') {
-      await message.react('✅').catch(() => {});
-      await message.react('❌').catch(() => {});
-    }
+    const { warning } = await postPanel(i.client, i.guild, channel, type);
     await i.editReply({ components: [ok(`Panel wysłany na ${channel}${warning}`)], flags: V2 });
   },
 );
@@ -1658,6 +1927,8 @@ async function route(i) {
       return replyV2(i, notice(`### ✅ ${x} Dziękujemy!\nZaakceptowałeś/aś regulamin i otrzymałeś/aś rolę <@&${roleId}>.`, colors.success));
     }
   }
+
+  if (scope === 'gen' && i.isButton()) return onGenerateButton(i, action, arg);
 
   if (scope === 'gw' && i.isButton()) {
     if (action === 'join') return onGiveawayJoin(i);
@@ -1920,11 +2191,102 @@ async function flowTest() {
   console.log('✅ Test przepływu: 11 scenariuszy OK');
 }
 
+
+// ─── Test generatora serwera (symulacja) ───────────────────────────────
+
+async function generatorTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test generatora nie przeszedł: ${msg}`);
+  };
+  const GID = 'gen-guild';
+  const created = [];
+  const deleted = [];
+  const dms = [];
+  let seq = 0;
+  const oldChannels = new Map([
+    ['old1', { id: 'old1', name: 'general', type: ChannelType.GuildText, delete: async () => deleted.push('old1') }],
+    ['oldcat', { id: 'oldcat', name: 'Kategoria', type: ChannelType.GuildCategory, delete: async () => deleted.push('oldcat') }],
+    ['rules', { id: 'rules', name: 'rules', type: ChannelType.GuildText, delete: async () => Promise.reject(new Error('Cannot delete a channel required for community servers')) }],
+  ]);
+  const roles = new Map([['everyone', { id: 'everyone', name: '@everyone' }]]);
+  const fakeGuild = {
+    id: GID,
+    name: 'TanieBoty',
+    iconURL: () => null,
+    roles: {
+      everyone: { id: 'everyone' },
+      fetch: async () => roles,
+      create: async (opts) => {
+        const role = { id: `role${++seq}`, ...opts };
+        roles.set(role.id, role);
+        return role;
+      },
+    },
+    members: { fetch: async (id) => ({ id, roles: { add: async (r) => dms.push(['role', id, r]) } }) },
+    channels: {
+      fetch: async () => oldChannels,
+      create: async (opts) => {
+        const ch = {
+          id: `ch${++seq}`,
+          ...opts,
+          send: async (p) => (created.find((item) => item.id === ch.id).sent.push(p), { id: `msg${++seq}`, react: async () => {} }),
+          sent: [],
+        };
+        created.push(ch);
+        return ch;
+      },
+    },
+  };
+  const fakeClient = { user: { id: 'bot', displayAvatarURL: () => null }, users: { fetch: async (id) => ({ id, send: async (p) => dms.push(['dm', id, p]) }) } };
+
+  // Stary otwarty ticket nie może blokować nowych po generowaniu.
+  const g = guild(GID);
+  g.tickets.old = { channelId: 'old', userId: 'u', openedAt: 1, type: 'bot', form: {} };
+
+  const report = await generateServer(fakeClient, fakeGuild, 'admin-user');
+  const byName = (name) => created.find((item) => item.name === name);
+  const cats = created.filter((item) => item.type === ChannelType.GuildCategory);
+  const chans = created.filter((item) => item.type !== ChannelType.GuildCategory);
+
+  assert(deleted.includes('old1') && deleted.includes('oldcat'), 'stare kanały usunięte');
+  assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
+  assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
+  assert(cats.length === 7 && chans.length === 16, `7 kategorii i 16 kanałów (${cats.length}/${chans.length})`);
+  assert(byName('━━ 📢 INFORMACJE ━━') && byName('━━ 🛡️ ADMINISTRACJA ━━'), 'nazwy kategorii w stylu ━━');
+  assert(byName('🎉┃konkursy') && byName('📜┃regulamin') && byName('⭐┃opinie→0') && byName('🤔┃czy-legit→0') && byName('✅┃legit-check→0'), 'nazwy kanałów w stylu ┃');
+  assert(byName('🔊┃rozmowy').type === ChannelType.GuildVoice, 'kanały głosowe');
+  assert([...roles.values()].filter((r) => r.name !== '@everyone').length === 4, '4 role');
+  assert(dms.some(([t, id]) => t === 'role' && id === 'admin-user'), 'rola Administracja dla osoby, która generuje');
+
+  const everyoneDeny = (ch) => ch.permissionOverwrites.find((o) => o.id === 'everyone').deny;
+  assert(everyoneDeny(byName('📁┃logi')).includes(F.ViewChannel), 'logi ukryte przed wszystkimi');
+  assert(everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria ticketów prywatna');
+  assert(everyoneDeny(byName('📜┃regulamin')).includes(F.SendMessages), 'regulamin tylko do czytania');
+  assert(!everyoneDeny(byName('✅┃legit-check→0')).includes(F.SendMessages), 'na legit-check można pisać');
+  assert(!everyoneDeny(byName('💬┃czat')).includes(F.SendMessages), 'na czacie można pisać');
+  assert(byName('📜┃regulamin').permissionOverwrites.some((o) => o.id === 'bot' && o.allow.includes(F.SendMessages)), 'bot może pisać wszędzie');
+
+  const s = guild(GID).settings;
+  assert(s.categoryId === byName('━━ 🎫 TICKETY ━━').id, 'kategoria ticketów ustawiona');
+  assert(s.logChannelId === byName('📁┃logi').id && s.lcChannelId === byName('✅┃legit-check→0').id, 'logi i legit check ustawione');
+  assert(s.reviewChannelId === byName('⭐┃opinie→0').id && s.boostChannelId === byName('🚀┃boosty').id, 'opinie i boosty ustawione');
+  assert(s.staffRoleId && s.rulesRoleId, 'role staff i regulaminu ustawione');
+  assert(report.panels.length === 5 && ['📜┃regulamin', '💰┃cennik', '🎫┃tickety', '⭐┃opinie→0', '🤔┃czy-legit→0'].every((n) => byName(n).sent.length === 1), '5 paneli wysłanych');
+  assert(JSON.stringify(byName('📜┃regulamin').sent[0].components[0].toJSON()).includes('rules:accept'), 'regulamin z przyciskiem akceptacji');
+  assert(byName('💬┃staff-czat').sent.length === 1 && dms.some(([t]) => t === 'dm'), 'podsumowanie na staff-czat i w DM');
+  assert(guild(GID).tickets.old.closedAt, 'stare tickety zamknięte w bazie');
+  assert(openTicketsOf(GID, 'u').length === 0, 'klient może otworzyć nowy ticket');
+
+  delete store.guilds[GID];
+  console.log('✅ Test generatora: 21 sprawdzeń OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
   selfTest();
   await flowTest();
+  await generatorTest();
   process.exit(0);
 }
 

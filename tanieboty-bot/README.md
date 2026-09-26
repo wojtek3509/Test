@@ -13,6 +13,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 💰 Cennik | `/panel typ:cennik` | Ceny botów i hostingu oraz przyciski „Zamów bota” / „Kup hosting”, które od razu otwierają ticket. |
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
+| 🏗️ Generator serwera | `/generuj` | Po potwierdzeniu **usuwa wszystkie kanały** i tworzy gotowy serwer: role, kategorie `━━ 📢 INFORMACJE ━━`, kanały `🎉┃konkursy` z uprawnieniami. Sam konfiguruje bota i wysyła panele. Podsumowanie trafia w DM i na staff-czat. |
 | 📈 Statystyki | `/statystyki` | Tickety, opinie i konkursy. |
 
 ## Zamykanie ticketu i legit check
@@ -56,6 +57,7 @@ Na początku `index.js`, w sekcji **KONFIGURACJA**:
 - `payments`: metody płatności w formularzu „Zrealizowane”.
 - `legitTimeoutMinutes`: długość wyciszenia za ❌ (`0` wyłącza wyciszenie).
 - `counterNames`: format nazw kanałów z licznikiem.
+- `serverLayout`: role, kategorie i kanały tworzone przez `/generuj`.
 
 Własne emoji wgrywasz w Developer Portal → Emojis. Kod w formacie `<:nazwa:id>` wklejasz zamiast zwykłego emoji.
 
