@@ -65,7 +65,7 @@ const ticketTypes = {
     prefix: 'bot',
     order: true,
     fields: [
-      { id: 'desc', label: 'Opisz bota', style: 'long', placeholder: 'Tickety, weryfikacja, konkursy, ekonomia…', min: 10 },
+      { id: 'desc', label: 'Opisz bota', style: 'long', placeholder: 'Tickety, weryfikacja, konkursy, ekonomia…' },
       { id: 'budget', label: 'Budżet (PLN)', placeholder: 'np. 50' },
       { id: 'deadline', label: 'Na kiedy?', placeholder: 'np. do piątku / bez pośpiechu', required: false },
     ],
@@ -96,7 +96,7 @@ const ticketTypes = {
     emoji: '❓',
     description: 'Kliknij, aby zadać nam pytanie.',
     prefix: 'pytanie',
-    fields: [{ id: 'question', label: 'Twoje pytanie', style: 'long', min: 5 }],
+    fields: [{ id: 'question', label: 'Twoje pytanie', style: 'long' }],
   },
   partner: {
     label: 'Współpraca',
@@ -105,7 +105,7 @@ const ticketTypes = {
     prefix: 'wspolpraca',
     fields: [
       { id: 'server', label: 'Link do serwera / strony', required: false },
-      { id: 'offer', label: 'Twoja propozycja', style: 'long', min: 10 },
+      { id: 'offer', label: 'Twoja propozycja', style: 'long' },
     ],
   },
 };
@@ -664,7 +664,6 @@ function ticketModal(type) {
           .setRequired(f.required !== false)
           .setMaxLength(f.style === 'long' ? 1000 : 100);
         if (f.placeholder) input.setPlaceholder(f.placeholder);
-        if (f.min) input.setMinLength(f.min);
         return label.setTextInputComponent(input);
       }),
     );
@@ -693,12 +692,6 @@ function ticketMessage(ticket, user) {
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(
-      new ButtonBuilder()
-        .setCustomId('tk:claim')
-        .setLabel(ticket.claimedBy ? 'Przejęty' : 'Przejmij')
-        .setEmoji('🙋')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(Boolean(ticket.claimedBy)),
       new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
     ),
   );
@@ -724,8 +717,8 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
           row('Wynik', ticket.result === 'done' ? '✅ **Zrealizowane**' : '❌ **Niezrealizowane**'),
           row('Autor', `<@${ticket.userId}>`),
           row('Kategoria', `${t.emoji} ${t.label}`),
-          row('Obsługiwał', ticket.claimedBy ? `<@${ticket.claimedBy}>` : '—'),
           row('Zamknął', ticket.closedBy ? `<@${ticket.closedBy}>` : 'automatycznie (legit check)'),
+          ticket.deal ? row('Sprzedawca', `<@${ticket.deal.sellerId}>`) : null,
           ticket.deal ? row('Produkt', `\`${ticket.deal.product}\``) : null,
           ticket.deal ? row('Cena', `\`${ticket.deal.price}\``) : null,
           ticket.deal ? row('Płatność', paymentName(ticket.deal.payment)) : null,
@@ -804,7 +797,7 @@ async function onTicketForm(i, type) {
     return i.editReply({ components: [fail('Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.')], flags: V2 });
   }
 
-  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), claimedBy: null, form };
+  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), form };
   const message = await channel.send({ components: [ticketMessage(ticket, i.user)], flags: V2, allowedMentions: { parse: [] } });
   ticket.messageId = message.id;
   await message.pin().catch(() => {});
@@ -826,16 +819,6 @@ function staffTicket(i) {
   if (!ticket || ticket.closedAt) return { error: 'To nie jest aktywny kanał ticketu.' };
   if (!isStaff(i.member, guild(i.guildId).settings)) return { error: 'Tylko staff może to zrobić.' };
   return { ticket };
-}
-
-async function onClaim(i) {
-  const { ticket, error } = staffTicket(i);
-  if (error) return replyV2(i, fail(error));
-  if (ticket.claimedBy) return replyV2(i, fail(`Ticket jest już przejęty przez <@${ticket.claimedBy}>.`));
-  updateGuild(i.guildId, (g) => (g.tickets[i.channelId].claimedBy = i.user.id));
-  const user = await i.client.users.fetch(ticket.userId);
-  await i.update({ components: [ticketMessage(getTicket(i.guildId, i.channelId), user)], flags: V2 });
-  await i.channel.send({ components: [notice(`### 🙋 ${x} Ticket przejęty\n<@${i.user.id}> zajmie się Twoją sprawą.`)], flags: V2 });
 }
 
 async function onCloseRequest(i) {
@@ -977,10 +960,10 @@ async function onDoneSubmit(i) {
     product: i.fields.getTextInputValue('product'),
     price: i.fields.getTextInputValue('price'),
     payment: i.fields.getStringSelectValues('payment')[0],
-    sellerId: ticket.claimedBy ?? i.user.id,
+    sellerId: i.user.id,
   };
   if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.'));
-  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, claimedBy: ticket.claimedBy ?? i.user.id }));
+  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true }));
   const updated = getTicket(i.guildId, i.channelId);
 
   // Karta ticketu zmienia kolor na zielony (zamówienie zrealizowane).
@@ -1120,7 +1103,6 @@ function reviewModal(guildId) {
             .setCustomId('content')
             .setStyle(TextInputStyle.Paragraph)
             .setPlaceholder('Jak przebiegła współpraca? Czy bot działa tak, jak chciałeś/aś?')
-            .setMinLength(5)
             .setMaxLength(800),
         ),
     );
@@ -1941,7 +1923,6 @@ async function route(i) {
     if (i.isModalSubmit() && action === 'notdonesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason') || null });
     if (i.isButton()) {
       if (action === 'quick') return onTicketSelect(i, arg);
-      if (action === 'claim') return onClaim(i);
       if (action === 'close') return onCloseRequest(i);
       if (action === 'userclose') return closeTicket(i, { reason: 'Zamknięte przez klienta' });
       if (action === 'done' || action === 'notdone') {
@@ -2020,10 +2001,10 @@ function selfTest() {
   Object.assign(g.settings, { rulesRoleId: '1', banners: { tickety: img, regulamin: img, opinie: img, cennik: img } });
   const review = { number: 3, userId: '2', product: 'bot', content: 'Świetny bot ```test```', ratings: { quality: 5, time: 4, service: 5 }, at: Date.now() };
   g.reviews.push(review);
-  const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), claimedBy: '3' };
+  const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), };
   const tickets = [
     { ...base, type: 'bot', form: { desc: 'Bot z ticketami', budget: '50', deadline: null } },
-    { ...base, type: 'hosting', claimedBy: null, form: { bot: 'discord.js', period: '3m', notes: 'x' } },
+    { ...base, type: 'hosting', form: { bot: 'discord.js', period: '3m', notes: 'x' } },
     { ...base, type: 'question', form: { question: 'Ile kosztuje?' } },
     { ...base, type: 'partner', form: { server: null, offer: 'Reklama' } },
   ];
@@ -2134,7 +2115,7 @@ async function flowTest() {
   // Przygotowanie: serwer, ticket przejęty przez staff.
   const g = guild(GID);
   Object.assign(g.settings, { staffRoleId: 'staff-role', logChannelId: LOG_CH, lcChannelId: null });
-  g.tickets[TICKET_CH] = { channelId: TICKET_CH, number: 1, type: 'bot', userId: CLIENT, openedAt: Date.now(), claimedBy: STAFF, form: { desc: 'x', budget: '50' }, messageId: 'card' };
+  g.tickets[TICKET_CH] = { channelId: TICKET_CH, number: 1, type: 'bot', userId: CLIENT, openedAt: Date.now(), form: { desc: 'x', budget: '50' }, messageId: 'card' };
   const doneFields = {
     getTextInputValue: (id) => ({ product: 'Bot do exchange', price: '50 PLN' })[id],
     getStringSelectValues: () => ['ltc'],
@@ -2143,6 +2124,10 @@ async function flowTest() {
   // 1. Karta ticketu nie ma menu statusu.
   const cardJson = JSON.stringify(ticketMessage(g.tickets[TICKET_CH], users[CLIENT]).toJSON());
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
+  assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
+  const modals = [...Object.keys(ticketTypes).map(ticketModal), reviewModal('x'), doneModal(), notDoneModal()];
+  const minLengths = JSON.stringify(modals.map((m) => m.toJSON())).match(/"min_length":\d+/g) ?? [];
+  assert(minLengths.every((m) => Number(m.split(':')[1]) <= 1), `w formularzach wystarczy 1 znak (${minLengths})`);
 
   // 2. Klient nie może kliknąć „Zrealizowane”.
   const iClientDone = interaction(CLIENT);
