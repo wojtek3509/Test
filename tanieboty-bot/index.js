@@ -704,6 +704,14 @@ const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(
 // Podmieniane w teście offline.
 let makeTranscript = (channel, ticket) => createTranscript(channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
 
+/** Kto zdecydował o wyniku: osoba, która kliknęła „Zrealizowane” / „Niezrealizowane” (albo klient, jeśli sam zamknął). */
+function closerRow(ticket) {
+  if (ticket.result === 'done') return row('✅ Oznaczył jako zrealizowane', `<@${ticket.decidedBy ?? ticket.deal?.sellerId ?? ticket.closedBy}>`);
+  if (!ticket.closedBy) return row('Zamknął', '—');
+  if (ticket.closedBy === ticket.userId) return row('Zamknął (klient)', `<@${ticket.closedBy}>`);
+  return row('❌ Oznaczył jako niezrealizowane', `<@${ticket.closedBy}>`);
+}
+
 function closedView(ticket, subtitle, withReviewButton, guildId) {
   const t = ticketTypes[ticket.type];
   const b = box(ticket.result === 'done' ? colors.success : colors.neutral);
@@ -717,7 +725,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
           row('Wynik', ticket.result === 'done' ? '✅ **Zrealizowane**' : '❌ **Niezrealizowane**'),
           row('Autor', `<@${ticket.userId}>`),
           row('Kategoria', `${t.emoji} ${t.label}`),
-          row('Zamknął', ticket.closedBy ? `<@${ticket.closedBy}>` : 'automatycznie (legit check)'),
+          closerRow(ticket),
           ticket.deal ? row('Sprzedawca', `<@${ticket.deal.sellerId}>`) : null,
           ticket.deal ? row('Produkt', `\`${ticket.deal.product}\``) : null,
           ticket.deal ? row('Cena', `\`${ticket.deal.price}\``) : null,
@@ -963,7 +971,7 @@ async function onDoneSubmit(i) {
     sellerId: i.user.id,
   };
   if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.'));
-  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true }));
+  updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, decidedBy: i.user.id }));
   const updated = getTicket(i.guildId, i.channelId);
 
   // Karta ticketu zmienia kolor na zielony (zamówienie zrealizowane).
@@ -1034,7 +1042,7 @@ async function closeTicket(i, { reason = null, result = 'notdone' } = {}) {
         [
           `## 🔒 ${x} Ticket zamykany`,
           row('Wynik', result === 'done' ? '✅ Zrealizowane' : '❌ Niezrealizowane'),
-          row('Zamknął', `<@${i.user.id}>`),
+          closerRow({ ...ticket, result, closedBy: i.user.id }),
           reason ? row('Powód', reason) : null,
           '-# Kanał zniknie za kilka sekund…',
         ]
@@ -2187,6 +2195,17 @@ async function flowTest() {
   assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'log zamknięcia na kanale logów');
   assert(after.some(([type, id]) => type === 'dm' && id === CLIENT), 'transcript do klienta w DM');
   assert(g.stats.lc === 1 && g.stats.done === 1, 'statystyki LC i zrealizowanych');
+  const doneLog = JSON.stringify(closedView(t, 'x', false).toJSON());
+  assert(doneLog.includes('Oznaczył jako zrealizowane') && doneLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Zrealizowane');
+
+  // 8b. Niezrealizowane: log pokazuje osobę, która kliknęła.
+  channels['ticket-2'] = mkChannel('ticket-2', 'bot-0002');
+  g.tickets['ticket-2'] = { channelId: 'ticket-2', number: 2, type: 'bot', userId: CLIENT, openedAt: Date.now(), form: { desc: 'y' }, messageId: 'card2' };
+  const iNot = interaction(STAFF, { channelId: 'ticket-2', channel: channels['ticket-2'] });
+  await closeTicket(iNot, { reason: 'Klient zrezygnował' });
+  const notLog = JSON.stringify(closedView(getTicket(GID, 'ticket-2'), 'x', false).toJSON());
+  assert(notLog.includes('Oznaczył jako niezrealizowane') && notLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Niezrealizowane');
+  assert(JSON.stringify(iNot.replies[0].components[0].toJSON()).includes('Oznaczył jako niezrealizowane'), 'wiadomość w tickecie pokazuje, kto kliknął');
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;
