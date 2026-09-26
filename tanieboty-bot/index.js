@@ -189,6 +189,9 @@ const payments = {
 };
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 
+// Przykładowe vouche pokazywane na kanale legit checków (panel „Jak napisać voucha?”).
+const vouchExamples = ['+rep @sprzedawca Bot discord [ 30 PLN ] [ BLIK ]', '+rep @sprzedawca Hosting 3 miesiące [ 13 PLN ] [ PAYPAL ]'];
+
 // Oceny w opiniach.
 const reviewCriteria = [
   { id: 'quality', label: 'Jakość bota', emoji: '🤖' },
@@ -242,7 +245,7 @@ const serverLayout = {
       emoji: '🤝',
       name: 'ZAUFANIE',
       channels: [
-        { counter: 'legitCheck', mode: 'open', setting: 'lcChannelId' },
+        { counter: 'legitCheck', mode: 'open', setting: 'lcChannelId', panel: 'vouch' },
         { counter: 'reviews', mode: 'readonly', panel: 'opinie', setting: 'reviewChannelId' },
         { counter: 'legit', mode: 'reactions', panel: 'legit' },
       ],
@@ -897,7 +900,8 @@ function notDoneModal() {
 }
 
 /** Wzór wiadomości, którą klient wysyła na kanał legit checków. */
-const repTemplate = (ticket) => `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} | ${ticket.deal.price} | ${payments[ticket.deal.payment]?.label ?? ticket.deal.payment}`;
+const repTemplate = (ticket) =>
+  `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} [ ${ticket.deal.price} ] [ ${upper(payments[ticket.deal.payment]?.label ?? ticket.deal.payment)} ]`;
 
 function repRequestView(ticket, lcChannelId) {
   const b = box(colors.success);
@@ -936,27 +940,36 @@ function repRequestView(ticket, lcChannelId) {
   return b;
 }
 
-/** Karta wysyłana pod repem klienta na kanale legit checków. */
-function legitCheckCard(ticket, number, author) {
+/** Panel na kanale legit checków — zawsze na dole, pod ostatnim vouchem. */
+function vouchPanel(g, logo) {
   const b = box(colors.success);
   header(
     b,
     [
-      title(`Legit check ${pad(number)}`, '✅'),
+      title('Jak napisać voucha?', '✅'),
       '>>> ' +
         [
-          row('Klient', `<@${ticket.userId}>`),
-          row('Sprzedawca', `<@${ticket.deal.sellerId}>`),
-          row('Produkt', `\`${ticket.deal.product}\``),
-          row('Cena', `\`${ticket.deal.price}\``),
-          row('Płatność', paymentName(ticket.deal.payment)),
-          row('Data', ts(Date.now(), 'f')),
+          point('Po każdym zakupie napisz na tym kanale **voucha** według wzoru:'),
+          codeBlock('+rep @sprzedawca Co zakupiłeś [ Kwota PLN ] [ Forma płatności ]'),
         ].join('\n'),
     ].join('\n'),
-    author?.displayAvatarURL?.({ size: 256 }),
+    logo,
   );
   sep(b);
-  text(b, `-# ✅ Transakcja potwierdzona przez ${brand.name} • dziękujemy za zaufanie!`);
+  text(b, [`### 📝 ${x} Przykładowe vouche`, ...vouchExamples.map(codeBlock)].join('\n'));
+  sep(b);
+  text(
+    b,
+    [
+      point('Gdy napiszesz voucha, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
+      g.settings.reviewChannelId ? point(`Zostaw też opinię na <#${g.settings.reviewChannelId}> ⭐`) : null,
+      point(`Dotychczas wystawiono **${g.stats.lc}** vouchy — dziękujemy za zaufanie! 💙`),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+  sep(b);
+  footer(b);
   return b;
 }
 
@@ -984,29 +997,26 @@ async function onDoneSubmit(i) {
 }
 
 /**
- * Czy wiadomość jest poprawnym repem: musi zaczynać się od „+rep”.
- * Bez „Message Content Intent” bot nie widzi treści — wtedy rep musi oznaczać sprzedawcę.
+ * Czy wiadomość jest vouchem: musi zaczynać się od „+rep”.
+ * Bez „Message Content Intent” bot nie widzi treści — wtedy vouch musi kogoś oznaczać.
  */
-function isValidRep(message, ticket) {
-  if (!messageContentOn) return message.mentions.users.has(ticket.deal.sellerId);
+function isRep(message) {
+  if (!messageContentOn) return message.mentions.users.size > 0;
   return /^\s*\+\s*rep\b/i.test(message.content);
 }
 
-/** Klient wysłał wiadomość na kanale legit checków → zamykamy jego ticket czekający na repa. */
+/** Wiadomość na kanale legit checków: vouch → ✅, licznik, zamknięcie ticketu klienta, panel na dół. */
 async function onLegitCheckMessage(message) {
   const g = guild(message.guild.id);
   if (message.channelId !== g.settings.lcChannelId || message.author.bot) return false;
   const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id);
-  if (!ticket) return true;
-  if (!isValidRep(message, ticket)) {
+
+  if (!isRep(message)) {
+    // Podpowiedź tylko dla klienta, który ma czekający ticket — reszta wiadomości zostaje bez odpowiedzi.
+    if (!ticket) return true;
     const hint = await message
       .reply({
-        components: [
-          notice(
-            `### ⚠️ ${x} To nie jest poprawny rep\nRep musi zaczynać się od **+rep**. Wzór:\n${codeBlock(repTemplate(ticket))}`,
-            colors.warning,
-          ),
-        ],
+        components: [notice(`### ⚠️ ${x} To nie jest poprawny vouch\nVouch musi zaczynać się od **+rep**. Twój wzór:\n${codeBlock(repTemplate(ticket))}`, colors.warning)],
         flags: V2,
         allowedMentions: { parse: [] },
       })
@@ -1014,20 +1024,21 @@ async function onLegitCheckMessage(message) {
     setTimeout(() => hint?.delete().catch(() => {}), 20_000);
     return true;
   }
-  const number = updateGuild(message.guild.id, (gg) => gg.stats.lc++).stats.lc;
-  updateGuild(message.guild.id, (gg) => Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url }));
-  await message.react('✅').catch(() => {});
-  await message
-    .reply({ components: [legitCheckCard(ticket, number, message.author)], flags: V2, allowedMentions: { parse: [] } })
-    .catch((err) => console.error('Legit check:', err.message));
 
-  const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
-  if (channel) {
-    await channel
-      .send({ components: [notice(`### ✅ ${x} Legit check otrzymany!\nDziękujemy <@${ticket.userId}>! ${message.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
-      .catch(() => {});
-    await finalizeTicket(message.client, message.guild, channel, { closedBy: null, result: 'done' });
+  updateGuild(message.guild.id, (gg) => gg.stats.lc++);
+  await message.react('✅').catch(() => {});
+
+  if (ticket) {
+    updateGuild(message.guild.id, (gg) => Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url }));
+    const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
+    if (channel) {
+      await channel
+        .send({ components: [notice(`### ✅ ${x} Vouch otrzymany!\nDziękujemy <@${ticket.userId}>! ${message.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
+        .catch(() => {});
+      await finalizeTicket(message.client, message.guild, channel, { closedBy: null, result: 'done' });
+    }
   }
+  await movePanelToBottom(message.client, message.guild.id, 'vouch', message.channel);
   return true;
 }
 
@@ -1154,7 +1165,7 @@ const panelQueues = new Map();
  * Panel ma być zawsze pod ostatnią wiadomością: usuwamy stary i wysyłamy nowy na dole kanału.
  * Jeśli panel stoi na innym kanale niż opinie, tylko go odświeżamy.
  */
-function movePanelToBottom(client, guildId, type, channel) {
+function movePanelToBottom(client, guildId, type, channel, createIfMissing = type === 'vouch') {
   const previous = panelQueues.get(guildId) ?? Promise.resolve();
   const next = previous.then(async () => {
     const ref = guild(guildId).panels[type];
@@ -1163,7 +1174,7 @@ function movePanelToBottom(client, guildId, type, channel) {
       const old = await channel.messages.fetch(ref.messageId).catch(() => null);
       await old?.delete().catch(() => {});
     }
-    if (ref) await postPanel(client, channel.guild, channel, type);
+    if (ref || createIfMissing) await postPanel(client, channel.guild, channel, type);
   });
   const settled = next.catch((err) => console.error(`Panel ${type}:`, err.message));
   panelQueues.set(guildId, settled);
@@ -1178,6 +1189,7 @@ const panelBuilders = {
   opinie: (g, logo) => reviewsPanel(g, logo),
   legit: (g, logo) => legitPanel(logo),
   cennik: (g, logo) => pricingPanel(g, logo),
+  vouch: (g, logo) => vouchPanel(g, logo),
 };
 
 /** Wysyła panel na kanał i zapamiętuje go. Zły link do baneru → wysyła bez baneru. */
@@ -1455,7 +1467,7 @@ function generateConfirmView(userId) {
           point('**Usunę wszystkie** obecne kanały i kategorie (razem z wiadomościami).'),
           point(`Utworzę role: ${Object.values(serverLayout.roles).map((r) => `**${r.name}**`).join(', ')}.`),
           point(`Utworzę **${serverLayout.categories.length}** kategorii i **${serverLayout.categories.reduce((a, cat) => a + cat.channels.length, 0)}** kanałów z uprawnieniami.`),
-          point('Skonfiguruję bota i wyślę panele: tickety, regulamin, opinie, czy legit, cennik.'),
+          point('Skonfiguruję bota i wyślę panele: tickety, regulamin, opinie, czy legit, cennik i „jak napisać voucha”.'),
           point('Podsumowanie wyślę Ci w **DM** i na kanał staffu.'),
         ].join('\n'),
     ].join('\n'),
@@ -1698,6 +1710,7 @@ command(
           { name: '⭐ Opinie', value: 'opinie' },
           { name: '🤔 Czy legit?', value: 'legit' },
           { name: '💰 Cennik', value: 'cennik' },
+          { name: '✅ Jak napisać voucha (kanał legit checków)', value: 'vouch' },
         ),
     )
     .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
@@ -2038,7 +2051,7 @@ function selfTest() {
     notDoneModal(),
     repRequestView(dealTicket, '5'),
     repRequestView(dealTicket, null),
-    legitCheckCard(dealTicket, 12, user),
+    vouchPanel(g, img),
     closedView({ ...dealTicket, closedAt: Date.now(), closedBy: null, result: 'done', lcUrl: 'https://discord.com/channels/1/2/3' }, 'Serwer', true, '9'),
     boostView(user, 23, 2),
   ];
@@ -2158,7 +2171,7 @@ async function flowTest() {
   // 5. „Skopiuj wzór” nie zamyka ticketu.
   i = interaction(CLIENT, { customId: 'tk:copyrep', isChatInputCommand: () => false, inGuild: () => true, inCachedGuild: () => true, isRepliable: () => true, isButton: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false });
   await route(i);
-  assert(i.replies[0]?.content === `+rep <@${STAFF}> Bot do exchange | 50 PLN | LTC`, 'wzór repa do skopiowania');
+  assert(i.replies[0]?.content === `+rep <@${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]`, `wzór repa do skopiowania (${i.replies[0]?.content})`);
   assert(!getTicket(GID, TICKET_CH).closedAt, 'kopiowanie nie zamyka ticketu');
 
   const lcMessage = (authorId, content, mentions) => ({
@@ -2167,15 +2180,20 @@ async function flowTest() {
     author: users[authorId] ?? mkUser(authorId),
     content,
     url: `https://discord.com/channels/${GID}/${LC_CH}/rep`,
-    mentions: { users: { has: (id) => mentions.includes(id) } },
+    mentions: { users: { has: (id) => mentions.includes(id), size: mentions.length } },
+    channel: channels[LC_CH],
     client: fakeClient,
     react: async (e) => log.push(['react', e]),
     reply: async (p) => (log.push(['lcreply', p]), { delete: async () => {} }),
   });
 
   // 6. Wiadomość innej osoby na LC → nic.
-  await onLegitCheckMessage(lcMessage('ktos', `+rep <@${STAFF}>`, [STAFF]));
-  assert(!getTicket(GID, TICKET_CH).closedAt, 'rep innej osoby nie zamyka ticketu');
+  channels[LC_CH].guild = fakeGuild;
+  channels[LC_CH].messages.fetch = async () => ({ delete: async () => log.push(['delete-panel']) });
+  await onLegitCheckMessage(Object.assign(lcMessage('ktos', `+rep <@${STAFF}> Bot [ 10 PLN ] [ BLIK ]`, [STAFF]), { channel: channels[LC_CH] }));
+  await panelQueues.get(GID);
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'vouch innej osoby nie zamyka ticketu');
+  assert(g.stats.lc === 1, 'vouch innej osoby liczy się do licznika');
 
   // 7. Klient pisze coś innego niż rep → podpowiedź, ticket otwarty.
   messageContentOn = true;
@@ -2187,14 +2205,19 @@ async function flowTest() {
 
   // 8. Poprawny rep → reakcja, karta LC, zamknięcie, logi, DM.
   const before = log.length;
-  await onLegitCheckMessage(lcMessage(CLIENT, `+rep <@${STAFF}> Bot do exchange | 50 PLN | LTC`, [STAFF]));
+  await onLegitCheckMessage(lcMessage(CLIENT, `+rep <@${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]`, [STAFF]));
+  await panelQueues.get(GID);
   t = getTicket(GID, TICKET_CH);
   assert(t.closedAt && t.result === 'done' && !t.awaitingRep && t.lcUrl, 'poprawny rep zamyka ticket jako zrealizowany');
   const after = log.slice(before);
   assert(after.some(([type, e]) => type === 'react' && e === '✅'), 'reakcja ✅ pod repem');
   assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'log zamknięcia na kanale logów');
   assert(after.some(([type, id]) => type === 'dm' && id === CLIENT), 'transcript do klienta w DM');
-  assert(g.stats.lc === 1 && g.stats.done === 1, 'statystyki LC i zrealizowanych');
+  assert(g.stats.done === 1, 'statystyki zrealizowanych');
+  const lcSends = after.filter(([type, id]) => type === 'send' && id === LC_CH).map(([, , p]) => JSON.stringify(p.components[0].toJSON()));
+  assert(lcSends.some((j) => j.includes('JAK NAPISAĆ VOUCHA')), 'panel „Jak napisać voucha?” pod vouchem');
+  assert(!JSON.stringify(after).includes('LEGIT CHECK #'), 'bez karty LEGIT CHECK #');
+  assert(g.panels.vouch?.channelId === LC_CH, 'panel voucha zapisany');
   const doneLog = JSON.stringify(closedView(t, 'x', false).toJSON());
   assert(doneLog.includes('Oznaczył jako zrealizowane') && doneLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Zrealizowane');
 
@@ -2209,7 +2232,7 @@ async function flowTest() {
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;
-  assert(isValidRep({ content: '', mentions: { users: { has: (id) => id === STAFF } } }, t), 'bez intentu: oznaczenie sprzedawcy wystarcza');
+  assert(isRep({ content: '', mentions: { users: { size: 1 } } }), 'bez intentu: oznaczenie kogoś wystarcza');
   messageContentOn = true;
 
   // 10. „Czy legit?” — ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
@@ -2247,7 +2270,7 @@ async function flowTest() {
   g.settings.reviewChannelId = null;
   await updateCounters(fakeClient);
   assert(channels[LEGIT_CH].name === '🤔┃czy-legit→404', `licznik czy legit (${channels[LEGIT_CH].name})`);
-  assert(channels[LC_CH].name === '✅┃legit-check→1', `licznik legit check (${channels[LC_CH].name})`);
+  assert(channels[LC_CH].name === '✅┃legit-check→2', `licznik legit check (${channels[LC_CH].name})`);
   const renames = log.filter(([type]) => type === 'rename').length;
   await updateCounters(fakeClient);
   assert(log.filter(([type]) => type === 'rename').length === renames, 'bez zmian liczby nie zmieniamy nazwy');
@@ -2390,7 +2413,7 @@ async function generatorTest() {
   assert(s.logChannelId === byName('📁┃logi').id && s.lcChannelId === byName('✅┃legit-check→0').id, 'logi i legit check ustawione');
   assert(s.reviewChannelId === byName('⭐┃opinie→0').id && s.boostChannelId === byName('🚀┃boosty').id, 'opinie i boosty ustawione');
   assert(s.staffRoleId && s.rulesRoleId, 'role staff i regulaminu ustawione');
-  assert(report.panels.length === 5 && ['📜┃regulamin', '💰┃cennik', '🎫┃tickety', '⭐┃opinie→0', '🤔┃czy-legit→0'].every((n) => byName(n).sent.length === 1), '5 paneli wysłanych');
+  assert(report.panels.length === 6 && ['📜┃regulamin', '💰┃cennik', '🎫┃tickety', '⭐┃opinie→0', '🤔┃czy-legit→0', '✅┃legit-check→0'].every((n) => byName(n).sent.length === 1), '6 paneli wysłanych');
   assert(JSON.stringify(byName('📜┃regulamin').sent[0].components[0].toJSON()).includes('rules:accept'), 'regulamin z przyciskiem akceptacji');
   assert(byName('💬┃staff-czat').sent.length === 1 && dms.some(([t]) => t === 'dm'), 'podsumowanie na staff-czat i w DM');
   assert(guild(GID).tickets.old.closedAt, 'stare tickety zamknięte w bazie');
