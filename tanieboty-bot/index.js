@@ -346,10 +346,10 @@ const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
 const c = style.chevron;
 const x = style.cross;
 
-/** Tytuł w ramce: # `🤖 TanieBoty × TEKST`. Własne emoji stoi przed ramką (w kodzie się nie wyświetla). */
+/** Tytuł w ramce: ## ```🤖 TanieBoty × TEKST```. Własne emoji stoi przed ramką (w kodzie się nie wyświetla). */
 function title(text, emoji = brand.emoji) {
   const body = `${brand.name} ${x} ${upper(text)}`;
-  return emoji.startsWith('<') ? `# ${emoji} \`${body}\`` : `# \`${emoji} ${body}\``;
+  return emoji.startsWith('<') ? `## ${emoji} \`\`\`${body}\`\`\`` : `## \`\`\`${emoji} ${body}\`\`\``;
 }
 /** Linia „» × Etykieta: wartość”. */
 const row = (label, value) => `${c} ${x} **${label}:** ${value}`;
@@ -2298,6 +2298,7 @@ async function flowTest() {
   fakeGuild.iconURL = () => null;
   fakeClient.user = { id: 'bot', displayAvatarURL: () => null };
   g.settings.reviewChannelId = REV_CH;
+  assert(title('Jak napisać voucha?', '✅') === '## ```✅ TanieBoty × JAK NAPISAĆ VOUCHA?```', `format tytułu (${title('Jak napisać voucha?', '✅')})`);
   const firstPanel = await postPanel(fakeClient, fakeGuild, revChannel, 'opinie');
   const reviewInteraction = (userId) =>
     interaction(userId, {

@@ -1,6 +1,6 @@
 # TanieBoty — bot Discord
 
-Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbudowany na **Components V2**: tytuły w ramce `# \`🤖 TanieBoty × TYTUŁ\``, sekcje z miniaturką, separatory, banery i menu. Cały bot to jeden plik `index.js`.
+Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbudowany na **Components V2**: tytuły w ramce `## ```🤖 TanieBoty × TYTUŁ```` , sekcje z miniaturką, separatory, banery i menu. Cały bot to jeden plik `index.js`.
 
 ## Funkcje
 
