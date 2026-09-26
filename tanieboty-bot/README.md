@@ -15,6 +15,8 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
 | 🏗️ Generator serwera | `/generuj` | Po potwierdzeniu **usuwa wszystkie kanały** i tworzy gotowy serwer: role, kategorie `━━ 📢 INFORMACJE ━━`, kanały `🎉┃konkursy` z uprawnieniami. Sam konfiguruje bota i wysyła panele. Podsumowanie trafia w DM i na staff-czat. |
+| 👋 Powitania | `/setup powitania:#kanał` (lub `/generuj`) | „Nowa osoba” z avatarem, numerem członka i tekstem powitalnym. |
+| 📩 Zaproszenia | `/setup zaproszenia:#kanał` (lub `/generuj`) | Wiadomość „@osoba właśnie zawitała do nas z zaproszenia od @x / przez link .gg/…”. Komendy `/zaproszenia sprawdz`, `ranking`, `bonus`, `reset`. Liczy prawdziwe, fałszywe (konto < 7 dni) i te, które wyszły. |
 | 📈 Statystyki | `/statystyki` | Tickety, opinie i konkursy. |
 
 ## Zamykanie ticketu i legit check
@@ -40,7 +42,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
    - `/setup kategoria:<kategoria> staff:<rola> logi:#logi opinie:#opinie boosty:#boosty legitcheck:#legit-check [rola-regulamin] [liczniki]`
    - `/panel typ:tickety`, `regulamin`, `opinie`, `legit`, `cennik` (każdy z opcjonalnym `baner:<link do obrazka>`)
 
-W Developer Portal → **Bot** włącz **Message Content Intent**. Dzięki temu bot sprawdza, czy rep zaczyna się od `+rep`. Bez niego bot też wystartuje, ale wtedy rep musi oznaczać sprzedawcę.
+W Developer Portal → **Bot** włącz **Message Content Intent** i **Server Members Intent** (ten drugi jest potrzebny do powitań i zaproszeń). Do ustalania, kto kogo zaprosił, bot potrzebuje uprawnienia **Zarządzanie serwerem** (Administrator wystarcza). Dzięki temu bot sprawdza, czy rep zaczyna się od `+rep`. Bez niego bot też wystartuje, ale wtedy rep musi oznaczać sprzedawcę.
 
 Liczniki w nazwach kanałów (czy legit, legit check, opinie) są zapisywane w bazie od razu, a nazwy kanałów aktualizują się co 10 minut. To limit Discorda: nazwę kanału można zmienić tylko 2 razy na 10 minut.
 

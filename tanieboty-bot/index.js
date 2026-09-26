@@ -213,6 +213,8 @@ const reviewCooldownMinutes = 60;
 // „Czy legit?”: reakcja ❌ jest zawsze usuwana, a autor dostaje przerwę (dni, 0 = bez przerwy, maks. 28).
 // Staff i admini nie dostają przerwy (Discord i tak nie pozwala wyciszyć właściciela ani administratorów).
 const legitTimeoutDays = 7;
+// Konto młodsze niż tyle dni liczy się jako fałszywe zaproszenie.
+const fakeAccountDays = 7;
 // Nazwy kanałów z licznikiem ({n} = liczba). Aktualizowane co 10 minut (limit Discorda).
 const counterNames = {
   legit: '🤔┃czy-legit→{n}',
@@ -234,6 +236,14 @@ const serverLayout = {
     verified: { name: '✅ Zweryfikowany', color: 0x2ecc71, hoist: false, permissions: [] },
   },
   categories: [
+    {
+      emoji: '👋',
+      name: 'WITAMY',
+      channels: [
+        { emoji: '👋', name: 'witamy', mode: 'readonly', setting: 'welcomeChannelId' },
+        { emoji: '📩', name: 'zaproszenia', mode: 'readonly', setting: 'invitesChannelId' },
+      ],
+    },
     {
       emoji: '📌',
       name: 'WAŻNE',
@@ -317,6 +327,8 @@ function guild(id) {
   g.stats ??= { opened: 0, closed: 0 };
   g.stats.done ??= 0;
   g.stats.lc ??= 0;
+  g.invites ??= {};
+  g.joins ??= {};
   return g;
 }
 
@@ -335,6 +347,8 @@ const openTicketsOf = (guildId, userId) => Object.values(guild(guildId).tickets)
 // „Message Content Intent” (Developer Portal → Bot) pozwala sprawdzić, czy rep zaczyna się od „+rep”.
 // Jeśli nie jest włączony, bot i tak wystartuje — wtedy rep musi tylko oznaczać sprzedawcę.
 let messageContentOn = true;
+// „Server Members Intent” jest potrzebny do powitań i zaproszeń.
+let membersIntentOn = true;
 let botClient;
 let loopsStarted = false;
 
@@ -1618,6 +1632,152 @@ async function onGenerateButton(i, action, ownerId) {
   }
 }
 
+// ═══ POWITANIA I ZAPROSZENIA ═══════════════════════════════════════════
+
+const inviteTotal = (st) => (st ? st.regular - st.left + st.bonus : 0);
+const emptyInvites = () => ({ regular: 0, left: 0, fake: 0, bonus: 0 });
+
+function welcomeView(member) {
+  const b = box();
+  text(b, title('Nowa osoba', '👋'));
+  sep(b);
+  header(
+    b,
+    '>>> ' +
+      [
+        point(`Hej ${member}! Super, że wpadłeś/aś na **${brand.name}.**`),
+        point(`Właśnie stałeś/aś się naszym **${member.guild.memberCount}. członkiem.**`),
+        point('Mamy nadzieję, że **zostaniesz u nas** na stałe!'),
+      ].join('\n'),
+    member.user.displayAvatarURL({ size: 256 }),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+/** Skąd przyszła nowa osoba: link własny serwera, zaproszenie od kogoś albo nie wiadomo. */
+function joinSource(member, g, found) {
+  if (found.vanity) return `przez link **.gg/${member.guild.vanityURLCode}**`;
+  if (found.inviterId) return `z zaproszenia od <@${found.inviterId}> — ma teraz **${inviteTotal(g.invites[found.inviterId])}** zaproszeń`;
+  if (found.code) return `przez link **.gg/${found.code}**`;
+  return '*(nie udało się ustalić, przez który link)*';
+}
+
+function inviteLogView(member, g, found) {
+  const b = box();
+  text(b, title('Zaproszenia', '📩'));
+  sep(b);
+  const lines = [point(`${member} właśnie **zawitał/a** do nas ${joinSource(member, g, found)}`)];
+  if (g.joins[member.id]?.fake) lines.push(point(`⚠️ Nowe konto (młodsze niż ${fakeAccountDays} dni) — nie liczy się do zaproszeń.`));
+  text(b, '>>> ' + lines.join('\n'));
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function invitesView(user, st) {
+  const stats = st ?? emptyInvites();
+  const b = box();
+  text(b, title('Zaproszenia', '📩'));
+  sep(b);
+  header(
+    b,
+    '>>> ' +
+      [
+        point(`${user} ma **${inviteTotal(stats)}** zaproszeń`),
+        row('✅ Prawdziwe', `\`${stats.regular}\``),
+        row('🚪 Wyszło', `\`${stats.left}\``),
+        row('⚠️ Fałszywe', `\`${stats.fake}\``),
+        row('🎁 Bonus', `\`${stats.bonus}\``),
+      ].join('\n'),
+    user.displayAvatarURL({ size: 256 }),
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function invitesRanking(g) {
+  const top = Object.entries(g.invites)
+    .map(([id, st]) => [id, inviteTotal(st)])
+    .filter(([, n]) => n > 0)
+    .sort((a, b2) => b2[1] - a[1])
+    .slice(0, 10);
+  const medals = ['🥇', '🥈', '🥉'];
+  const b = box(colors.gold);
+  text(b, title('Ranking zaproszeń', '🏆'));
+  sep(b);
+  text(
+    b,
+    top.length
+      ? '>>> ' + top.map(([id, n], idx) => `${medals[idx] ?? `\`${idx + 1}.\``} ${x} <@${id}> ${style.arrow} **${n}** zaproszeń`).join('\n')
+      : '*Nikt jeszcze nikogo nie zaprosił.*',
+  );
+  sep(b);
+  footer(b);
+  return b;
+}
+
+// Pamięć użyć linków — po wejściu nowej osoby porównujemy, który link zyskał użycie.
+const inviteCache = new Map(); // guildId → Map(code → uses)
+const vanityCache = new Map(); // guildId → uses
+
+async function cacheInvites(discordGuild) {
+  const invites = await discordGuild.invites.fetch().catch(() => null);
+  if (!invites) return null;
+  inviteCache.set(discordGuild.id, new Map([...invites.values()].map((inv) => [inv.code, inv.uses ?? 0])));
+  if (discordGuild.vanityURLCode) {
+    const vanity = await discordGuild.fetchVanityData().catch(() => null);
+    if (vanity) vanityCache.set(discordGuild.id, vanity.uses);
+  }
+  return invites;
+}
+
+async function findUsedInvite(discordGuild) {
+  const before = inviteCache.get(discordGuild.id) ?? new Map();
+  const vanityBefore = vanityCache.get(discordGuild.id);
+  const invites = await cacheInvites(discordGuild);
+  if (!invites) return { unknown: true };
+  const used = [...invites.values()].find((inv) => (inv.uses ?? 0) > (before.get(inv.code) ?? 0));
+  if (used) return { inviterId: used.inviter?.id ?? null, code: used.code };
+  // Jednorazowy link znika po użyciu — jeśli zniknął dokładnie jeden, to on.
+  const gone = [...before.keys()].filter((code) => !invites.has(code));
+  if (gone.length === 1) return { code: gone[0] };
+  if (vanityBefore != null && (vanityCache.get(discordGuild.id) ?? 0) > vanityBefore) return { vanity: true };
+  return { unknown: true };
+}
+
+async function sendTo(discordGuild, channelId, payload) {
+  if (!channelId) return;
+  const channel = await discordGuild.channels.fetch(channelId).catch(() => null);
+  await channel?.send(payload).catch((err) => console.error('Powitania/zaproszenia:', err.message));
+}
+
+async function onMemberAdd(member) {
+  const found = await findUsedInvite(member.guild);
+  const fake = Date.now() - member.user.createdTimestamp < fakeAccountDays * 86_400_000;
+  const g = updateGuild(member.guild.id, (gg) => {
+    gg.joins[member.id] = { inviterId: found.inviterId ?? null, fake, at: Date.now() };
+    // Boty i własne linki się nie liczą.
+    if (!member.user.bot && found.inviterId && found.inviterId !== member.id) {
+      const st = (gg.invites[found.inviterId] ??= emptyInvites());
+      if (fake) st.fake++;
+      else st.regular++;
+    }
+  });
+  await sendTo(member.guild, g.settings.welcomeChannelId, { components: [welcomeView(member)], flags: V2, allowedMentions: { users: [member.id] } });
+  await sendTo(member.guild, g.settings.invitesChannelId, { components: [inviteLogView(member, g, found)], flags: V2, allowedMentions: { parse: [] } });
+}
+
+function onMemberRemove(member) {
+  updateGuild(member.guild.id, (gg) => {
+    const entry = gg.joins[member.id];
+    if (entry?.inviterId && !entry.left && !entry.fake && gg.invites[entry.inviterId]) gg.invites[entry.inviterId].left++;
+    if (entry) entry.left = true;
+  });
+}
+
 // ═══ KOMENDY SLASH ═════════════════════════════════════════════════════
 
 const replyOk = (i, content, flags = V2_EPHEMERAL) => i.reply({ components: [ok(content)], flags, allowedMentions: { parse: [] } });
@@ -1650,6 +1810,8 @@ command(
     .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów i transcriptów').addChannelTypes(ChannelType.GuildText).setRequired(true))
     .addChannelOption((o) => o.setName('opinie').setDescription('Kanał, na który trafiają opinie').addChannelTypes(ChannelType.GuildText))
     .addChannelOption((o) => o.setName('boosty').setDescription('Kanał podziękowań za boosty').addChannelTypes(ChannelType.GuildText))
+    .addChannelOption((o) => o.setName('powitania').setDescription('Kanał powitań nowych osób').addChannelTypes(ChannelType.GuildText))
+    .addChannelOption((o) => o.setName('zaproszenia').setDescription('Kanał z informacją, kto kogo zaprosił').addChannelTypes(ChannelType.GuildText))
     .addChannelOption((o) => o.setName('legitcheck').setDescription('Kanał legit checków (rep po zrealizowanym zamówieniu)').addChannelTypes(ChannelType.GuildText))
     .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
     .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
@@ -1663,6 +1825,8 @@ command(
       st.reviewChannelId = i.options.getChannel('opinie')?.id ?? st.reviewChannelId ?? null;
       st.boostChannelId = i.options.getChannel('boosty')?.id ?? st.boostChannelId ?? null;
       st.lcChannelId = i.options.getChannel('legitcheck')?.id ?? st.lcChannelId ?? null;
+      st.welcomeChannelId = i.options.getChannel('powitania')?.id ?? st.welcomeChannelId ?? null;
+      st.invitesChannelId = i.options.getChannel('zaproszenia')?.id ?? st.invitesChannelId ?? null;
       st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
       st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
       st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
@@ -1681,6 +1845,8 @@ command(
                 row('⭐ Opinie', ch(s.reviewChannelId)),
                 row('🚀 Boosty', ch(s.boostChannelId)),
                 row('✅ Legit check', ch(s.lcChannelId)),
+                row('👋 Powitania', ch(s.welcomeChannelId)),
+                row('📩 Zaproszenia', ch(s.invitesChannelId)),
                 row('✅ Rola za regulamin', s.rulesRoleId ? `<@&${s.rulesRoleId}>` : '`—`'),
                 row('🔢 Liczniki kanałów', s.counters ? '`włączone`' : '`wyłączone`'),
                 row('🎫 Limit ticketów', `\`${s.maxOpen}\``),
@@ -1878,6 +2044,45 @@ command(
     await (await channel?.messages.fetch(review.messageId).catch(() => null))?.delete().catch(() => {});
     await refreshPanel(i.client, i.guildId, 'opinie');
     return replyOk(i, `Usunięto opinię od <@${review.userId}>.`);
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('zaproszenia')
+    .setDescription('Licznik zaproszeń')
+    .setDMPermission(false)
+    .addSubcommand((sub) =>
+      sub
+        .setName('sprawdz')
+        .setDescription('Ile osób zaprosił użytkownik')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Kogo sprawdzić (domyślnie Ty)')),
+    )
+    .addSubcommand((sub) => sub.setName('ranking').setDescription('Top 10 zapraszających'))
+    .addSubcommand((sub) =>
+      sub
+        .setName('bonus')
+        .setDescription('Dodaj lub odejmij zaproszenia (admin)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Komu').setRequired(true))
+        .addIntegerOption((o) => o.setName('ilosc').setDescription('Ile (ujemna liczba odejmuje)').setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('reset')
+        .setDescription('Wyzeruj zaproszenia użytkownika (admin)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Komu').setRequired(true)),
+    ),
+  async (i) => {
+    const sub = i.options.getSubcommand();
+    if (sub === 'ranking') return i.reply({ components: [invitesRanking(guild(i.guildId))], flags: V2, allowedMentions: { parse: [] } });
+    const user = i.options.getUser('uzytkownik') ?? i.user;
+    if (sub === 'sprawdz') return i.reply({ components: [invitesView(user, guild(i.guildId).invites[user.id])], flags: V2, allowedMentions: { parse: [] } });
+    if (!i.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return replyFail(i, 'Potrzebujesz uprawnienia **Zarządzanie serwerem**.');
+    updateGuild(i.guildId, (g) => {
+      if (sub === 'reset') g.invites[user.id] = emptyInvites();
+      else (g.invites[user.id] ??= emptyInvites()).bonus += i.options.getInteger('ilosc');
+    });
+    return i.reply({ components: [invitesView(user, guild(i.guildId).invites[user.id])], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
   },
 );
 
@@ -2398,7 +2603,8 @@ async function generatorTest() {
   assert(deleted.includes('old1') && deleted.includes('oldcat'), 'stare kanały usunięte');
   assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
   assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
-  assert(cats.length === 7 && chans.length === 16, `7 kategorii i 16 kanałów (${cats.length}/${chans.length})`);
+  assert(cats.length === 8 && chans.length === 18, `8 kategorii i 18 kanałów (${cats.length}/${chans.length})`);
+  assert(['👋┃witamy', '📩┃zaproszenia'].every((n) => created.find((item) => item.id === byName(n).parent)?.name === '━━ 👋 WITAMY ━━'), 'WITAMY: witamy i zaproszenia');
   assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 📂 OTWARTE TICKETY ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
   const parentOf = (name) => created.find((item) => item.id === byName(name).parent)?.name;
   assert(['📜┃regulamin', '📢┃ogłoszenia', '💰┃cennik', '🎉┃konkursy', '🚀┃boosty'].every((n) => parentOf(n) === '━━ 📌 WAŻNE ━━'), 'WAŻNE: regulamin, ogłoszenia, cennik, konkursy, boosty');
@@ -2423,6 +2629,7 @@ async function generatorTest() {
   assert(s.logChannelId === byName('📁┃logi').id && s.lcChannelId === byName('✅┃legit-check→0').id, 'logi i legit check ustawione');
   assert(s.reviewChannelId === byName('⭐┃opinie→0').id && s.boostChannelId === byName('🚀┃boosty').id, 'opinie i boosty ustawione');
   assert(s.staffRoleId && s.rulesRoleId, 'role staff i regulaminu ustawione');
+  assert(s.welcomeChannelId === byName('👋┃witamy').id && s.invitesChannelId === byName('📩┃zaproszenia').id, 'powitania i zaproszenia ustawione');
   assert(report.panels.length === 6 && ['📜┃regulamin', '💰┃cennik', '🎫┃tickety', '⭐┃opinie→0', '🤔┃czy-legit→0', '✅┃legit-check→0'].every((n) => byName(n).sent.length === 1), '6 paneli wysłanych');
   assert(JSON.stringify(byName('📜┃regulamin').sent[0].components[0].toJSON()).includes('rules:accept'), 'regulamin z przyciskiem akceptacji');
   assert(byName('💬┃staff-czat').sent.length === 1 && dms.some(([t]) => t === 'dm'), 'podsumowanie na staff-czat i w DM');
@@ -2430,7 +2637,7 @@ async function generatorTest() {
   assert(openTicketsOf(GID, 'u').length === 0, 'klient może otworzyć nowy ticket');
 
   delete store.guilds[GID];
-  console.log('✅ Test generatora: 25 sprawdzeń OK');
+  console.log('✅ Test generatora: 27 sprawdzeń OK');
 }
 
 // ═══ REJESTRACJA KOMEND ════════════════════════════════════════════════
@@ -2499,6 +2706,65 @@ async function registerTest() {
   console.log('✅ Test rejestracji komend: bez duplikatów OK');
 }
 
+// ─── Test powitań i zaproszeń (symulacja) ──────────────────────────────
+
+async function welcomeTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test powitań nie przeszedł: ${msg}`);
+  };
+  const GID = 'welcome-guild';
+  const sent = { welcome: [], invites: [] };
+  const invites = new Map([['abc', { code: 'abc', uses: 1, inviter: { id: 'inviter1' } }]]);
+  let vanityUses = 10;
+  const fakeGuild = {
+    id: GID,
+    memberCount: 26,
+    vanityURLCode: 'tanieboty',
+    invites: { fetch: async () => new Map([...invites].map(([k, v]) => [k, { ...v }])) },
+    fetchVanityData: async () => ({ uses: vanityUses }),
+    channels: { fetch: async (id) => ({ send: async (p) => sent[id].push(JSON.stringify(p.components[0].toJSON())) }) },
+  };
+  const mkMember = (id, ageDays) => ({
+    id,
+    guild: fakeGuild,
+    user: { bot: false, createdTimestamp: Date.now() - ageDays * 86_400_000, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png' },
+    toString: () => `<@${id}>`,
+  });
+  const g = guild(GID);
+  Object.assign(g.settings, { welcomeChannelId: 'welcome', invitesChannelId: 'invites' });
+  await cacheInvites(fakeGuild);
+
+  // 1. Wejście z zaproszenia.
+  invites.get('abc').uses = 2;
+  await onMemberAdd(mkMember('new1', 365));
+  assert(g.invites.inviter1.regular === 1, 'zaproszenie policzone');
+  assert(sent.welcome[0].includes('NOWA OSOBA') && sent.welcome[0].includes('26. członkiem') && sent.welcome[0].includes('"type":11'), 'powitanie z avatarem i numerem członka');
+  assert(sent.invites[0].includes('ZAPROSZENIA') && sent.invites[0].includes('<@inviter1>') && sent.invites[0].includes('**1** zaproszeń'), 'log zaproszenia z zapraszającym');
+  assert(!sent.invites[0].includes('"type":11'), 'log zaproszeń bez zdjęcia');
+
+  // 2. Nowe konto → fałszywe zaproszenie.
+  invites.get('abc').uses = 3;
+  await onMemberAdd(mkMember('new2', 1));
+  assert(g.invites.inviter1.fake === 1 && g.invites.inviter1.regular === 1, 'nowe konto liczy się jako fałszywe');
+  assert(sent.invites[1].includes('Nowe konto'), 'ostrzeżenie o nowym koncie');
+
+  // 3. Wyjście → „wyszło”.
+  onMemberRemove(mkMember('new1', 365));
+  assert(g.invites.inviter1.left === 1 && inviteTotal(g.invites.inviter1) === 0, 'wyjście odejmuje zaproszenie');
+
+  // 4. Link własny serwera.
+  vanityUses = 11;
+  await onMemberAdd(mkMember('new3', 365));
+  assert(sent.invites[2].includes('.gg/tanieboty'), 'wejście przez link własny serwera');
+
+  // 5. Widoki komendy /zaproszenia.
+  invitesView({ displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png', toString: () => '<@inviter1>' }, g.invites.inviter1).toJSON();
+  invitesRanking(g).toJSON();
+
+  delete store.guilds[GID];
+  console.log('✅ Test powitań i zaproszeń: 5 scenariuszy OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
@@ -2506,6 +2772,7 @@ if (process.argv.includes('--check')) {
   await flowTest();
   await generatorTest();
   await registerTest();
+  await welcomeTest();
   process.exit(0);
 }
 
@@ -2527,6 +2794,12 @@ async function onReady(ready) {
   if (!messageContentOn) {
     console.warn('⚠️ „Message Content Intent” jest wyłączony — bot nie sprawdzi „+rep”, tylko oznaczenie sprzedawcy. Włącz go w Developer Portal → Bot.');
   }
+  if (!membersIntentOn) {
+    console.warn('⚠️ „Server Members Intent” jest wyłączony — powitania i zaproszenia nie działają. Włącz go w Developer Portal → Bot i zrestartuj bota.');
+  }
+  for (const g of ready.guilds.cache.values()) {
+    if (!(await cacheInvites(g))) console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
+  }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
   if (!loopsStarted) {
     loopsStarted = true;
@@ -2547,27 +2820,47 @@ async function onReady(ready) {
 
 const isDisallowedIntents = (err) => err?.code === 4014 || /disallowed|privileged intent/i.test(String(err?.message));
 
-function start(withContent) {
-  messageContentOn = withContent;
-  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions];
-  if (withContent) intents.push(GatewayIntentBits.MessageContent);
-  botClient = new Client({ intents, partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User] });
+// Kolejne próby logowania, gdy uprzywilejowane intenty nie są włączone w Developer Portal.
+const intentAttempts = [
+  { content: true, members: true },
+  { content: false, members: true },
+  { content: true, members: false },
+  { content: false, members: false },
+];
+
+function start(attempt = 0) {
+  const { content, members } = intentAttempts[attempt];
+  messageContentOn = content;
+  membersIntentOn = members;
+  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildInvites];
+  if (content) intents.push(GatewayIntentBits.MessageContent);
+  if (members) intents.push(GatewayIntentBits.GuildMembers);
+  botClient = new Client({ intents, partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User, Partials.GuildMember] });
 
   botClient.once(Events.ClientReady, onReady);
   botClient.on(Events.InteractionCreate, onInteraction);
   botClient.on(Events.MessageCreate, (m) => onMessage(m).catch(console.error));
   botClient.on(Events.MessageReactionAdd, (r, u) => onLegitReaction(r, u, true).catch(console.error));
   botClient.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
+  botClient.on(Events.InviteCreate, (inv) => inviteCache.get(inv.guild?.id)?.set(inv.code, inv.uses ?? 0));
+  botClient.on(Events.InviteDelete, (inv) => inviteCache.get(inv.guild?.id)?.delete(inv.code));
+  botClient.on(Events.GuildCreate, (g) => cacheInvites(g));
+  if (members) {
+    botClient.on(Events.GuildMemberAdd, (m) => onMemberAdd(m).catch(console.error));
+    botClient.on(Events.GuildMemberRemove, (m) => onMemberRemove(m));
+  }
 
+  let switched = false;
   const fallback = () => {
-    if (!messageContentOn) return;
-    console.warn('⚠️ „Message Content Intent” nie jest włączony w Developer Portal — uruchamiam bota bez niego.');
+    if (switched || attempt + 1 >= intentAttempts.length) return;
+    switched = true;
+    console.warn('⚠️ Część uprzywilejowanych intentów nie jest włączona w Developer Portal — próbuję uruchomić bota bez nich.');
     botClient.destroy();
-    start(false);
+    start(attempt + 1);
   };
   botClient.on(Events.ShardDisconnect, (ev) => ev?.code === 4014 && fallback());
   botClient.login(DISCORD_TOKEN).catch((err) => {
-    if (withContent && (isDisallowedIntents(err) || !messageContentOn)) return fallback();
+    if (isDisallowedIntents(err) || switched) return fallback();
     console.error('Logowanie nie powiodło się:', err.message);
     process.exit(1);
   });
@@ -2581,4 +2874,4 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-start(true);
+start();
