@@ -203,8 +203,9 @@ const reviewProducts = {
 // Jak często jedna osoba może dodać opinię (minuty).
 const reviewCooldownMinutes = 60;
 
-// „Czy legit?”: wyciszenie za ❌ (minuty, 0 = wyłączone). Staff nie jest wyciszany.
-const legitTimeoutMinutes = 10;
+// „Czy legit?”: reakcja ❌ jest zawsze usuwana, a autor dostaje przerwę (dni, 0 = bez przerwy, maks. 28).
+// Staff i admini nie dostają przerwy (Discord i tak nie pozwala wyciszyć właściciela ani administratorów).
+const legitTimeoutDays = 7;
 // Nazwy kanałów z licznikiem ({n} = liczba). Aktualizowane co 10 minut (limit Discorda).
 const counterNames = {
   legit: '🤔┃czy-legit→{n}',
@@ -227,26 +228,26 @@ const serverLayout = {
   },
   categories: [
     {
-      emoji: '📢',
-      name: 'INFORMACJE',
+      emoji: '📌',
+      name: 'WAŻNE',
       channels: [
         { emoji: '📜', name: 'regulamin', mode: 'readonly', panel: 'regulamin' },
         { emoji: '📢', name: 'ogłoszenia', mode: 'readonly' },
         { emoji: '💰', name: 'cennik', mode: 'readonly', panel: 'cennik' },
+        { emoji: '🎉', name: 'konkursy', mode: 'readonly' },
         { emoji: '🚀', name: 'boosty', mode: 'readonly', setting: 'boostChannelId' },
       ],
     },
     {
-      emoji: '🛒',
-      name: 'SKLEP',
+      emoji: '🤝',
+      name: 'ZAUFANIE',
       channels: [
-        { emoji: '🎫', name: 'tickety', mode: 'readonly', panel: 'tickety' },
-        { counter: 'reviews', mode: 'readonly', panel: 'opinie', setting: 'reviewChannelId' },
         { counter: 'legitCheck', mode: 'open', setting: 'lcChannelId' },
+        { counter: 'reviews', mode: 'readonly', panel: 'opinie', setting: 'reviewChannelId' },
         { counter: 'legit', mode: 'reactions', panel: 'legit' },
       ],
     },
-    { emoji: '🎉', name: 'EVENTY', channels: [{ emoji: '🎉', name: 'konkursy', mode: 'readonly' }] },
+    { emoji: '🎫', name: 'TICKETY', channels: [{ emoji: '🎫', name: 'tickety', mode: 'readonly', panel: 'tickety' }] },
     {
       emoji: '💬',
       name: 'SPOŁECZNOŚĆ',
@@ -264,7 +265,8 @@ const serverLayout = {
         { emoji: '🎵', name: 'muzyka', mode: 'voice' },
       ],
     },
-    { emoji: '🎫', name: 'TICKETY', private: true, setting: 'categoryId', channels: [] },
+    // Tu bot tworzy kanały ticketów — widoczne tylko dla Administracji i Staffu (+ autora ticketu).
+    { emoji: '📂', name: 'OTWARTE TICKETY', private: true, setting: 'categoryId', channels: [] },
     {
       emoji: '🛡️',
       name: 'ADMINISTRACJA',
@@ -529,8 +531,8 @@ function legitPanel(logo) {
     ].join('\n'),
     logo,
   );
-  if (legitTimeoutMinutes > 0) {
-    text(b, `> -# Zaznaczenie reakcji ❌ bez dowodu skutkuje **automatycznym tymczasowym wyciszeniem!**`);
+  if (legitTimeoutDays > 0) {
+    text(b, `> -# Zaznaczenie reakcji ❌ bez dowodu skutkuje **automatyczną przerwą na ${legitTimeoutDays} dni!** Dowody zgłaszaj w tickecie.`);
   }
   sep(b);
   footer(b);
@@ -1230,11 +1232,20 @@ async function updateCounters(client) {
 }
 
 function counterLoop(client) {
-  updateCounters(client).catch(console.error);
+  syncLegitVotes(client)
+    .catch(console.error)
+    .then(() => updateCounters(client))
+    .catch(console.error);
   setInterval(() => updateCounters(client).catch(console.error), 10 * 60_000);
 }
 
 // ═══ CZY LEGIT ═════════════════════════════════════════════════════════
+
+/** Liczba reakcji bez reakcji samego bota. */
+function votesOf(message, name) {
+  const r = message.reactions.cache.get(name);
+  return r ? Math.max(0, r.count - (r.me ? 1 : 0)) : 0;
+}
 
 async function onLegitReaction(reaction, user, added) {
   if (user.bot) return;
@@ -1245,30 +1256,45 @@ async function onLegitReaction(reaction, user, added) {
   const g = guild(message.guildId);
   if (g.panels.legit?.messageId !== message.id) return;
   const emoji = reaction.emoji.name;
-  if (emoji !== '✅' && emoji !== '❌') return;
 
-  // Liczymy głosy bez reakcji samego bota i zapisujemy w bazie od razu.
-  const votes = (name) => {
-    const r = message.reactions.cache.get(name);
-    return r ? Math.max(0, r.count - (r.me ? 1 : 0)) : 0;
-  };
-  updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votes('✅'), no: votes('❌') }));
-
-  if (emoji === '❌' && added && legitTimeoutMinutes > 0) {
+  if (emoji === '❌' && added) {
+    // ❌ zawsze znika, a autor (poza staffem) dostaje przerwę.
+    await reaction.users.remove(user.id).catch((err) => console.warn('Usuwanie ❌:', err.message));
     const member = await message.guild.members.fetch(user.id).catch(() => null);
-    if (!member || isStaff(member, g.settings) || !member.moderatable) return;
-    await member.timeout(legitTimeoutMinutes * 60_000, 'Czy legit: reakcja ❌ bez dowodu').catch((err) => console.warn('Wyciszenie:', err.message));
-    await user
-      .send({
-        components: [
-          notice(
-            `### 🔇 ${x} Zostałeś/aś wyciszony/a na ${legitTimeoutMinutes} min\nReakcja ❌ na **czy legit** wymaga dowodu. Jeśli go masz — otwórz ticket.`,
-            colors.warning,
-          ),
-        ],
-        flags: V2,
-      })
-      .catch(() => {});
+    if (legitTimeoutDays > 0 && member && !isStaff(member, g.settings) && member.moderatable) {
+      const timedOut = await member
+        .timeout(legitTimeoutDays * 86_400_000, 'Czy legit: reakcja ❌ bez dowodu')
+        .then(() => true)
+        .catch((err) => (console.warn('Przerwa:', err.message), false));
+      if (timedOut) {
+        await user
+          .send({
+            components: [
+              notice(
+                `### 🔇 ${x} Otrzymałeś/aś przerwę na ${legitTimeoutDays} dni\nReakcja ❌ na **czy legit** wymaga dowodu. Jeśli go masz — napisz do administracji.`,
+                colors.warning,
+              ),
+            ],
+            flags: V2,
+          })
+          .catch(() => {});
+      }
+    }
+    return;
+  }
+
+  // ✅ — zapisujemy liczbę od razu; nazwa kanału aktualizuje się automatycznie co 10 minut.
+  if (emoji === '✅') updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, '✅'), no: 0 }));
+}
+
+/** Przy starcie: przelicza ✅ na panelu (reakcje dodane, gdy bot był wyłączony). */
+async function syncLegitVotes(client) {
+  for (const [guildId, g] of Object.entries(store.guilds)) {
+    const ref = g.panels?.legit;
+    if (!ref || !client.guilds.cache.has(guildId)) continue;
+    const channel = await client.channels.fetch(ref.channelId).catch(() => null);
+    const message = await channel?.messages.fetch(ref.messageId).catch(() => null);
+    if (message) updateGuild(guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, '✅'), no: 0 }));
   }
 }
 
@@ -2159,24 +2185,36 @@ async function flowTest() {
   assert(isValidRep({ content: '', mentions: { users: { has: (id) => id === STAFF } } }, t), 'bez intentu: oznaczenie sprzedawcy wystarcza');
   messageContentOn = true;
 
-  // 10. „Czy legit?” — głosy zapisują się od razu, ❌ wycisza.
+  // 10. „Czy legit?” — ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
   g.panels.legit = { channelId: LEGIT_CH, messageId: 'legit-msg' };
   const reactions = new Map([
     ['✅', { count: 405, me: true }],
     ['❌', { count: 2, me: true }],
   ]);
+  const removed = [];
   const reaction = (name) => ({
     partial: false,
     emoji: { name },
+    users: { remove: async (id) => removed.push([name, id]) },
     message: { id: 'legit-msg', partial: false, guildId: GID, guild: fakeGuild, channelId: LEGIT_CH, client: fakeClient, reactions: { cache: reactions } },
   });
   await onLegitReaction(reaction('✅'), mkUser('fan'), true);
-  assert(g.legitVotes.yes === 404 && g.legitVotes.no === 1, 'głosy zapisane w bazie bez reakcji bota');
+  assert(g.legitVotes.yes === 404, 'głosy ✅ zapisane w bazie bez reakcji bota');
   await onLegitReaction(reaction('❌'), mkUser('hater'), true);
-  assert(log.some(([type, id]) => type === 'timeout' && id === 'hater'), '❌ wycisza użytkownika');
+  assert(removed.some(([e, id]) => e === '❌' && id === 'hater'), '❌ usunięte');
+  const hater = log.find(([type, id]) => type === 'timeout' && id === 'hater');
+  assert(hater && hater[2] === 7 * 86_400_000, 'przerwa 7 dni za ❌');
+  assert(log.some(([type, id]) => type === 'dm' && id === 'hater'), 'DM o przerwie');
   const timeoutsBefore = log.filter(([type]) => type === 'timeout').length;
   await onLegitReaction(reaction('❌'), mkUser(STAFF), true);
-  assert(log.filter(([type]) => type === 'timeout').length === timeoutsBefore, 'staff nie jest wyciszany');
+  assert(removed.some(([e, id]) => e === '❌' && id === STAFF), '❌ staffu też usunięte');
+  assert(log.filter(([type]) => type === 'timeout').length === timeoutsBefore, 'staff bez przerwy');
+  assert(g.legitVotes.yes === 404, '❌ nie zmienia licznika');
+  reactions.get('✅').count = 404;
+  await onLegitReaction(reaction('✅'), mkUser('fan'), false);
+  assert(g.legitVotes.yes === 403, 'cofnięcie ✅ zmniejsza licznik');
+  reactions.get('✅').count = 405;
+  await onLegitReaction(reaction('✅'), mkUser('fan'), true);
 
   // 11. Liczniki kanałów: nazwy z bazy.
   g.settings.reviewChannelId = null;
@@ -2188,7 +2226,7 @@ async function flowTest() {
   assert(log.filter(([type]) => type === 'rename').length === renames, 'bez zmian liczby nie zmieniamy nazwy');
 
   delete store.guilds[GID];
-  console.log('✅ Test przepływu: 11 scenariuszy OK');
+  console.log('✅ Test przepływu: 11 scenariuszy (w tym czy legit: ✅, ❌, staff, cofnięcie) OK');
 }
 
 
@@ -2252,7 +2290,11 @@ async function generatorTest() {
   assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
   assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
   assert(cats.length === 7 && chans.length === 16, `7 kategorii i 16 kanałów (${cats.length}/${chans.length})`);
-  assert(byName('━━ 📢 INFORMACJE ━━') && byName('━━ 🛡️ ADMINISTRACJA ━━'), 'nazwy kategorii w stylu ━━');
+  assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 📂 OTWARTE TICKETY ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
+  const parentOf = (name) => created.find((item) => item.id === byName(name).parent)?.name;
+  assert(['📜┃regulamin', '📢┃ogłoszenia', '💰┃cennik', '🎉┃konkursy', '🚀┃boosty'].every((n) => parentOf(n) === '━━ 📌 WAŻNE ━━'), 'WAŻNE: regulamin, ogłoszenia, cennik, konkursy, boosty');
+  assert(['✅┃legit-check→0', '⭐┃opinie→0', '🤔┃czy-legit→0'].every((n) => parentOf(n) === '━━ 🤝 ZAUFANIE ━━'), 'ZAUFANIE: legit-check, opinie, czy-legit');
+  assert(parentOf('🎫┃tickety') === '━━ 🎫 TICKETY ━━', 'panel ticketów w osobnej kategorii');
   assert(byName('🎉┃konkursy') && byName('📜┃regulamin') && byName('⭐┃opinie→0') && byName('🤔┃czy-legit→0') && byName('✅┃legit-check→0'), 'nazwy kanałów w stylu ┃');
   assert(byName('🔊┃rozmowy').type === ChannelType.GuildVoice, 'kanały głosowe');
   assert([...roles.values()].filter((r) => r.name !== '@everyone').length === 4, '4 role');
@@ -2260,14 +2302,15 @@ async function generatorTest() {
 
   const everyoneDeny = (ch) => ch.permissionOverwrites.find((o) => o.id === 'everyone').deny;
   assert(everyoneDeny(byName('📁┃logi')).includes(F.ViewChannel), 'logi ukryte przed wszystkimi');
-  assert(everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria ticketów prywatna');
+  assert(everyoneDeny(byName('━━ 📂 OTWARTE TICKETY ━━')).includes(F.ViewChannel), 'kategoria otwartych ticketów prywatna');
+  assert(!everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria z panelem ticketów publiczna');
   assert(everyoneDeny(byName('📜┃regulamin')).includes(F.SendMessages), 'regulamin tylko do czytania');
   assert(!everyoneDeny(byName('✅┃legit-check→0')).includes(F.SendMessages), 'na legit-check można pisać');
   assert(!everyoneDeny(byName('💬┃czat')).includes(F.SendMessages), 'na czacie można pisać');
   assert(byName('📜┃regulamin').permissionOverwrites.some((o) => o.id === 'bot' && o.allow.includes(F.SendMessages)), 'bot może pisać wszędzie');
 
   const s = guild(GID).settings;
-  assert(s.categoryId === byName('━━ 🎫 TICKETY ━━').id, 'kategoria ticketów ustawiona');
+  assert(s.categoryId === byName('━━ 📂 OTWARTE TICKETY ━━').id, 'tickety tworzą się w OTWARTE TICKETY');
   assert(s.logChannelId === byName('📁┃logi').id && s.lcChannelId === byName('✅┃legit-check→0').id, 'logi i legit check ustawione');
   assert(s.reviewChannelId === byName('⭐┃opinie→0').id && s.boostChannelId === byName('🚀┃boosty').id, 'opinie i boosty ustawione');
   assert(s.staffRoleId && s.rulesRoleId, 'role staff i regulaminu ustawione');
@@ -2278,7 +2321,7 @@ async function generatorTest() {
   assert(openTicketsOf(GID, 'u').length === 0, 'klient może otworzyć nowy ticket');
 
   delete store.guilds[GID];
-  console.log('✅ Test generatora: 21 sprawdzeń OK');
+  console.log('✅ Test generatora: 25 sprawdzeń OK');
 }
 
 // ═══ START ═════════════════════════════════════════════════════════════

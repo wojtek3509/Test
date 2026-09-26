@@ -9,7 +9,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 🎫 Tickety | `/panel typ:tickety` | Menu kategorii: Bot discord, Hosting, Pytanie, Współpraca. Formularz, prywatny kanał i przejmowanie. Transcript powstaje dopiero po zamknięciu i trafia do logów oraz do klienta w DM. |
 | 📜 Regulamin | `/panel typ:regulamin` | Lista §1–§4 i menu, które pokazuje wybraną sekcję. Opcjonalny przycisk „Akceptuję regulamin” nadający rolę. |
 | ⭐ Opinie | `/panel typ:opinie` | Przycisk „Wystaw opinię” i formularz: produkt, **jakość bota**, **czas realizacji**, **obsługa klienta** (1–5 ⭐) i treść. Panel pokazuje średnie ocen na żywo. Po zamknięciu ticketu klient dostaje w DM przycisk do opinii. |
-| 🤔 Czy legit? | `/panel typ:legit` | Reakcje ✅ ❌ zapisywane od razu w bazie, licznik w nazwie kanału (`czy-legit→404`, aktualizacja co 10 minut) i automatyczne wyciszenie za ❌. |
+| 🤔 Czy legit? | `/panel typ:legit` | ✅ jest liczone (bez reakcji bota) i zapisywane w bazie, a nazwa kanału (`czy-legit→404`) aktualizuje się sama co 10 minut. ❌ jest zawsze usuwane, a autor dostaje przerwę na 7 dni. Staff i admini nie dostają przerwy. |
 | 💰 Cennik | `/panel typ:cennik` | Ceny botów i hostingu oraz przyciski „Zamów bota” / „Kup hosting”, które od razu otwierają ticket. |
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
@@ -55,7 +55,7 @@ Na początku `index.js`, w sekcji **KONFIGURACJA**:
 - `pricing`: cennik.
 - `reviewCriteria` / `reviewProducts`: oceny w opiniach.
 - `payments`: metody płatności w formularzu „Zrealizowane”.
-- `legitTimeoutMinutes`: długość wyciszenia za ❌ (`0` wyłącza wyciszenie).
+- `legitTimeoutDays`: długość przerwy za ❌ w dniach (`0` wyłącza przerwę).
 - `counterNames`: format nazw kanałów z licznikiem.
 - `serverLayout`: role, kategorie i kanały tworzone przez `/generuj`.
 
