@@ -1763,6 +1763,8 @@ async function onReady(c) {
   const rest = new REST().setToken(DISCORD_TOKEN);
   const registerGlobal = async () => {
     await rest.put(Routes.applicationCommands(c.user.id), { body });
+    // Stare komendy serwerowe dublowałyby globalne — czyścimy je.
+    for (const id of c.guilds.cache.keys()) await rest.put(Routes.applicationGuildCommands(c.user.id, id), { body: [] }).catch(() => {});
     console.log(`✅ Zarejestrowano ${body.length} komend globalnie (mogą pojawić się z opóźnieniem do ~1h)`);
   };
 
@@ -1774,7 +1776,9 @@ async function onReady(c) {
   try {
     if (!guildId) return await registerGlobal();
     await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), { body });
-    console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId}`);
+    // Stare komendy globalne dublowałyby serwerowe — czyścimy je.
+    await rest.put(Routes.applicationCommands(c.user.id), { body: [] }).catch(() => {});
+    console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId} (stare komendy globalne usunięte)`);
   } catch (err) {
     if (err.code === 50001) {
       console.warn(

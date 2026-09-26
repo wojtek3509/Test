@@ -2396,12 +2396,79 @@ async function generatorTest() {
   console.log('✅ Test generatora: 25 sprawdzeń OK');
 }
 
+// ═══ REJESTRACJA KOMEND ════════════════════════════════════════════════
+
+/**
+ * Komendy mogą być zarejestrowane globalnie albo na konkretnym serwerze. Jeśli istnieją w obu miejscach,
+ * Discord pokazuje je podwójnie — dlatego zawsze czyścimy ten zestaw, którego nie używamy.
+ */
+async function registerCommands(rest, appId, guildId, guildIds, body) {
+  const registerGlobal = async () => {
+    await rest.put(Routes.applicationCommands(appId), { body });
+    // Usuwamy stare komendy serwerowe, żeby nie dublowały globalnych.
+    for (const id of guildIds) await rest.put(Routes.applicationGuildCommands(appId, id), { body: [] }).catch(() => {});
+    console.log(`✅ Zarejestrowano ${body.length} komend globalnie (mogą pojawić się z opóźnieniem do ~1h)`);
+    return 'global';
+  };
+  if (!guildId) return registerGlobal();
+  try {
+    await rest.put(Routes.applicationGuildCommands(appId, guildId), { body });
+  } catch (err) {
+    if (err.code !== 50001) throw err;
+    console.warn(`⚠️ Brak dostępu do serwera ${guildId} — rejestruję komendy globalnie.`);
+    return registerGlobal();
+  }
+  // Usuwamy stare komendy globalne, żeby nie dublowały serwerowych.
+  await rest.put(Routes.applicationCommands(appId), { body: [] });
+  console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId} (stare komendy globalne usunięte)`);
+  return 'guild';
+}
+
+async function registerTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test rejestracji nie przeszedł: ${msg}`);
+  };
+  const mkRest = (failGuild) => {
+    const calls = [];
+    return {
+      calls,
+      put: async (path, { body }) => {
+        if (failGuild && path.includes('/guilds/') && body.length) throw Object.assign(new Error('Missing Access'), { code: 50001 });
+        calls.push([path, body.length]);
+      },
+    };
+  };
+  const body = [{ name: 'a' }, { name: 'b' }];
+  const log = console.log;
+  const warn = console.warn;
+  console.log = console.warn = () => {};
+  try {
+    let rest = mkRest(false);
+    assert((await registerCommands(rest, 'app', 'g1', ['g1'], body)) === 'guild', 'rejestracja na serwerze');
+    assert(rest.calls.some(([r, n]) => r === Routes.applicationGuildCommands('app', 'g1') && n === 2), 'komendy na serwerze');
+    assert(rest.calls.some(([r, n]) => r === Routes.applicationCommands('app') && n === 0), 'globalne wyczyszczone');
+
+    rest = mkRest(false);
+    assert((await registerCommands(rest, 'app', null, ['g1', 'g2'], body)) === 'global', 'rejestracja globalna');
+    assert(rest.calls.some(([r, n]) => r === Routes.applicationCommands('app') && n === 2), 'komendy globalne');
+    assert(['g1', 'g2'].every((g) => rest.calls.some(([r, n]) => r === Routes.applicationGuildCommands('app', g) && n === 0)), 'serwerowe wyczyszczone');
+
+    rest = mkRest(true);
+    assert((await registerCommands(rest, 'app', 'g1', ['g1'], body)) === 'global', 'brak dostępu → globalnie');
+  } finally {
+    console.log = log;
+    console.warn = warn;
+  }
+  console.log('✅ Test rejestracji komend: bez duplikatów OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
   selfTest();
   await flowTest();
   await generatorTest();
+  await registerTest();
   process.exit(0);
 }
 
@@ -2430,26 +2497,15 @@ async function onReady(ready) {
     counterLoop(ready);
   }
 
-  const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
-  const rest = new REST().setToken(DISCORD_TOKEN);
-  const registerGlobal = async () => {
-    await rest.put(Routes.applicationCommands(ready.user.id), { body });
-    console.log(`✅ Zarejestrowano ${body.length} komend globalnie (mogą pojawić się z opóźnieniem do ~1h)`);
-  };
   let guildId = GUILD_ID;
   if (guildId === ready.user.id) {
     console.warn('⚠️ guildId to ID bota, a nie serwera. Kliknij PPM na ikonę serwera → „Kopiuj ID serwera”.');
     guildId = null;
   }
-  try {
-    if (!guildId) return await registerGlobal();
-    await rest.put(Routes.applicationGuildCommands(ready.user.id, guildId), { body });
-    console.log(`✅ Zarejestrowano ${body.length} komend na serwerze ${guildId}`);
-  } catch (err) {
-    if (err.code !== 50001) return console.error('Rejestracja komend nie powiodła się:', err.message);
-    console.warn(`⚠️ Brak dostępu do serwera ${guildId} — rejestruję komendy globalnie.`);
-    await registerGlobal().catch((e) => console.error('Rejestracja komend nie powiodła się:', e.message));
-  }
+  const body = [...commands.values()].map((cmd) => cmd.data.toJSON());
+  await registerCommands(new REST().setToken(DISCORD_TOKEN), ready.user.id, guildId, [...ready.guilds.cache.keys()], body).catch((err) =>
+    console.error('Rejestracja komend nie powiodła się:', err.message),
+  );
 }
 
 const isDisallowedIntents = (err) => err?.code === 4014 || /disallowed|privileged intent/i.test(String(err?.message));
