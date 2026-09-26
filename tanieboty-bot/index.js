@@ -499,7 +499,7 @@ function reviewCard(review, user) {
   header(
     b,
     [
-      title(`Opinia ${pad(review.number)}`, '⭐'),
+      title('Opinia', '⭐'),
       '>>> ' +
         [
           row('Twórca opinii', `<@${review.userId}>`),
@@ -1154,7 +1154,30 @@ async function onReviewSubmit(i, guildId) {
   review.messageId = msg.id;
   updateGuild(guildId, (gg) => gg.reviews.push(review));
   await i.editReply({ components: [ok(`Dziękujemy za opinię! ${msg.url}`)], flags: V2 });
-  await refreshPanel(i.client, guildId, 'opinie');
+  await movePanelToBottom(i.client, guildId, 'opinie', channel);
+}
+
+// Kolejka na serwer, żeby dwie opinie naraz nie zostawiły dwóch paneli.
+const panelQueues = new Map();
+
+/**
+ * Panel ma być zawsze pod ostatnią wiadomością: usuwamy stary i wysyłamy nowy na dole kanału.
+ * Jeśli panel stoi na innym kanale niż opinie, tylko go odświeżamy.
+ */
+function movePanelToBottom(client, guildId, type, channel) {
+  const previous = panelQueues.get(guildId) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const ref = guild(guildId).panels[type];
+    if (ref && ref.channelId !== channel.id) return refreshPanel(client, guildId, type);
+    if (ref) {
+      const old = await channel.messages.fetch(ref.messageId).catch(() => null);
+      await old?.delete().catch(() => {});
+    }
+    if (ref) await postPanel(client, channel.guild, channel, type);
+  });
+  const settled = next.catch((err) => console.error(`Panel ${type}:`, err.message));
+  panelQueues.set(guildId, settled);
+  return settled;
 }
 
 // ═══ PANELE: WYSYŁANIE I ODŚWIEŻANIE ══════════════════════════════════
@@ -1836,18 +1859,18 @@ command(
       s
         .setName('usun')
         .setDescription('Usuń opinię (np. spam)')
-        .addIntegerOption((o) => o.setName('numer').setDescription('Numer opinii, np. 12').setMinValue(1).setRequired(true)),
+        .addStringOption((o) => o.setName('id').setDescription('ID wiadomości z opinią (PPM na opinię → Kopiuj ID)').setRequired(true)),
     ),
   async (i) => {
-    const number = i.options.getInteger('numer');
+    const id = i.options.getString('id').trim();
     const g = guild(i.guildId);
-    const review = g.reviews.find((r) => r.number === number);
-    if (!review) return replyFail(i, `Nie ma opinii ${pad(number)}.`);
+    const review = g.reviews.find((r) => r.messageId === id);
+    if (!review) return replyFail(i, 'Nie znaleziono opinii o takim ID wiadomości.');
     updateGuild(i.guildId, (gg) => (gg.reviews = gg.reviews.filter((r) => r !== review)));
     const channel = await i.client.channels.fetch(g.settings.reviewChannelId).catch(() => null);
     await (await channel?.messages.fetch(review.messageId).catch(() => null))?.delete().catch(() => {});
     await refreshPanel(i.client, i.guildId, 'opinie');
-    return replyOk(i, `Usunięto opinię ${pad(number)}.`);
+    return replyOk(i, `Usunięto opinię od <@${review.userId}>.`);
   },
 );
 
@@ -2225,8 +2248,57 @@ async function flowTest() {
   await updateCounters(fakeClient);
   assert(log.filter(([type]) => type === 'rename').length === renames, 'bez zmian liczby nie zmieniamy nazwy');
 
+  // 12. Opinie: bez numeru w tytule, panel zawsze na dole (także przy dwóch opiniach naraz).
+  const REV_CH = 'rev-ch';
+  const revMessages = new Map();
+  let revSeq = 0;
+  const revOrder = [];
+  const revChannel = {
+    id: REV_CH,
+    guild: fakeGuild,
+    send: async (p) => {
+      const id = `rev-m${++revSeq}`;
+      const json = JSON.stringify(p.components[0].toJSON());
+      const kind = json.includes('rev:open') ? 'panel' : 'review';
+      const msg = { id, url: `https://discord.com/channels/${GID}/${REV_CH}/${id}`, kind, json, react: async () => {}, delete: async () => revMessages.delete(id) };
+      revMessages.set(id, msg);
+      revOrder.push(id);
+      return msg;
+    },
+    messages: { fetch: async (id) => revMessages.get(id) ?? null },
+  };
+  channels[REV_CH] = revChannel;
+  fakeGuild.iconURL = () => null;
+  fakeClient.user = { id: 'bot', displayAvatarURL: () => null };
+  g.settings.reviewChannelId = REV_CH;
+  const firstPanel = await postPanel(fakeClient, fakeGuild, revChannel, 'opinie');
+  const reviewInteraction = (userId) =>
+    interaction(userId, {
+      fields: {
+        getStringSelectValues: (id) => [id === 'product' ? 'bot' : '5'],
+        getTextInputValue: () => 'Super bot, polecam!',
+      },
+      deferReply: async () => {},
+      editReply: async () => {},
+    });
+  g.reviews = [];
+  users.client2 = mkUser('client2');
+  await Promise.all([onReviewSubmit(reviewInteraction(CLIENT), GID), onReviewSubmit(reviewInteraction('client2'), GID)]);
+  await panelQueues.get(GID);
+  const remaining = [...revMessages.values()];
+  const panelsLeft = remaining.filter((m) => m.kind === 'panel');
+  const reviewsLeft = remaining.filter((m) => m.kind === 'review');
+  assert(!revMessages.has(firstPanel.message.id), 'stary panel usunięty');
+  assert(panelsLeft.length === 1, `dokładnie jeden panel (${panelsLeft.length})`);
+  assert(reviewsLeft.length === 2, 'obie opinie wysłane');
+  const lastId = revOrder.filter((id) => revMessages.has(id)).at(-1);
+  assert(revMessages.get(lastId).kind === 'panel', 'panel jest ostatnią wiadomością');
+  assert(g.panels.opinie.messageId === lastId, 'baza wskazuje nowy panel');
+  assert(!reviewsLeft[0].json.includes('#0001') && reviewsLeft[0].json.includes('OPINIA'), 'tytuł opinii bez numeru');
+  assert(panelsLeft[0].json.includes('`2`'), 'panel pokazuje aktualną liczbę opinii');
+
   delete store.guilds[GID];
-  console.log('✅ Test przepływu: 11 scenariuszy (w tym czy legit: ✅, ❌, staff, cofnięcie) OK');
+  console.log('✅ Test przepływu: 12 scenariuszy (w tym czy legit i opinie z panelem na dole) OK');
 }
 
 
