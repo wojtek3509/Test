@@ -953,7 +953,7 @@ function legitCheckCard(ticket, number, author) {
 }
 
 async function onDoneSubmit(i) {
-  const { ticket, error } = staffTicket(i);
+  const { error } = staffTicket(i);
   if (error) return replyV2(i, fail(error));
   const g = guild(i.guildId);
   const deal = {
