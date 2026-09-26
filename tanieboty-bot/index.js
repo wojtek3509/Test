@@ -40,6 +40,10 @@ const brand = {
   footerEmoji: '💙',
 };
 
+// Zdjęcia (miniaturki) pokazujemy tylko przy osobach: w tickecie, opiniach, boostach i powitaniach.
+// true = panele i statystyki też dostaną logo serwera / bota.
+const panelThumbnails = false;
+
 const style = {
   chevron: '»',
   cross: '×',
@@ -385,7 +389,7 @@ const ok = (content) => notice(`### ✅ ${content}`, colors.success);
 const fail = (content) => notice(`### ❌ ${x} ${content}`, colors.danger);
 
 /** Obrazek do nagłówków: ikona serwera, a gdy jej brak — avatar bota. */
-const logoOf = (g, client) => g?.iconURL?.({ size: 256 }) ?? client?.user?.displayAvatarURL?.({ size: 256 }) ?? null;
+const logoOf = (g, client) => (panelThumbnails ? (g?.iconURL?.({ size: 256 }) ?? client?.user?.displayAvatarURL?.({ size: 256 }) ?? null) : null);
 
 const placeholderNone = `❌ ${x} Nie wybrałeś/aś żadnej kategorii.`;
 
@@ -2146,6 +2150,11 @@ async function flowTest() {
   const cardJson = JSON.stringify(ticketMessage(g.tickets[TICKET_CH], users[CLIENT]).toJSON());
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
+  assert(cardJson.includes('"type":11'), 'ticket pokazuje avatar klienta');
+  const logo = logoOf({ iconURL: () => img }, { user: { displayAvatarURL: () => img } });
+  for (const [type, build] of Object.entries(panelBuilders)) {
+    assert(!JSON.stringify(build(g, logo).toJSON()).includes('"type":11'), `panel ${type} bez zdjęcia bota/serwera`);
+  }
   const modals = [...Object.keys(ticketTypes).map(ticketModal), reviewModal('x'), doneModal(), notDoneModal()];
   const minLengths = JSON.stringify(modals.map((m) => m.toJSON())).match(/"min_length":\d+/g) ?? [];
   assert(minLengths.every((m) => Number(m.split(':')[1]) <= 1), `w formularzach wystarczy 1 znak (${minLengths})`);
