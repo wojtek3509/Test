@@ -716,7 +716,14 @@ const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(
 let makeTranscript = (channel, ticket) => createTranscript(channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
 
 /** Kto zdecydował o wyniku: osoba, która kliknęła „Zrealizowane” / „Niezrealizowane” (albo klient, jeśli sam zamknął). */
+/** Wynik zamknięcia: zakupy → zrealizowane/niezrealizowane, pytania i współpraca → po prostu zamknięte. */
+const resultLabel = (result) => ({ done: '✅ **Zrealizowane**', notdone: '❌ **Niezrealizowane**', closed: '🔒 **Zamknięte**' })[result] ?? '🔒 **Zamknięte**';
+
 function closerRow(ticket) {
+  if (ticket.result === 'closed') {
+    const who = ticket.closedBy === ticket.userId ? 'Zamknął (klient)' : 'Zamknął';
+    return row(who, ticket.closedBy ? `<@${ticket.closedBy}>` : '—');
+  }
   if (ticket.result === 'done') return row('✅ Oznaczył jako zrealizowane', `<@${ticket.decidedBy ?? ticket.deal?.sellerId ?? ticket.closedBy}>`);
   if (!ticket.closedBy) return row('Zamknął', '—');
   if (ticket.closedBy === ticket.userId) return row('Zamknął (klient)', `<@${ticket.closedBy}>`);
@@ -733,7 +740,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
       subtitle ? `-# ${subtitle}` : null,
       '>>> ' +
         [
-          row('Wynik', ticket.result === 'done' ? '✅ **Zrealizowane**' : '❌ **Niezrealizowane**'),
+          row('Wynik', resultLabel(ticket.result)),
           row('Autor', `<@${ticket.userId}>`),
           row('Kategoria', `${t.emoji} ${t.label}`),
           closerRow(ticket),
@@ -858,6 +865,8 @@ async function onCloseRequest(i) {
   if (!ticket || ticket.closedAt) return replyV2(i, fail('To nie jest aktywny kanał ticketu.'));
   const staff = isStaff(i.member, guild(i.guildId).settings);
   if (ticket.userId !== i.user.id && !staff) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+  // Pytania i współpraca: bez „Zrealizowane / Niezrealizowane” — od razu formularz z powodem.
+  if (!ticketTypes[ticket.type].order) return i.showModal(closeReasonModal());
   const b = box(colors.danger);
   if (staff) {
     text(
@@ -881,6 +890,19 @@ async function onCloseRequest(i) {
     );
   }
   await replyV2(i, b);
+}
+
+function closeReasonModal() {
+  return new ModalBuilder()
+    .setCustomId('tk:closesubmit')
+    .setTitle('🔒 Zamknij ticket')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Powód zamknięcia')
+        .setTextInputComponent(
+          new TextInputBuilder().setCustomId('reason').setStyle(TextInputStyle.Paragraph).setPlaceholder('np. Pytanie wyjaśnione').setMaxLength(300),
+        ),
+    );
 }
 
 function doneModal() {
@@ -1073,7 +1095,7 @@ async function closeTicket(i, { reason = null, result = 'notdone' } = {}) {
       notice(
         [
           `## 🔒 ${x} Ticket zamykany`,
-          row('Wynik', result === 'done' ? '✅ Zrealizowane' : '❌ Niezrealizowane'),
+          row('Wynik', resultLabel(result)),
           closerRow({ ...ticket, result, closedBy: i.user.id }),
           reason ? row('Powód', reason) : null,
           '-# Kanał zniknie za kilka sekund…',
@@ -2202,6 +2224,7 @@ async function route(i) {
     }
     if (i.isModalSubmit() && action === 'form') return onTicketForm(i, arg);
     if (i.isModalSubmit() && action === 'donesubmit') return onDoneSubmit(i);
+    if (i.isModalSubmit() && action === 'closesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason'), result: 'closed' });
     if (i.isModalSubmit() && action === 'notdonesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason') || null });
     if (i.isButton()) {
       if (action === 'quick') return onTicketSelect(i, arg);
@@ -2419,7 +2442,7 @@ async function flowTest() {
   for (const [type, build] of Object.entries(panelBuilders)) {
     assert(!JSON.stringify(build(g, logo).toJSON()).includes('"type":11'), `panel ${type} bez zdjęcia bota/serwera`);
   }
-  const modals = [...Object.keys(ticketTypes).map(ticketModal), reviewModal('x'), doneModal(), notDoneModal()];
+  const modals = [...Object.keys(ticketTypes).map(ticketModal), reviewModal('x'), doneModal(), notDoneModal(), closeReasonModal()];
   const minLengths = JSON.stringify(modals.map((m) => m.toJSON())).match(/"min_length":\d+/g) ?? [];
   assert(minLengths.every((m) => Number(m.split(':')[1]) <= 1), `w formularzach wystarczy 1 znak (${minLengths})`);
 
@@ -2499,16 +2522,48 @@ async function flowTest() {
   channels['log-questions'] = mkChannel('log-questions', 'logi-pytania');
   g.settings.ticketLogs = { question: 'log-questions' };
 
-  // 8b. Niezrealizowane: log pokazuje osobę, która kliknęła.
-  channels['ticket-2'] = mkChannel('ticket-2', 'bot-0002');
-  g.tickets['ticket-2'] = { channelId: 'ticket-2', number: 2, type: 'question', userId: CLIENT, openedAt: Date.now(), form: { desc: 'y' }, messageId: 'card2' };
+  // 8b. Zakup niezrealizowany: log pokazuje osobę, która kliknęła.
+  channels['ticket-2'] = mkChannel('ticket-2', 'klient');
+  g.tickets['ticket-2'] = { channelId: 'ticket-2', number: 2, type: 'bot', userId: CLIENT, openedAt: Date.now(), form: { desc: 'y' }, messageId: 'card2' };
   const iNot = interaction(STAFF, { channelId: 'ticket-2', channel: channels['ticket-2'] });
+  await onCloseRequest(iNot);
+  assert(!iNot.modal && JSON.stringify(iNot.replies[0].components[0].toJSON()).includes('tk:notdone'), 'zakup: Zamknij pokazuje Zrealizowane / Niezrealizowane');
   await closeTicket(iNot, { reason: 'Klient zrezygnował' });
   const notLog = JSON.stringify(closedView(getTicket(GID, 'ticket-2'), 'x', false).toJSON());
   assert(notLog.includes('Oznaczył jako niezrealizowane') && notLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Niezrealizowane');
-  assert(JSON.stringify(iNot.replies[0].components[0].toJSON()).includes('Oznaczył jako niezrealizowane'), 'wiadomość w tickecie pokazuje, kto kliknął');
+  assert(JSON.stringify(iNot.replies[1].components[0].toJSON()).includes('Oznaczył jako niezrealizowane'), 'wiadomość w tickecie pokazuje, kto kliknął');
+
+  // 8c. Pytanie: Zamknij → od razu formularz z powodem → zamknięte (bez zrealizowane/niezrealizowane).
+  channels['ticket-3'] = mkChannel('ticket-3', 'klient');
+  g.tickets['ticket-3'] = { channelId: 'ticket-3', number: 3, type: 'question', userId: CLIENT, openedAt: Date.now(), form: { question: '?' }, messageId: 'card3' };
+  const iQ = interaction(STAFF, { channelId: 'ticket-3', channel: channels['ticket-3'] });
+  await onCloseRequest(iQ);
+  assert(iQ.modal?.toJSON().custom_id === 'tk:closesubmit' && !iQ.replies.length, 'pytanie: Zamknij od razu pokazuje formularz z powodem');
+  const iQSubmit = interaction(STAFF, {
+    channelId: 'ticket-3',
+    channel: channels['ticket-3'],
+    customId: 'tk:closesubmit',
+    fields: { getTextInputValue: () => 'Pytanie wyjaśnione' },
+    isChatInputCommand: () => false,
+    inGuild: () => true,
+    inCachedGuild: () => true,
+    isRepliable: () => true,
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => true,
+  });
+  await route(iQSubmit);
+  const q = getTicket(GID, 'ticket-3');
+  assert(q.closedAt && q.result === 'closed' && q.closeReason === 'Pytanie wyjaśnione', 'pytanie zamknięte z powodem');
+  const qLog = JSON.stringify(closedView(q, 'x', false).toJSON());
+  assert(qLog.includes('Zamknięte') && !qLog.includes('Niezrealizowane') && qLog.includes('Pytanie wyjaśnione'), 'log pytania: „Zamknięte” i powód');
   assert(log.some(([type, id]) => type === 'send' && id === 'log-questions'), 'log pytania trafia na kanał logów pytań');
-  assert(!log.slice(-5).some(([type, id]) => type === 'send' && id === LOG_CH), 'log pytania nie trafia na ogólny kanał');
+  // Klient też dostaje od razu formularz.
+  channels['ticket-4'] = mkChannel('ticket-4', 'klient');
+  g.tickets['ticket-4'] = { channelId: 'ticket-4', number: 4, type: 'partner', userId: CLIENT, openedAt: Date.now(), form: { offer: 'x' }, messageId: 'card4' };
+  const iP = interaction(CLIENT, { channelId: 'ticket-4', channel: channels['ticket-4'] });
+  await onCloseRequest(iP);
+  assert(iP.modal?.toJSON().custom_id === 'tk:closesubmit', 'współpraca: klient też dostaje formularz z powodem');
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;

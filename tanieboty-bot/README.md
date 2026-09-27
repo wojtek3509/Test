@@ -30,7 +30,8 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
    - przenosi panel „Jak napisać voucha?” (wzór i przykłady) na dół kanału,
    - podbija licznik w nazwie kanału,
    - **sam zamyka ticket**: transcript i podsumowanie trafiają na kanał logów, a klient dostaje w DM transcript i przycisk do opinii.
-5. **Niezrealizowane** zamyka ticket od razu (z opcjonalnym powodem). Staff może też użyć przycisku **Zamknij bez repa**.
+5. Tickety **Pytanie** i **Współpraca** nie mają wyboru zrealizowane/niezrealizowane: „Zamknij” od razu otwiera formularz z powodem, a w logach wynik to „🔒 Zamknięte”.
+6. **Niezrealizowane** zamyka ticket od razu (z opcjonalnym powodem). Staff może też użyć przycisku **Zamknij bez repa**.
 
 „Zrealizowane” działa dopiero po ustawieniu kanału legit checków. Kliknięcie „Skopiuj wzór” nigdy nie zamyka ticketu.
 
