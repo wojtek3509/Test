@@ -74,7 +74,6 @@ const ticketTypes = {
     label: 'Bot discord',
     emoji: '💻',
     description: 'Kliknij, aby zamówić bota discord.',
-    prefix: 'bot',
     order: true,
     fields: [
       { id: 'desc', label: 'Opisz bota', style: 'long', placeholder: 'Tickety, weryfikacja, konkursy, ekonomia…' },
@@ -86,7 +85,6 @@ const ticketTypes = {
     label: 'Hosting bota discord',
     emoji: '🖥️',
     description: 'Kliknij, aby zakupić hosting bota.',
-    prefix: 'hosting',
     order: true,
     fields: [
       { id: 'bot', label: 'Jaki bot? (język / biblioteka)', placeholder: 'np. discord.js, Python' },
@@ -102,14 +100,12 @@ const ticketTypes = {
     label: 'Pytanie',
     emoji: '❓',
     description: 'Kliknij, aby zadać nam pytanie.',
-    prefix: 'pytanie',
     fields: [{ id: 'question', label: 'Twoje pytanie', style: 'long' }],
   },
   partner: {
     label: 'Współpraca',
     emoji: '🤝',
     description: 'Kliknij, aby zaproponować współpracę.',
-    prefix: 'wspolpraca',
     fields: [
       { id: 'server', label: 'Link do serwera / strony', required: false },
       { id: 'offer', label: 'Twoja propozycja', style: 'long' },
@@ -771,6 +767,19 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
   return b;
 }
 
+/** Nazwa kanału ticketu = nick osoby na serwerze (gdy nick to same znaki specjalne — nazwa konta). */
+function ticketChannelName(member, user) {
+  const clean = (v) =>
+    String(v ?? '')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\p{L}\p{N}_-]/gu, '')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 90);
+  return clean(member?.displayName) || clean(user.username) || `ticket-${user.id}`;
+}
+
 async function onTicketSelect(i, type) {
   const { settings } = guild(i.guildId);
   if (!ticketCategoryFor(settings, type)) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup` albo `/generuj`.'));
@@ -809,7 +818,7 @@ async function onTicketForm(i, type) {
   let channel;
   try {
     channel = await i.guild.channels.create({
-      name: `${t.prefix}-${String(number).padStart(4, '0')}`,
+      name: ticketChannelName(i.member, i.user),
       type: ChannelType.GuildText,
       parent: ticketCategoryFor(settings, type),
       topic: `${t.emoji} ${t.label} • ${i.user.tag} (${i.user.id})`,
@@ -2395,6 +2404,9 @@ async function flowTest() {
   };
 
   // 1. Karta ticketu nie ma menu statusu.
+  assert(ticketChannelName({ displayName: 'Wojtek Kowalski' }, { username: 'wojtek3509', id: '1' }) === 'wojtek-kowalski', 'nazwa kanału = nick');
+  assert(ticketChannelName({ displayName: '✨✨' }, { username: 'wojtek3509', id: '1' }) === 'wojtek3509', 'nick z samych emoji → nazwa konta');
+  assert(ticketChannelName(null, { username: 'Żaba_99', id: '1' }) === 'żaba_99', 'polskie znaki zostają');
   const cardJson = JSON.stringify(ticketMessage(g.tickets[TICKET_CH], users[CLIENT]).toJSON());
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
