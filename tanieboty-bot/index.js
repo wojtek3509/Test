@@ -262,14 +262,20 @@ const serverLayout = {
         { emoji: '🎵', name: 'muzyka', mode: 'voice' },
       ],
     },
-    // Tu bot tworzy kanały ticketów — widoczne tylko dla Administracji i Staffu (+ autora ticketu).
-    { emoji: '📂', name: 'OTWARTE TICKETY', private: true, setting: 'categoryId', channels: [] },
+    // Tu bot tworzy kanały ticketów — każdy rodzaj w swojej kategorii, widoczne tylko dla Administracji i Staffu (+ autora ticketu).
+    { emoji: '💻', name: 'ZAMÓWIENIA BOTÓW', private: true, ticketType: 'bot', channels: [] },
+    { emoji: '🖥️', name: 'ZAMÓWIENIA HOSTINGU', private: true, ticketType: 'hosting', channels: [] },
+    { emoji: '❓', name: 'PYTANIA', private: true, ticketType: 'question', channels: [] },
+    { emoji: '🤝', name: 'WSPÓŁPRACA', private: true, ticketType: 'partner', channels: [] },
     {
       emoji: '🛡️',
       name: 'ADMINISTRACJA',
       private: true,
       channels: [
-        { emoji: '📁', name: 'logi', mode: 'open', setting: 'logChannelId' },
+        { emoji: '💻', name: 'logi-boty', mode: 'open', ticketLog: 'bot' },
+        { emoji: '🖥️', name: 'logi-hosting', mode: 'open', ticketLog: 'hosting' },
+        { emoji: '❓', name: 'logi-pytania', mode: 'open', ticketLog: 'question' },
+        { emoji: '🤝', name: 'logi-współpraca', mode: 'open', ticketLog: 'partner' },
         { emoji: '💬', name: 'staff-czat', mode: 'open', report: true },
       ],
     },
@@ -308,6 +314,8 @@ function guild(id) {
   g.stats.done ??= 0;
   g.stats.lc ??= 0;
   g.invites ??= {};
+  g.settings.ticketCategories ??= {};
+  g.settings.ticketLogs ??= {};
   g.joins ??= {};
   return g;
 }
@@ -318,6 +326,10 @@ function updateGuild(id, fn) {
   save();
   return g;
 }
+
+/** Kategoria i kanał logów dla rodzaju ticketu (ustawienie dla rodzaju, a gdy go brak — ogólne z /setup). */
+const ticketCategoryFor = (settings, type) => settings.ticketCategories?.[type] ?? settings.categoryId ?? null;
+const ticketLogFor = (settings, type) => settings.ticketLogs?.[type] ?? settings.logChannelId ?? null;
 
 const getTicket = (guildId, channelId) => guild(guildId).tickets[channelId] ?? null;
 const openTicketsOf = (guildId, userId) => Object.values(guild(guildId).tickets).filter((t) => t.userId === userId && !t.closedAt);
@@ -761,7 +773,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
 
 async function onTicketSelect(i, type) {
   const { settings } = guild(i.guildId);
-  if (!settings.categoryId) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup`.'));
+  if (!ticketCategoryFor(settings, type)) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup` albo `/generuj`.'));
   const open = openTicketsOf(i.guildId, i.user.id);
   if (open.length >= settings.maxOpen) return replyV2(i, fail(`Masz już otwarty ticket: ${open.map((t) => `<#${t.channelId}>`).join(', ')}`));
   await i.showModal(ticketModal(type));
@@ -799,7 +811,7 @@ async function onTicketForm(i, type) {
     channel = await i.guild.channels.create({
       name: `${t.prefix}-${String(number).padStart(4, '0')}`,
       type: ChannelType.GuildText,
-      parent: settings.categoryId,
+      parent: ticketCategoryFor(settings, type),
       topic: `${t.emoji} ${t.label} • ${i.user.tag} (${i.user.id})`,
       permissionOverwrites: overwrites,
     });
@@ -1080,8 +1092,9 @@ async function finalizeTicket(client, g, channel, { closedBy, reason = null, res
   const closed = getTicket(g.id, channel.id);
   const { settings } = guild(g.id);
   const transcript = await makeTranscript(channel, closed);
-  if (settings.logChannelId) {
-    const log = await g.channels.fetch(settings.logChannelId).catch(() => null);
+  const logChannelId = ticketLogFor(settings, closed.type);
+  if (logChannelId) {
+    const log = await g.channels.fetch(logChannelId).catch(() => null);
     await log?.send({ components: [closedView(closed, g.name, false)], files: [transcript], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
   }
   const user = await client.users.fetch(closed.userId).catch(() => null);
@@ -1549,7 +1562,7 @@ async function generateServer(client, discordGuild, invokerId) {
     .catch((err) => report.errors.push(`Nie nadano roli Administracja: ${err.message}`));
 
   // 3. Kategorie i kanały.
-  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true };
+  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true, ticketCategories: {}, ticketLogs: {} };
   const panels = [];
   let reportChannel = null;
   for (const cat of serverLayout.categories) {
@@ -1561,6 +1574,7 @@ async function generateServer(client, discordGuild, invokerId) {
     });
     report.categories++;
     if (cat.setting) settings[cat.setting] = category.id;
+    if (cat.ticketType) settings.ticketCategories[cat.ticketType] = category.id;
     for (const ch of cat.channels) {
       const channel = await discordGuild.channels.create({
         name: layoutChannelName(ch, guild(discordGuild.id)),
@@ -1571,12 +1585,15 @@ async function generateServer(client, discordGuild, invokerId) {
       });
       report.channels++;
       if (ch.setting) settings[ch.setting] = channel.id;
+      if (ch.ticketLog) settings.ticketLogs[ch.ticketLog] = channel.id;
       if (ch.panel) panels.push([ch.panel, channel]);
       if (ch.report) reportChannel = channel;
     }
   }
 
-  // 4. Konfiguracja bota (to samo, co /setup).
+  // 4. Konfiguracja bota (to samo, co /setup). Ogólna kategoria i logi = te od zamówień botów.
+  settings.categoryId = settings.ticketCategories.bot;
+  settings.logChannelId = settings.ticketLogs.bot;
   updateGuild(discordGuild.id, (g) => Object.assign(g.settings, settings));
 
   // 5. Panele.
@@ -1847,6 +1864,49 @@ command(
 
 command(
   new SlashCommandBuilder()
+    .setName('ustaw-ticket')
+    .setDescription('Osobna kategoria i kanał logów dla jednego rodzaju ticketu')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o
+        .setName('rodzaj')
+        .setDescription('Rodzaj ticketu')
+        .setRequired(true)
+        .addChoices(...Object.entries(ticketTypes).map(([value, t]) => ({ name: `${t.emoji} ${t.label}`, value }))),
+    )
+    .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria, w której tworzą się te tickety').addChannelTypes(ChannelType.GuildCategory))
+    .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów dla tych ticketów').addChannelTypes(ChannelType.GuildText)),
+  async (i) => {
+    const type = i.options.getString('rodzaj');
+    const category = i.options.getChannel('kategoria');
+    const logs = i.options.getChannel('logi');
+    if (!category && !logs) return replyFail(i, 'Podaj kategorię, kanał logów albo oba.');
+    const { settings } = updateGuild(i.guildId, (g) => {
+      if (category) g.settings.ticketCategories[type] = category.id;
+      if (logs) g.settings.ticketLogs[type] = logs.id;
+    });
+    const t = ticketTypes[type];
+    const ch = (id) => (id ? `<#${id}>` : '`—`');
+    return i.reply({
+      components: [
+        notice(
+          [
+            `### ${t.emoji} ${x} ${t.label}`,
+            row('Kategoria', ch(ticketCategoryFor(settings, type))),
+            row('Logi', ch(ticketLogFor(settings, type))),
+          ].join('\n'),
+          colors.success,
+        ),
+      ],
+      flags: V2_EPHEMERAL,
+      allowedMentions: { parse: [] },
+    });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
     .setName('panel')
     .setDescription('Wyślij panel na kanał')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -1871,7 +1931,8 @@ command(
     const type = i.options.getString('typ');
     const bannerUrl = i.options.getString('baner');
     if (bannerUrl && !isUrl(bannerUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https).');
-    if (type === 'tickety' && !guild(i.guildId).settings.categoryId) return replyFail(i, 'Najpierw użyj `/setup`.');
+    const st = guild(i.guildId).settings;
+    if (type === 'tickety' && !Object.keys(ticketTypes).some((t) => ticketCategoryFor(st, t))) return replyFail(i, 'Najpierw użyj `/setup` albo `/generuj`.');
     if (bannerUrl) updateGuild(i.guildId, (g) => (g.settings.banners[type] = bannerUrl));
 
     const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
@@ -2422,14 +2483,21 @@ async function flowTest() {
   const doneLog = JSON.stringify(closedView(t, 'x', false).toJSON());
   assert(doneLog.includes('Oznaczył jako zrealizowane') && doneLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Zrealizowane');
 
+  // 8a. Log idzie na kanał przypisany do rodzaju ticketu.
+  assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'bez ustawień rodzaju — ogólny kanał logów');
+  channels['log-questions'] = mkChannel('log-questions', 'logi-pytania');
+  g.settings.ticketLogs = { question: 'log-questions' };
+
   // 8b. Niezrealizowane: log pokazuje osobę, która kliknęła.
   channels['ticket-2'] = mkChannel('ticket-2', 'bot-0002');
-  g.tickets['ticket-2'] = { channelId: 'ticket-2', number: 2, type: 'bot', userId: CLIENT, openedAt: Date.now(), form: { desc: 'y' }, messageId: 'card2' };
+  g.tickets['ticket-2'] = { channelId: 'ticket-2', number: 2, type: 'question', userId: CLIENT, openedAt: Date.now(), form: { desc: 'y' }, messageId: 'card2' };
   const iNot = interaction(STAFF, { channelId: 'ticket-2', channel: channels['ticket-2'] });
   await closeTicket(iNot, { reason: 'Klient zrezygnował' });
   const notLog = JSON.stringify(closedView(getTicket(GID, 'ticket-2'), 'x', false).toJSON());
   assert(notLog.includes('Oznaczył jako niezrealizowane') && notLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Niezrealizowane');
   assert(JSON.stringify(iNot.replies[0].components[0].toJSON()).includes('Oznaczył jako niezrealizowane'), 'wiadomość w tickecie pokazuje, kto kliknął');
+  assert(log.some(([type, id]) => type === 'send' && id === 'log-questions'), 'log pytania trafia na kanał logów pytań');
+  assert(!log.slice(-5).some(([type, id]) => type === 'send' && id === LOG_CH), 'log pytania nie trafia na ogólny kanał');
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;
@@ -2590,9 +2658,9 @@ async function generatorTest() {
   assert(deleted.includes('old1') && deleted.includes('oldcat'), 'stare kanały usunięte');
   assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
   assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
-  assert(cats.length === 8 && chans.length === 18, `8 kategorii i 18 kanałów (${cats.length}/${chans.length})`);
+  assert(cats.length === 11 && chans.length === 21, `11 kategorii i 21 kanałów (${cats.length}/${chans.length})`);
   assert(['👋┃witamy', '📩┃zaproszenia'].every((n) => created.find((item) => item.id === byName(n).parent)?.name === '━━ 👋 WITAMY ━━'), 'WITAMY: witamy i zaproszenia');
-  assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 📂 OTWARTE TICKETY ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
+  assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
   const parentOf = (name) => created.find((item) => item.id === byName(name).parent)?.name;
   assert(['📜┃regulamin', '📢┃ogłoszenia', '💰┃cennik', '🎉┃konkursy', '🚀┃boosty'].every((n) => parentOf(n) === '━━ 📌 WAŻNE ━━'), 'WAŻNE: regulamin, ogłoszenia, cennik, konkursy, boosty');
   assert(['✅┃legit-check→0', '⭐┃opinie→0', '🤔┃czy-legit→0'].every((n) => parentOf(n) === '━━ 🤝 ZAUFANIE ━━'), 'ZAUFANIE: legit-check, opinie, czy-legit');
@@ -2603,8 +2671,8 @@ async function generatorTest() {
   assert(dms.some(([t, id]) => t === 'role' && id === 'admin-user'), 'rola Administracja dla osoby, która generuje');
 
   const everyoneDeny = (ch) => ch.permissionOverwrites.find((o) => o.id === 'everyone').deny;
-  assert(everyoneDeny(byName('📁┃logi')).includes(F.ViewChannel), 'logi ukryte przed wszystkimi');
-  assert(everyoneDeny(byName('━━ 📂 OTWARTE TICKETY ━━')).includes(F.ViewChannel), 'kategoria otwartych ticketów prywatna');
+  assert(['💻┃logi-boty', '🖥️┃logi-hosting', '❓┃logi-pytania', '🤝┃logi-współpraca'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '4 kanały logów ukryte przed wszystkimi');
+  assert(['━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '4 kategorie ticketów prywatne');
   assert(!everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria z panelem ticketów publiczna');
   assert(everyoneDeny(byName('📜┃regulamin')).includes(F.SendMessages), 'regulamin tylko do czytania');
   assert(!everyoneDeny(byName('✅┃legit-check→0')).includes(F.SendMessages), 'na legit-check można pisać');
@@ -2612,8 +2680,12 @@ async function generatorTest() {
   assert(byName('📜┃regulamin').permissionOverwrites.some((o) => o.id === 'bot' && o.allow.includes(F.SendMessages)), 'bot może pisać wszędzie');
 
   const s = guild(GID).settings;
-  assert(s.categoryId === byName('━━ 📂 OTWARTE TICKETY ━━').id, 'tickety tworzą się w OTWARTE TICKETY');
-  assert(s.logChannelId === byName('📁┃logi').id && s.lcChannelId === byName('✅┃legit-check→0').id, 'logi i legit check ustawione');
+  const typeMap = { bot: ['━━ 💻 ZAMÓWIENIA BOTÓW ━━', '💻┃logi-boty'], hosting: ['━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '🖥️┃logi-hosting'], question: ['━━ ❓ PYTANIA ━━', '❓┃logi-pytania'], partner: ['━━ 🤝 WSPÓŁPRACA ━━', '🤝┃logi-współpraca'] };
+  for (const [type, [catName, logName]] of Object.entries(typeMap)) {
+    assert(ticketCategoryFor(s, type) === byName(catName).id, `ticket ${type} tworzy się w ${catName}`);
+    assert(ticketLogFor(s, type) === byName(logName).id, `log ticketu ${type} idzie na ${logName}`);
+  }
+  assert(s.lcChannelId === byName('✅┃legit-check→0').id, 'legit check ustawiony');
   assert(s.reviewChannelId === byName('⭐┃opinie→0').id && s.boostChannelId === byName('🚀┃boosty').id, 'opinie i boosty ustawione');
   assert(s.staffRoleId && s.rulesRoleId, 'role staff i regulaminu ustawione');
   assert(s.welcomeChannelId === byName('👋┃witamy').id && s.invitesChannelId === byName('📩┃zaproszenia').id, 'powitania i zaproszenia ustawione');
@@ -2624,7 +2696,7 @@ async function generatorTest() {
   assert(openTicketsOf(GID, 'u').length === 0, 'klient może otworzyć nowy ticket');
 
   delete store.guilds[GID];
-  console.log('✅ Test generatora: 27 sprawdzeń OK');
+  console.log('✅ Test generatora: 35 sprawdzeń OK');
 }
 
 // ═══ REJESTRACJA KOMEND ════════════════════════════════════════════════

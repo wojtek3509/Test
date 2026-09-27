@@ -14,6 +14,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 💰 Cennik | `/panel typ:cennik` | Cennik hostingu (1 miesiąc 5 zł, 3 miesiące 14 zł, 1 rok 50 zł) i przycisk „Kup hosting”, który od razu otwiera ticket z wyborem pakietu. |
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
+| 🗂️ Osobne kategorie i logi | `/generuj` albo `/ustaw-ticket` | Każdy rodzaj ticketu (bot, hosting, pytanie, współpraca) tworzy się w swojej kategorii, a log po zamknięciu trafia na swój kanał (`logi-boty`, `logi-hosting`, `logi-pytania`, `logi-współpraca`). Bez ustawień dla rodzaju używana jest kategoria i logi z `/setup`. |
 | 🏗️ Generator serwera | `/generuj` | Po potwierdzeniu **usuwa wszystkie kanały** i tworzy gotowy serwer: role, kategorie `━━ 📢 INFORMACJE ━━`, kanały `🎉┃konkursy` z uprawnieniami. Sam konfiguruje bota i wysyła panele. Podsumowanie trafia w DM i na staff-czat. |
 | 👋 Powitania | `/setup powitania:#kanał` (lub `/generuj`) | „Nowa osoba” z avatarem, numerem członka i tekstem powitalnym. |
 | 📩 Zaproszenia | `/setup zaproszenia:#kanał` (lub `/generuj`) | Wiadomość „@osoba właśnie zawitała do nas z zaproszenia od @x / przez link .gg/…”. Komendy `/zaproszenia sprawdz`, `ranking`, `bonus`, `reset`. Liczy prawdziwe, fałszywe (konto < 7 dni) i te, które wyszły. |
