@@ -60,6 +60,14 @@ const colors = {
   boost: 0xf47fff,
 };
 
+// Cennik hostingu (/panel typ:cennik) — te same pakiety są do wyboru w tickecie „Hosting bota discord”.
+// [nazwa, cena, id]
+const hostingPlans = [
+  ['1 miesiąc', '5 zł', '1m'],
+  ['3 miesiące', '14 zł', '3m'],
+  ['1 rok', '50 zł', '12m'],
+];
+
 // Kategorie ticketów (maks. 25). "fields" to pola formularza (maks. 5).
 const ticketTypes = {
   bot: {
@@ -85,12 +93,7 @@ const ticketTypes = {
       {
         id: 'period',
         label: 'Okres hostingu',
-        select: [
-          ['1 miesiąc', '1m'],
-          ['3 miesiące', '3m'],
-          ['6 miesięcy', '6m'],
-          ['12 miesięcy', '12m'],
-        ],
+        select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]),
       },
       { id: 'notes', label: 'Uwagi', style: 'long', required: false },
     ],
@@ -155,29 +158,6 @@ const rules = [
 ];
 
 // Cennik (/panel typ:cennik).
-const pricing = [
-  {
-    emoji: '🤖',
-    title: 'Boty Discord',
-    items: [
-      ['Bot z ticketami', 'od 25 PLN'],
-      ['Bot weryfikacyjny', 'od 20 PLN'],
-      ['Bot z konkursami', 'od 25 PLN'],
-      ['Bot „wszystko w jednym”', 'od 60 PLN'],
-      ['Bot na zamówienie', 'wycena indywidualna'],
-    ],
-  },
-  {
-    emoji: '🖥️',
-    title: 'Hosting',
-    items: [
-      ['1 miesiąc', '5 PLN'],
-      ['3 miesiące', '13 PLN'],
-      ['12 miesięcy', '45 PLN'],
-    ],
-  },
-];
-
 // Metody płatności w formularzu „Zrealizowane” (maks. 25). Emoji może być własne: '<:ltc:123…>'.
 const payments = {
   blik: { label: 'BLIK', emoji: '📱' },
@@ -194,7 +174,7 @@ const payments = {
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 
 // Przykładowe vouche pokazywane na kanale legit checków (panel „Jak napisać voucha?”).
-const vouchExamples = ['+rep @sprzedawca Bot discord [ 30 PLN ] [ BLIK ]', '+rep @sprzedawca Hosting 3 miesiące [ 13 PLN ] [ PAYPAL ]'];
+const vouchExamples = ['+rep @sprzedawca Bot discord [ 30 PLN ] [ BLIK ]', '+rep @sprzedawca Hosting 3 miesiące [ 14 PLN ] [ PAYPAL ]'];
 
 // Oceny w opiniach.
 const reviewCriteria = [
@@ -562,18 +542,20 @@ function legitPanel(logo) {
 
 function pricingPanel(g, logo) {
   const b = box();
-  header(b, [title('Cennik', '💰'), `>>> ${point('Poniżej znajdziesz **orientacyjne ceny** naszych usług.')}\n${point('Dokładną wycenę dostaniesz w **tickecie**.')}`].join('\n'), logo);
-  for (const cat of pricing) {
-    sep(b);
-    text(b, [`### ${cat.emoji} ${x} ${cat.title}`, ...cat.items.map(([name, price]) => row(name, `\`${price}\``))].join('\n'));
-  }
+  header(
+    b,
+    [
+      title('Cennik hostingu', '💰'),
+      '>>> ' + [point('Twój bot działa **24/7** na naszym hostingu.'), point('Kliknij **Kup hosting**, wybierz pakiet i otwórz ticket.')].join('\n'),
+    ].join('\n'),
+    logo,
+  );
+  sep(b);
+  text(b, [`### 🖥️ ${x} Pakiety`, ...hostingPlans.map(([name, price]) => row(name, `\`${price}\``))].join('\n'));
   banner(b, g.settings.banners.cennik);
   sep(b);
   b.addActionRowComponents((r) =>
-    r.setComponents(
-      new ButtonBuilder().setCustomId('tk:quick:bot').setLabel('Zamów bota').setEmoji('💻').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('tk:quick:hosting').setLabel('Kup hosting').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
-    ),
+    r.setComponents(new ButtonBuilder().setCustomId('tk:quick:hosting').setLabel('Kup hosting').setEmoji('🖥️').setStyle(ButtonStyle.Primary)),
   );
   sep(b);
   footer(b);
@@ -2356,6 +2338,11 @@ async function flowTest() {
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
   assert(cardJson.includes('"type":11'), 'ticket pokazuje avatar klienta');
+  const priceJson = JSON.stringify(pricingPanel(g, null).toJSON());
+  assert(['1 miesiąc', '5 zł', '3 miesiące', '14 zł', '1 rok', '50 zł'].every((t) => priceJson.includes(t)), 'cennik: 3 pakiety hostingu');
+  assert(!priceJson.includes('tk:quick:bot') && !priceJson.includes('Boty Discord'), 'cennik bez botów');
+  const hostingJson = JSON.stringify(ticketModal('hosting').toJSON());
+  assert(hostingJson.includes('1 rok — 50 zł') && !hostingJson.includes('6 miesięcy'), 'formularz hostingu z pakietami z cennika');
   const logo = logoOf({ iconURL: () => img }, { user: { displayAvatarURL: () => img } });
   for (const [type, build] of Object.entries(panelBuilders)) {
     assert(!JSON.stringify(build(g, logo).toJSON()).includes('"type":11'), `panel ${type} bez zdjęcia bota/serwera`);

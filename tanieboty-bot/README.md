@@ -11,7 +11,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | ⭐ Opinie | `/panel typ:opinie` | Panel jest zawsze na dole kanału (po każdej opinii wysyła się od nowa). Przycisk „Wystaw opinię” i formularz: produkt, **jakość bota**, **czas realizacji**, **obsługa klienta** (1–5 ⭐) i treść. Panel pokazuje średnie ocen na żywo. Po zamknięciu ticketu klient dostaje w DM przycisk do opinii. |
 | 🤔 Czy legit? | `/panel typ:legit` | ✅ jest liczone (bez reakcji bota) i zapisywane w bazie, a nazwa kanału (`czy-legit→404`) aktualizuje się sama co 10 minut. ❌ jest zawsze usuwane, a autor dostaje przerwę na 7 dni. Staff i admini nie dostają przerwy. |
 | ✅ Vouche | `/panel typ:vouch` | Panel „Jak napisać voucha?” na kanale legit checków: wzór `+rep @sprzedawca Co zakupiłeś [ Kwota PLN ] [ Forma płatności ]` i przykłady. Po każdym vouchu przenosi się na dół kanału. Każdy vouch zaczynający się od `+rep` dostaje ✅ i liczy się do licznika. |
-| 💰 Cennik | `/panel typ:cennik` | Ceny botów i hostingu oraz przyciski „Zamów bota” / „Kup hosting”, które od razu otwierają ticket. |
+| 💰 Cennik | `/panel typ:cennik` | Cennik hostingu (1 miesiąc 5 zł, 3 miesiące 14 zł, 1 rok 50 zł) i przycisk „Kup hosting”, który od razu otwiera ticket z wyborem pakietu. |
 | 🎉 Konkursy | `/konkurs start` | Przycisk „Dołącz [ 171 osób \| 0.58% ]”, lista uczestników, automatyczne losowanie, `/konkurs zakoncz` i `/konkurs reroll`. |
 | 🚀 Boosty | `/setup boosty:#kanał` | Podziękowanie z avatarem, datą, łączną liczbą boostów i poziomem serwera. |
 | 🏗️ Generator serwera | `/generuj` | Po potwierdzeniu **usuwa wszystkie kanały** i tworzy gotowy serwer: role, kategorie `━━ 📢 INFORMACJE ━━`, kanały `🎉┃konkursy` z uprawnieniami. Sam konfiguruje bota i wysyła panele. Podsumowanie trafia w DM i na staff-czat. |
@@ -55,7 +55,7 @@ Na początku `index.js`, w sekcji **KONFIGURACJA**:
 - `brand`: nazwa, emoji i hasło w stopce.
 - `ticketTypes`: kategorie ticketów i pola formularzy.
 - `rules`: treść regulaminu.
-- `pricing`: cennik.
+- `hostingPlans`: pakiety i ceny hostingu (cennik i formularz ticketu).
 - `reviewCriteria` / `reviewProducts`: oceny w opiniach.
 - `vouchExamples`: przykładowe vouche w panelu.
 - `payments`: metody płatności w formularzu „Zrealizowane”.
