@@ -767,8 +767,8 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
   return b;
 }
 
-/** Nazwa kanału ticketu = nick osoby na serwerze (gdy nick to same znaki specjalne — nazwa konta). */
-function ticketChannelName(member, user) {
+/** Nazwa kanału ticketu = nazwa konta Discord osoby (np. wojtek3509). */
+function ticketChannelName(user) {
   const clean = (v) =>
     String(v ?? '')
       .toLowerCase()
@@ -777,7 +777,7 @@ function ticketChannelName(member, user) {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 90);
-  return clean(member?.displayName) || clean(user.username) || `ticket-${user.id}`;
+  return clean(user.username) || `ticket-${user.id}`;
 }
 
 async function onTicketSelect(i, type) {
@@ -818,7 +818,7 @@ async function onTicketForm(i, type) {
   let channel;
   try {
     channel = await i.guild.channels.create({
-      name: ticketChannelName(i.member, i.user),
+      name: ticketChannelName(i.user),
       type: ChannelType.GuildText,
       parent: ticketCategoryFor(settings, type),
       topic: `${t.emoji} ${t.label} • ${i.user.tag} (${i.user.id})`,
@@ -2404,9 +2404,8 @@ async function flowTest() {
   };
 
   // 1. Karta ticketu nie ma menu statusu.
-  assert(ticketChannelName({ displayName: 'Wojtek Kowalski' }, { username: 'wojtek3509', id: '1' }) === 'wojtek-kowalski', 'nazwa kanału = nick');
-  assert(ticketChannelName({ displayName: '✨✨' }, { username: 'wojtek3509', id: '1' }) === 'wojtek3509', 'nick z samych emoji → nazwa konta');
-  assert(ticketChannelName(null, { username: 'Żaba_99', id: '1' }) === 'żaba_99', 'polskie znaki zostają');
+  assert(ticketChannelName({ username: 'wojtek3509', globalName: 'Wojtek Kowalski', id: '1' }) === 'wojtek3509', 'nazwa kanału = nazwa konta, nie nick');
+  assert(ticketChannelName({ username: 'jan.nowak_99', id: '1' }) === 'jannowak_99', 'kropka usunięta, reszta zostaje');
   const cardJson = JSON.stringify(ticketMessage(g.tickets[TICKET_CH], users[CLIENT]).toJSON());
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
