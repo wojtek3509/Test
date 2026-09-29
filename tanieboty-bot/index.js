@@ -221,7 +221,7 @@ const rules = [
       {
         title: 'Metody płatności',
         points: [
-          'Płatności przyjmujemy **wyłącznie na naszym Discordzie** (w tickecie). Dostępne metody:\n- BLIK,\n- PayPal,\n- Litecoin (LTC),\n- PaySafeCard (kod) — *bez prowizji od kwoty*.',
+          'Płatności przyjmujemy **wyłącznie na naszym Discordzie** (w tickecie). Dostępne metody:\n- BLIK,\n- PayPal,\n- kryptowaluty: Litecoin (LTC), Bitcoin (BTC), Ethereum (ETH), USDT,\n- PaySafeCard (kod) — *bez prowizji od kwoty*.',
         ],
       },
       {
@@ -237,9 +237,10 @@ const rules = [
         ],
       },
       {
-        title: 'Litecoin',
+        title: 'Kryptowaluty',
         points: [
-          'Płatności w Litecoin realizujemy zgodnie z zasadami bezpieczeństwa transakcji kryptowalutowych.',
+          'Przyjmujemy **Litecoin (LTC), Bitcoin (BTC), Ethereum (ETH) i USDT**. Adres portfela i sieć podajemy w tickecie.',
+          'Płatności w kryptowalutach realizujemy zgodnie z zasadami bezpieczeństwa transakcji kryptowalutowych.',
           'Transakcje krypto są **nieodwracalne** — klient w pełni odpowiada za poprawność płatności (adres, kwota, sieć).',
         ],
       },
@@ -2570,6 +2571,7 @@ async function flowTest() {
   const ch3 = rulesMsgs[2].map((m) => texts(m).join('\n')).join('\n');
   assert(ch3.includes('`3.1` Składanie zamówień') && ch3.includes('`3.2.6`') && ch3.includes('`3.4.4`'), 'rozdział 3: podrozdziały 3.1–3.4');
   assert(texts(rulesMsgs[3][0]).join('').includes('`4.5.1`'), 'rozdział 4: punkt 4.5.1');
+  assert(['Kryptowaluty', 'BTC', 'ETH', 'USDT', 'LTC'].every((w) => texts(rulesMsgs[3][0]).join('').includes(w)), 'rozdział 4: kryptowaluty');
   assert(texts(rulesMsgs[1][0]).join('').includes('punktu `1.14`'), 'odwołanie do punktu 1.14 w zwrotach');
   const priceJson = JSON.stringify(pricingPanel(g, null).toJSON());
   assert(['1 miesiąc', '5 zł', '3 miesiące', '14 zł', '1 rok', '50 zł'].every((t) => priceJson.includes(t)), 'cennik: 3 pakiety hostingu');
