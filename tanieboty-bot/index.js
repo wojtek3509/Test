@@ -1405,6 +1405,7 @@ let hostingDelay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const hostingApi = () => ({
   ltc: 'https://litecoinspace.org/api',
+  ltcBlockcypher: 'https://api.blockcypher.com/v1/ltc/main',
   eth: 'https://eth.blockscout.com/api',
   ethRpc: 'https://ethereum-rpc.publicnode.com',
   sol: 'https://api.mainnet-beta.solana.com',
@@ -1438,7 +1439,8 @@ function unitsToString(units, decimals) {
 async function getJson(url, init = {}) {
   // Część serwisów (np. CloudFront) odrzuca zapytania bez nagłówka User-Agent.
   const headers = { 'User-Agent': `${brand.name}-bot/1.0`, Accept: 'application/json', ...init.headers };
-  const res = await httpFetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
+  const { timeout = 20_000, ...rest } = init;
+  const res = await httpFetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeout) });
   const raw = await res.text();
   let data = null;
   try {
@@ -2156,9 +2158,50 @@ async function routeHosting(i) {
 // ─── Sprawdzanie blockchainu ───────────────────────────────────────────
 // Każdy skaner zwraca wpłaty na adres: { txid, coin, units (BigInt), confirmations, time }.
 
+// Litecoin: dwa niezależne źródła. Bot zaczyna od tego, które ostatnio działało.
+const ltcSources = [
+  { name: 'litecoinspace.org', scan: scanLtcEsplora },
+  { name: 'BlockCypher', scan: scanLtcBlockcypher },
+];
+let ltcSource = 0;
+
 async function scanLtc(wallet, since) {
+  const errors = [];
+  for (let n = 0; n < ltcSources.length; n++) {
+    const idx = (ltcSource + n) % ltcSources.length;
+    try {
+      const txs = await ltcSources[idx].scan(wallet, since);
+      ltcSource = idx;
+      return txs;
+    } catch (err) {
+      errors.push(`${ltcSources[idx].name}: ${err.message}`);
+    }
+  }
+  throw new Error(errors.join(' | '));
+}
+
+async function scanLtcBlockcypher(wallet, since) {
+  const data = await getJson(`${hostingApi().ltcBlockcypher}/addrs/${wallet}?limit=50`, { timeout: 12_000 });
+  // Wyjścia na nasz adres mają tx_input_n = -1. Jedna transakcja może mieć kilka wyjść — sumujemy.
+  const byTx = new Map();
+  for (const ref of [...(data?.unconfirmed_txrefs ?? []), ...(data?.txrefs ?? [])]) {
+    if (ref.tx_input_n !== -1) continue;
+    const time = Date.parse(ref.confirmed ?? ref.received ?? '') || Date.now();
+    const prev = byTx.get(ref.tx_hash);
+    byTx.set(ref.tx_hash, {
+      txid: ref.tx_hash,
+      coin: 'ltc',
+      units: (prev?.units ?? 0n) + BigInt(ref.value),
+      confirmations: Math.max(prev?.confirmations ?? 0, ref.confirmations ?? 0),
+      time,
+    });
+  }
+  return [...byTx.values()].filter((t) => t.units > 0n && t.time >= since);
+}
+
+async function scanLtcEsplora(wallet, since) {
   const api = hostingApi().ltc;
-  const [tip, txs] = await Promise.all([getJson(`${api}/blocks/tip/height`), getJson(`${api}/address/${wallet}/txs`)]);
+  const [tip, txs] = await Promise.all([getJson(`${api}/blocks/tip/height`, { timeout: 12_000 }), getJson(`${api}/address/${wallet}/txs`, { timeout: 12_000 })]);
   const out = [];
   for (const tx of txs ?? []) {
     const units = (tx.vout ?? []).filter((v) => v.scriptpubkey_address === wallet).reduce((sum, v) => sum + BigInt(v.value), 0n);
@@ -2503,7 +2546,7 @@ async function hostingDiagnostics() {
   priceCache.at = 0;
   await check('Kursy PLN', async () =>
     Object.entries(await cryptoPricesPln())
-      .map(([id, v]) => `${id} ${v.pln} zł`)
+      .map(([id, v]) => `${id} ${Number(v.pln).toFixed(2)} zł`)
       .join(' • '),
   );
   const formats = { ltc: /^(ltc1[a-z0-9]{20,90}|[LM3][a-km-zA-HJ-NP-Z1-9]{25,34})$/, eth: /^0x[0-9a-fA-F]{40}$/, sol: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };
@@ -2514,7 +2557,7 @@ async function hostingDiagnostics() {
       if (!formats[chain].test(wallet)) throw new Error(`adres \`${wallet}\` nie wygląda na adres ${chain.toUpperCase()}`);
       const coins = new Set(Object.keys(cryptoCoins).filter((k) => cryptoCoins[k].chain === chain));
       const txs = await scanChain(chain, wallet, coins, Date.now() - 30 * DAY);
-      return `\`${wallet}\` • wpłat z 30 dni: ${txs.length}`;
+      return `\`${wallet}\` • wpłat z 30 dni: ${txs.length}${chain === 'ltc' ? ` • źródło: ${ltcSources[ltcSource].name}` : ''}`;
     });
   }
   return out;
@@ -4908,7 +4951,7 @@ async function hostingTest() {
   }
 
   // ── Symulowane blockchainy ──
-  const chain = { coinbaseDown: false, geckoDown: true, ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
+  const chain = { coinbaseDown: false, geckoDown: true, ltcSpaceDown: false, ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
   function chainRoute(url, init) {
     assert(init.headers?.['User-Agent'], 'nagłówek User-Agent');
     // Coinbase blokuje (jak CoinGecko na niektórych serwerach) → kursy z zapasowego źródła; potem Coinbase działa.
@@ -4919,6 +4962,24 @@ async function hostingTest() {
     if (url.startsWith('https://api.coingecko.com/')) {
       if (chain.geckoDown) return [403, '<!DOCTYPE HTML><HTML><TITLE>ERROR</TITLE></HTML>'];
       return [200, { litecoin: { pln: 400 }, ethereum: { pln: 12000 }, solana: { pln: 600 }, 'usd-coin': { pln: 3.65 } }];
+    }
+    if (url.startsWith('https://litecoinspace.org/') && chain.ltcSpaceDown) throw new Error('The operation was aborted due to timeout');
+    if (url === `https://api.blockcypher.com/v1/ltc/main/addrs/${LTC}?limit=50`) {
+      // Te same wpłaty w formacie BlockCypher (potwierdzone w txrefs, niepotwierdzone w unconfirmed_txrefs).
+      const refs = chain.ltcTxs.flatMap((tx) =>
+        tx.vout
+          .map((v, n) => [v, n])
+          .filter(([v]) => v.scriptpubkey_address === LTC)
+          .map(([v, n]) => ({
+            tx_hash: tx.txid,
+            tx_input_n: -1,
+            tx_output_n: n,
+            value: v.value,
+            confirmations: tx.status.confirmed ? chain.ltcTip - tx.status.block_height + 1 : 0,
+            [tx.status.confirmed ? 'confirmed' : 'received']: new Date(tx.status.block_time ? tx.status.block_time * 1000 : Date.now()).toISOString(),
+          })),
+      );
+      return [200, { address: LTC, txrefs: refs.filter((r) => r.confirmed), unconfirmed_txrefs: [...refs.filter((r) => r.received), { tx_hash: 'spend', tx_input_n: 0, tx_output_n: -1, value: 999, confirmations: 0 }] }];
     }
     if (url === 'https://litecoinspace.org/api/blocks/tip/height') return [200, chain.ltcTip];
     if (url === `https://litecoinspace.org/api/address/${LTC}/txs`) return [200, chain.ltcTxs];
@@ -5089,7 +5150,9 @@ async function hostingTest() {
     assert(order.status === 'seen' && order.txid === 'ltcgood' && order.confirmations === 0, 'wpłata wykryta w mempoolu');
     assert(dmEdits.at(-1)[1].includes('Płatność wykryta') && dmEdits.at(-1)[1].includes('0/2'), 'DM: 0/2 potwierdzeń');
     chain.ltcTxs[1].status = { confirmed: true, block_height: chain.ltcTip, block_time: Math.floor(Date.now() / 1000) };
+    chain.ltcSpaceDown = true; // litecoinspace.org nie odpowiada (jak na serwerze Wojtka) → BlockCypher
     await tick();
+    assert(ltcSources[ltcSource].name === 'BlockCypher', 'LTC: przełączenie na BlockCypher');
     assert(order.status === 'seen' && order.confirmations === 1, '1 potwierdzenie → jeszcze czekamy');
     chain.ltcTip++;
     await tick();
