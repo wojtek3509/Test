@@ -18,6 +18,8 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 🏗️ Generator serwera | `/generuj` | Po potwierdzeniu **usuwa wszystkie kanały** i tworzy gotowy serwer: role, kategorie `━━ 📢 INFORMACJE ━━`, kanały `🎉┃konkursy` z uprawnieniami. Sam konfiguruje bota i wysyła panele. Podsumowanie trafia w DM i na staff-czat. |
 | 👋 Powitania | `/setup powitania:#kanał` (lub `/generuj`) | „Nowa osoba” z avatarem, numerem członka i tekstem powitalnym. |
 | 📩 Zaproszenia | `/setup zaproszenia:#kanał` (lub `/generuj`) | Wiadomość „@osoba właśnie zawitała do nas z zaproszenia od @x / przez link .gg/…”. Komendy `/zaproszenia sprawdz`, `ranking`, `bonus`, `reset`. Liczy prawdziwe, fałszywe (konto < 7 dni) i te, które wyszły. |
+| 🤖 Auto LC | `/autolc` | Za każdego klienta, który po „Zrealizowane” nie napisał repa, bot wysyła voucha przez webhook z nazwą konta klienta i dopiskiem `[AUTO LC]` (z jego avatarem), zamyka ticket i wysyła log. |
+| 🗄️ Spójność bazy | automatycznie | Usunięta opinia znika z bazy i ze średnich. Usunięty konkurs zostaje anulowany. Usunięty panel „czy legit” zeruje głosy. Ręcznie usunięty kanał ticketu zamyka ticket w bazie (z informacją w logach). Liczba vouchy (`legit-check→N`) = liczba zrealizowanych zamówień. |
 | 📈 Statystyki | `/statystyki` | Tickety, opinie i konkursy. |
 
 ## Zamykanie ticketu i legit check

@@ -882,7 +882,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
           ticket.deal ? row('Produkt', `\`${ticket.deal.product}\``) : null,
           ticket.deal ? row('Cena', `\`${ticket.deal.price}\``) : null,
           ticket.deal ? row('Płatność', paymentName(ticket.deal.payment)) : null,
-          ticket.lcUrl ? row('Legit check', ticket.lcUrl) : null,
+          ticket.lcUrl ? row('Legit check', `${ticket.lcUrl}${ticket.autoLc ? ' **[AUTO LC]**' : ''}`) : null,
           ticket.result !== 'done' ? row('Powód', ticket.closeReason ?? '*brak*') : null,
           row('Otwarty', ts(ticket.openedAt, 'f')),
           row('Zamknięty', ts(ticket.closedAt, 'f')),
@@ -1140,7 +1140,7 @@ function vouchPanel(g, logo) {
     [
       point('Gdy napiszesz voucha, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
       g.settings.reviewChannelId ? point(`Zostaw też opinię na <#${g.settings.reviewChannelId}> ⭐`) : null,
-      point(`Dotychczas wystawiono **${g.stats.lc}** vouchy — dziękujemy za zaufanie! 💙`),
+      point(`Zrealizowaliśmy już **${g.stats.done}** zamówień — dziękujemy za zaufanie! 💙`),
     ]
       .filter(Boolean)
       .join('\n'),
@@ -1185,7 +1185,8 @@ function isRep(message) {
 /** Wiadomość na kanale legit checków: vouch → ✅, licznik, zamknięcie ticketu klienta, panel na dół. */
 async function onLegitCheckMessage(message) {
   const g = guild(message.guild.id);
-  if (message.channelId !== g.settings.lcChannelId || message.author.bot) return false;
+  // Wiadomości botów i webhooków (np. /autolc) pomijamy.
+  if (message.channelId !== g.settings.lcChannelId || message.author.bot || message.webhookId) return false;
   const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id);
 
   if (!isRep(message)) {
@@ -1202,11 +1203,13 @@ async function onLegitCheckMessage(message) {
     return true;
   }
 
-  updateGuild(message.guild.id, (gg) => gg.stats.lc++);
   await message.react('✅').catch(() => {});
 
   if (ticket) {
-    updateGuild(message.guild.id, (gg) => Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url }));
+    updateGuild(message.guild.id, (gg) => {
+      Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url, lcMessageId: message.id });
+      gg.stats.lc++;
+    });
     const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
     if (channel) {
       await channel
@@ -1420,7 +1423,7 @@ async function refreshPanel(client, guildId, type) {
 function counterTargets(g) {
   return [
     [g.panels.legit?.channelId, counterNames.legit, g.legitVotes?.yes ?? 0],
-    [g.settings.lcChannelId, counterNames.legitCheck, g.stats.lc],
+    [g.settings.lcChannelId, counterNames.legitCheck, g.stats.done],
     [g.settings.reviewChannelId, counterNames.reviews, g.reviews.length],
   ].filter(([id, pattern]) => id && pattern);
 }
@@ -1645,7 +1648,7 @@ function layoutOverwrites(discordGuild, roles, botId, { isPrivate, mode }) {
 
 function layoutChannelName(ch, g) {
   if (!ch.counter) return serverLayout.channelName(ch.emoji, ch.name);
-  const values = { reviews: g.reviews.length, legitCheck: g.stats.lc, legit: 0 };
+  const values = { reviews: g.reviews.length, legitCheck: g.stats.done, legit: 0 };
   return counterNames[ch.counter].replace('{n}', values[ch.counter]);
 }
 
@@ -1958,6 +1961,133 @@ function onMemberRemove(member) {
   });
 }
 
+// ═══ AUTO LC ═══════════════════════════════════════════════════════════
+
+/** Webhook bota na kanale legit checków (tworzony raz i używany ponownie). */
+async function lcWebhook(channel, client) {
+  const hooks = await channel.fetchWebhooks();
+  const own = [...hooks.values()].find((h) => h.owner?.id === client.user.id && h.name === `${brand.name} Auto LC`);
+  return own ?? channel.createWebhook({ name: `${brand.name} Auto LC`, reason: '/autolc' });
+}
+
+/**
+ * Wystawia vouche za klientów, którzy nie napisali repa po „Zrealizowane”:
+ * webhook z nazwą konta klienta + [AUTO LC] i jego avatarem, potem zamyka ticket i wysyła log.
+ */
+async function autoLegitCheck(client, discordGuild, invokerId) {
+  const g = guild(discordGuild.id);
+  const pending = Object.values(g.tickets).filter((t) => t.awaitingRep && !t.closedAt && t.deal);
+  const result = { done: [], failed: [] };
+  if (!pending.length) return result;
+  const lcChannel = await discordGuild.channels.fetch(g.settings.lcChannelId).catch(() => null);
+  if (!lcChannel) throw new Error('Nie znaleziono kanału legit checków. Ustaw go w /setup legitcheck.');
+  const hook = await lcWebhook(lcChannel, client);
+
+  for (const t of pending) {
+    try {
+      const user = await client.users.fetch(t.userId).catch(() => null);
+      const username = `${user?.username ?? 'klient'} [AUTO LC]`.slice(0, 80);
+      const msg = await hook.send({ content: repTemplate(t), username, avatarURL: user?.displayAvatarURL({ size: 256 }), allowedMentions: { parse: [] } });
+      await msg.react?.('✅').catch(() => {});
+      updateGuild(discordGuild.id, (gg) => {
+        Object.assign(gg.tickets[t.channelId], { awaitingRep: false, autoLc: true, lcUrl: msg.url, lcMessageId: msg.id });
+        gg.stats.lc++;
+      });
+      const channel = await discordGuild.channels.fetch(t.channelId).catch(() => null);
+      if (channel) {
+        await channel
+          .send({ components: [notice(`### ✅ ${x} Auto LC wystawiony\nKlient nie wystawił voucha, więc zrobił to bot: ${msg.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
+          .catch(() => {});
+        await finalizeTicket(client, discordGuild, channel, { closedBy: invokerId, result: 'done' });
+      } else {
+        // Kanał ticketu już nie istnieje — zamykamy tylko w bazie.
+        updateGuild(discordGuild.id, (gg) => {
+          Object.assign(gg.tickets[t.channelId], { closedAt: Date.now(), closedBy: invokerId, result: 'done' });
+          gg.stats.closed++;
+          gg.stats.done++;
+        });
+      }
+      result.done.push({ ticket: getTicket(discordGuild.id, t.channelId), url: msg.url, username });
+    } catch (err) {
+      result.failed.push({ ticket: t, error: err.message });
+    }
+  }
+  await movePanelToBottom(client, discordGuild.id, 'vouch', lcChannel);
+  return result;
+}
+
+// ═══ SPÓJNOŚĆ BAZY (usunięte wiadomości i kanały) ══════════════════════
+
+/** Usunięta wiadomość: panel, opinia albo konkurs znika też z bazy. */
+async function onMessageDeleted(message) {
+  const guildId = message.guildId;
+  if (!guildId || !store.guilds[guildId]) return;
+  const g = guild(guildId);
+  let changed = false;
+
+  for (const [type, ref] of Object.entries(g.panels)) {
+    if (ref?.messageId !== message.id) continue;
+    updateGuild(guildId, (gg) => {
+      delete gg.panels[type];
+      // Usunięty panel „czy legit” = głosy od zera (nowy panel liczy od początku).
+      if (type === 'legit') gg.legitVotes = { yes: 0, no: 0 };
+    });
+    changed = true;
+  }
+
+  const review = g.reviews.find((r) => r.messageId === message.id);
+  if (review) {
+    updateGuild(guildId, (gg) => (gg.reviews = gg.reviews.filter((r) => r !== review)));
+    await refreshPanel(message.client, guildId, 'opinie');
+    changed = true;
+  }
+
+  const gw = g.giveaways[message.id];
+  if (gw && !gw.ended) {
+    updateGuild(guildId, () => Object.assign(gw, { ended: true, cancelled: true, winnerIds: [] }));
+    changed = true;
+  }
+  return changed;
+}
+
+/** Usunięty kanał: otwarty ticket zamykamy w bazie (nie blokuje klienta), zapominamy panele z tego kanału. */
+async function onChannelDeleted(channel) {
+  const guildId = channel.guildId ?? channel.guild?.id;
+  if (!guildId || !store.guilds[guildId]) return;
+  const g = guild(guildId);
+  const ticket = g.tickets[channel.id];
+  if (ticket && !ticket.closedAt) {
+    updateGuild(guildId, (gg) => {
+      Object.assign(gg.tickets[channel.id], { closedAt: Date.now(), closedBy: null, result: 'notdone', closeReason: 'Kanał ticketu usunięty ręcznie', awaitingRep: false });
+      gg.stats.closed++;
+    });
+    const logId = ticketLogFor(g.settings, ticket.type);
+    const log = logId ? await channel.client.channels.fetch(logId).catch(() => null) : null;
+    await log
+      ?.send({
+        components: [notice(`### 🗑️ ${x} Ticket ${pad(ticket.number)} usunięty ręcznie\n${row('Autor', `<@${ticket.userId}>`)}\n-# Kanał usunięto bez zamknięcia — brak transcriptu.`, colors.warning)],
+        flags: V2,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => {});
+  }
+  for (const [type, ref] of Object.entries(g.panels)) {
+    if (ref?.channelId === channel.id) updateGuild(guildId, (gg) => delete gg.panels[type]);
+  }
+  for (const gw of Object.values(g.giveaways)) {
+    if (gw.channelId === channel.id && !gw.ended) updateGuild(guildId, () => Object.assign(gw, { ended: true, cancelled: true }));
+  }
+}
+
+/** Ktoś usunął wszystkie reakcje (lub jedno emoji) z panelu „czy legit” — przeliczamy. */
+async function onLegitReactionsCleared(message) {
+  if (!message.guildId || !store.guilds[message.guildId]) return;
+  const g = guild(message.guildId);
+  if (g.panels.legit?.messageId !== message.id) return;
+  const fresh = await message.fetch().catch(() => message);
+  updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votesOf(fresh, 'yes'), no: 0 }));
+}
+
 // ═══ KOMENDY SLASH ═════════════════════════════════════════════════════
 
 const replyOk = (i, content, flags = V2_EPHEMERAL) => i.reply({ components: [ok(content)], flags, allowedMentions: { parse: [] } });
@@ -2168,6 +2298,7 @@ command(
       const id = i.options.getString('id').trim();
       const gw = guild(i.guildId).giveaways[id];
       if (!gw) return replyFail(i, 'Nie znaleziono konkursu o takim ID (kliknij PPM na wiadomość konkursu → Kopiuj ID).');
+      if (gw.cancelled) return replyFail(i, 'Ten konkurs został anulowany (jego wiadomość usunięto).');
       if (sub === 'zakoncz' && gw.ended) return replyFail(i, 'Ten konkurs już się zakończył.');
       if (sub === 'reroll' && !gw.ended) return replyFail(i, 'Najpierw zakończ konkurs.');
       await i.deferReply({ flags: V2_EPHEMERAL });
@@ -2309,6 +2440,27 @@ command(
       else (g.invites[user.id] ??= emptyInvites()).bonus += i.options.getInteger('ilosc');
     });
     return i.reply({ components: [invitesView(user, guild(i.guildId).invites[user.id])], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('autolc')
+    .setDescription('Wystaw auto LC za klientów, którzy nie napisali repa, i zamknij ich tickety')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false),
+  async (i) => {
+    const g = guild(i.guildId);
+    if (!g.settings.lcChannelId) return replyFail(i, 'Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const { done, failed } = await autoLegitCheck(i.client, i.guild, i.user.id);
+    if (!done.length && !failed.length) return i.editReply({ components: [notice(`### ✅ ${x} Brak ticketów czekających na repa.`, colors.success)], flags: V2 });
+    const lines = [
+      `## ✅ ${x} Auto LC: ${done.length}`,
+      ...done.map((d) => row(`Ticket ${pad(d.ticket.number)}`, `\`${d.username}\` → ${d.url}`)),
+      ...failed.map((f) => row(`❌ Ticket ${pad(f.ticket.number)}`, f.error)),
+    ];
+    return i.editReply({ components: [notice(lines.join('\n'), failed.length ? colors.warning : colors.success)], flags: V2, allowedMentions: { parse: [] } });
   },
 );
 
@@ -2654,7 +2806,7 @@ async function flowTest() {
   await onLegitCheckMessage(Object.assign(lcMessage('ktos', `+rep <@${STAFF}> Bot [ 10 PLN ] [ BLIK ]`, [STAFF]), { channel: channels[LC_CH] }));
   await panelQueues.get(GID);
   assert(!getTicket(GID, TICKET_CH).closedAt, 'vouch innej osoby nie zamyka ticketu');
-  assert(g.stats.lc === 1, 'vouch innej osoby liczy się do licznika');
+  assert(g.stats.lc === 0 && g.stats.done === 0, 'vouch osoby bez ticketu nie zmienia licznika (liczą się zrealizowane zamówienia)');
 
   // 7. Klient pisze coś innego niż rep → podpowiedź, ticket otwarty.
   messageContentOn = true;
@@ -2779,7 +2931,7 @@ async function flowTest() {
   g.settings.reviewChannelId = null;
   await updateCounters(fakeClient);
   assert(channels[LEGIT_CH].name === '🤔┃czy-legit→404', `licznik czy legit (${channels[LEGIT_CH].name})`);
-  assert(channels[LC_CH].name === '✅┃legit-check→2', `licznik legit check (${channels[LC_CH].name})`);
+  assert(channels[LC_CH].name === '✅┃legit-check→1', `licznik legit check = zrealizowane zamówienia (${channels[LC_CH].name})`);
   const renames = log.filter(([type]) => type === 'rename').length;
   await updateCounters(fakeClient);
   assert(log.filter(([type]) => type === 'rename').length === renames, 'bez zmian liczby nie zmieniamy nazwy');
@@ -3064,6 +3216,91 @@ async function welcomeTest() {
   console.log('✅ Test powitań i zaproszeń: 5 scenariuszy OK');
 }
 
+// ─── Test auto LC i spójności bazy (symulacja) ─────────────────────────
+
+async function autoLcTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test auto LC nie przeszedł: ${msg}`);
+  };
+  const GID = 'autolc-guild';
+  const sent = [];
+  const hookSends = [];
+  let seq = 0;
+  const mkChannel = (id) => ({
+    id,
+    guildId: GID,
+    name: id,
+    send: async (p) => (sent.push([id, p]), { id: `m${++seq}`, url: `https://discord.com/channels/${GID}/${id}/m${seq}`, delete: async () => {}, react: async () => {} }),
+    messages: { fetch: async () => null },
+    delete: async () => sent.push([id, 'deleted']),
+  });
+  const channels = { lc: mkChannel('lc'), log: mkChannel('log'), t1: mkChannel('t1'), t2: mkChannel('t2') };
+  let createdHooks = 0;
+  channels.lc.fetchWebhooks = async () => new Map();
+  channels.lc.createWebhook = async () => {
+    createdHooks++;
+    return {
+      send: async (p) => (hookSends.push(p), { id: `hook${++seq}`, url: `https://discord.com/channels/${GID}/lc/hook${seq}`, react: async () => {} }),
+    };
+  };
+  const users = {
+    c1: { id: 'c1', username: 'wojtek3509', displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png', send: async () => {} },
+    c2: { id: 'c2', username: 'klient2', displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/2.png', send: async () => {} },
+  };
+  const fakeGuild = { id: GID, name: 'TanieBoty', iconURL: () => null, channels: { fetch: async (id) => channels[id] ?? null } };
+  for (const ch of Object.values(channels)) ch.guild = fakeGuild;
+  const fakeClient = { user: { id: 'bot' }, users: { fetch: async (id) => users[id] }, channels: { fetch: async (id) => channels[id] ?? null } };
+  makeTranscript = async () => ({ name: 'transcript.html' });
+
+  const g = guild(GID);
+  Object.assign(g.settings, { lcChannelId: 'lc', logChannelId: 'log' });
+  const deal = { product: 'Bot do exchange', price: '50 zł', payment: 'ltc', sellerId: 'staff' };
+  g.tickets.t1 = { channelId: 't1', number: 1, type: 'bot', userId: 'c1', openedAt: 1, form: {}, deal, awaitingRep: true, decidedBy: 'staff' };
+  g.tickets.t2 = { channelId: 't2', number: 2, type: 'hosting', userId: 'c2', openedAt: 1, form: {}, deal, awaitingRep: true, decidedBy: 'staff' };
+  g.tickets.t3 = { channelId: 't3', number: 3, type: 'bot', userId: 'c1', openedAt: 1, form: {} }; // otwarty, bez „Zrealizowane”
+
+  // 1. /autolc: webhook z nazwą konta + [AUTO LC], zamknięcie, logi.
+  const res = await autoLegitCheck(fakeClient, fakeGuild, 'admin');
+  assert(res.done.length === 2 && !res.failed.length, 'auto LC dla 2 czekających ticketów');
+  assert(createdHooks === 1, 'jeden webhook dla wszystkich');
+  assert(hookSends[0].username === 'wojtek3509 [AUTO LC]', `nazwa webhooka (${hookSends[0].username})`);
+  assert(hookSends[0].content === '+rep <@staff> Bot do exchange [ 50 zł ] [ LTC ]' && hookSends[0].avatarURL, 'treść repa i avatar klienta');
+  assert(g.tickets.t1.closedAt && g.tickets.t1.result === 'done' && g.tickets.t1.autoLc, 'ticket zamknięty jako zrealizowany (auto LC)');
+  assert(!g.tickets.t3.closedAt, 'ticket bez „Zrealizowane” nietknięty');
+  assert(g.stats.done === 2, 'licznik zrealizowanych = 2');
+  assert(sent.some(([id, p]) => id === 'lc' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('JAK NAPISAĆ VOUCHA')), 'panel voucha na dole po auto LC');
+  const logSend = sent.find(([id, p]) => id === 'log' && p.components);
+  assert(logSend && JSON.stringify(logSend[1].components[0].toJSON()).includes('[AUTO LC]'), 'log z oznaczeniem AUTO LC');
+  assert(counterTargets(g).some(([id, , n]) => id === 'lc' && n === 2), 'nazwa kanału LC = liczba zrealizowanych');
+  assert((await autoLegitCheck(fakeClient, fakeGuild, 'admin')).done.length === 0, 'drugie /autolc nic nie robi');
+  // Webhook (auto LC) nie jest traktowany jak rep klienta.
+  assert((await onLegitCheckMessage({ guild: fakeGuild, channelId: 'lc', author: { id: 'x', bot: true }, webhookId: 'h' })) === false, 'wiadomość webhooka pomijana');
+
+  // 2. Usunięta opinia → znika z bazy.
+  g.reviews = [{ number: 1, userId: 'c1', messageId: 'rev1', ratings: { quality: 5, time: 5, service: 5 }, at: 1 }];
+  await onMessageDeleted({ id: 'rev1', guildId: GID, client: fakeClient });
+  assert(g.reviews.length === 0, 'usunięta opinia usunięta z bazy');
+
+  // 3. Usunięty panel „czy legit” → zapomniany, głosy od zera.
+  g.panels.legit = { channelId: 'x', messageId: 'legitmsg' };
+  g.legitVotes = { yes: 40, no: 0 };
+  await onMessageDeleted({ id: 'legitmsg', guildId: GID, client: fakeClient });
+  assert(!g.panels.legit && g.legitVotes.yes === 0, 'usunięty panel czy legit: reset do 0');
+
+  // 4. Usunięty konkurs → anulowany, bez losowania.
+  g.giveaways.gw1 = { channelId: 'x', prize: 'P', winners: 1, endsAt: Date.now() + 1e6, entrants: ['a'], ended: false };
+  await onMessageDeleted({ id: 'gw1', guildId: GID, client: fakeClient });
+  assert(g.giveaways.gw1.ended && g.giveaways.gw1.cancelled, 'usunięty konkurs anulowany');
+
+  // 5. Ręcznie usunięty kanał ticketu → zamknięty w bazie, klient może otworzyć nowy.
+  await onChannelDeleted({ id: 't3', guildId: GID, client: fakeClient });
+  assert(g.tickets.t3.closedAt && openTicketsOf(GID, 'c1').length === 0, 'usunięty kanał zamyka ticket w bazie');
+  assert(sent.some(([id, p]) => id === 'log' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('usunięty ręcznie')), 'informacja w logach');
+
+  delete store.guilds[GID];
+  console.log('✅ Test auto LC i spójności bazy: 5 scenariuszy OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
@@ -3072,6 +3309,7 @@ if (process.argv.includes('--check')) {
   await generatorTest();
   await registerTest();
   await welcomeTest();
+  await autoLcTest();
   process.exit(0);
 }
 
@@ -3141,6 +3379,13 @@ function start(attempt = 0) {
   botClient.on(Events.MessageCreate, (m) => onMessage(m).catch(console.error));
   botClient.on(Events.MessageReactionAdd, (r, u) => onLegitReaction(r, u, true).catch(console.error));
   botClient.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
+  botClient.on(Events.MessageReactionRemoveAll, (m) => onLegitReactionsCleared(m).catch(console.error));
+  botClient.on(Events.MessageReactionRemoveEmoji, (r) => onLegitReactionsCleared(r.message).catch(console.error));
+  botClient.on(Events.MessageDelete, (m) => onMessageDeleted(m).catch(console.error));
+  botClient.on(Events.MessageBulkDelete, async (msgs) => {
+    for (const m of msgs.values()) await onMessageDeleted(m).catch(console.error);
+  });
+  botClient.on(Events.ChannelDelete, (ch) => onChannelDeleted(ch).catch(console.error));
   botClient.on(Events.InviteCreate, (inv) => inviteCache.get(inv.guild?.id)?.set(inv.code, inv.uses ?? 0));
   botClient.on(Events.InviteDelete, (inv) => inviteCache.get(inv.guild?.id)?.delete(inv.code));
   botClient.on(Events.GuildCreate, (g) => cacheInvites(g));
