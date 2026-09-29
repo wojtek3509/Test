@@ -78,7 +78,7 @@ Własne emoji wgrywasz w Developer Portal → Emojis. Kod w formacie `<:nazwa:id
 
 ### Jak to działa
 
-Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język (Node.js, Python, Java albo inny), okres, płatność ze sposobem zakupu (np. `⚡ LTC — automatycznie` albo `⏳ BLIK — ręcznie`), opcjonalnie **nazwę serwera** i e-mail (login do panelu). Nazwę można później zmienić przyciskiem **✏️ Zmień nazwę** (w DM z danymi serwera i w `/moj-hosting`).
+Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język (Node.js, Python, Java albo inny), okres, sposób zakupu (⚡ automatyczny / ⏳ ręczny), płatność i e-mail (login do panelu). Serwer dostaje nazwę „Język • nazwa klienta”, którą klient zmienia przyciskiem **✏️ Zmień nazwę** (w DM z danymi serwera i w `/moj-hosting`).
 
 **⚡ Automatyczny (tylko krypto: LTC, ETH, USDC na Ethereum, SOL, USDC na Solanie):**
 1. Bot przelicza cenę na krypto po aktualnym kursie i dodaje **unikalną końcówkę kwoty** (np. `0.01250417 LTC`). Po niej rozpoznaje wpłatę na Twój jeden adres. W DM wysyła adres, kwotę, kod QR i przyciski „Skopiuj adres” i „Skopiuj kwotę”.

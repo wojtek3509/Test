@@ -157,16 +157,16 @@ const ticketTypes = {
     fields: [
       { id: 'lang', label: 'Język bota', select: Object.entries(hostingLanguages).map(([id, l]) => [`${l.emoji} ${l.label}`, id]) },
       { id: 'period', label: 'Okres hostingu', select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]) },
-      // ⚡ = automatycznie (tylko krypto, serwer od razu), ⏳ = ręcznie (ticket, czekasz na właściciela).
       {
-        id: 'pay',
-        label: 'Płatność i sposób zakupu',
+        id: 'mode',
+        label: 'Sposób zakupu',
         select: [
-          ...Object.keys(cryptoCoins).map((id) => [`⚡ ${hostingPayments[id].label} — automatycznie, serwer od razu`, `auto:${id}`]),
-          ...Object.entries(hostingPayments).map(([id, p]) => [`⏳ ${p.label} — ręcznie (czekasz na właściciela)`, `manual:${id}`]),
+          ['⚡ Automatyczny — krypto, serwer od razu', 'auto'],
+          ['⏳ Ręczny — czekasz na właściciela', 'manual'],
         ],
       },
-      { id: 'name', label: 'Nazwa serwera (opcjonalnie)', placeholder: 'np. Mój bot ticketowy', required: false, max: 40 },
+      { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]) },
+      // Nazwę serwera klient ustawia po zakupie: „✏️ Zmień nazwę” w DM i w /moj-hosting.
       { id: 'email', label: 'E-mail (login do panelu hostingu)', placeholder: 'np. jan.kowalski@gmail.com' },
     ],
   },
@@ -1921,7 +1921,7 @@ function cleanServerName(value) {
   return name || null;
 }
 
-/** „auto:ltc” → mode + payment; nazwa serwera oczyszczona. */
+/** Nazwa serwera oczyszczona (pole „pay” = „auto:ltc” zostaje obsługiwane dla starszych formularzy). */
 function normalizeHostingForm(form) {
   if (form.pay) [form.mode, form.payment] = form.pay.split(':');
   form.name = cleanServerName(form.name);
@@ -2136,7 +2136,7 @@ function renewModal(guildId, serverId) {
     .setCustomId(`hs:renewsubmit:${guildId}:${serverId}`)
     .setTitle('🔁 Przedłuż hosting')
     .addLabelComponents(
-      ['period', 'pay'].map((id) => {
+      ['period', 'mode', 'payment'].map((id) => {
         const f = ticketTypes.hosting.fields.find((field) => field.id === id);
         return new LabelBuilder()
           .setLabel(f.label)
@@ -2157,7 +2157,8 @@ async function onRenewSubmit(i, guildId, serverId) {
   const form = normalizeHostingForm({
     lang: rec.lang,
     period: i.fields.getStringSelectValues('period')[0],
-    pay: i.fields.getStringSelectValues('pay')[0],
+    mode: i.fields.getStringSelectValues('mode')[0],
+    payment: i.fields.getStringSelectValues('payment')[0],
     renew: String(serverId),
   });
   const error = hostingFormError(form);
@@ -5253,7 +5254,7 @@ async function hostingTest() {
   const purchase = async (userId, form) => {
     const i = interaction(userId, {
       fields: {
-        getStringSelectValues: (id) => (id === 'pay' ? [`${form.mode}:${form.payment}`] : form[id] ? [form[id]] : []),
+        getStringSelectValues: (id) => (form[id] ? [form[id]] : []),
         getTextInputValue: (id) => form[id] ?? '',
       },
     });
@@ -5299,8 +5300,8 @@ async function hostingTest() {
     assert(hostingFormError(form({ email: null, renew: '5', lang: 'other' })) === null, 'przedłużenie bez e-maila i dla innego języka');
     const modalJson = JSON.stringify(ticketModal('hosting').toJSON());
     assert(
-      ['Język bota', 'Płatność i sposób zakupu', 'auto:usdc_sol', 'manual:ltc', 'manual:revolut', 'automatycznie', 'ręcznie', 'Nazwa serwera', 'E-mail'].every((t) => modalJson.includes(t)),
-      'formularz zakupu: język, okres, płatność ze sposobem, nazwa, e-mail',
+      ['Język bota', 'Okres hostingu', 'Sposób zakupu', 'Automatyczny', 'Ręczny', 'USDC (sieć Solana)', 'Revolut', 'E-mail'].every((t) => modalJson.includes(t)) && !modalJson.includes('Nazwa serwera'),
+      'formularz zakupu: język, okres, sposób, płatność, e-mail (bez nazwy)',
     );
     assert(ticketModal('hosting').toJSON().components.length === 5, 'formularz ma 5 pól (limit Discorda)');
     assert(cleanServerName('  Mój\u200b   bot\n ticketowy  ') === 'Mój bot ticketowy' && cleanServerName('   ') === null && cleanServerName('x'.repeat(60)).length === 40, 'czyszczenie nazwy serwera');
@@ -5308,7 +5309,7 @@ async function hostingTest() {
     assert(/z listy/.test(hostingFormError(normalizeHostingForm({ lang: 'nodejs', period: '1m', pay: 'auto:btc', email: 'a@b.pl' }))), 'nieznana płatność → błąd');
 
     // 3. Zakup automatyczny LTC: DM z kwotą → wpłata w mempoolu → 2 potwierdzenia → serwer.
-    let i = await purchase('c1', form({ name: '  Mój   bot ticketowy ' }));
+    let i = await purchase('c1', form());
     let order = lastOrder('c1');
     assert(order?.status === 'waiting' && order.wallet === LTC && order.amount.startsWith('0.01250'), 'zamówienie LTC utworzone');
     assert(J(i.replies.at(-1)).includes('DM') && dms.length === 1 && J(dms[0][1]).includes(order.amount) && J(dms[0][1]).includes(LTC), 'DM z adresem i kwotą');
@@ -5336,12 +5337,12 @@ async function hostingTest() {
     await tick();
     assert(order.status === 'done' && order.serverId, `2 potwierdzenia → serwer utworzony (${order.status} ${order.lastError ?? ''})`);
     const s1 = panel.servers.find((s) => s.id === order.serverId);
-    assert(s1.name === 'Mój bot ticketowy' && order.name === 'Mój bot ticketowy', 'nazwa serwera od klienta');
+    assert(s1.name === 'Node.js • Wojtek3509', 'domyślna nazwa serwera: język • nazwa klienta');
     const log1 = purchaseLogs.find((e) => e.json.includes(order.id));
     assert(purchaseLogs.filter((e) => e.json.includes(order.id)).length === 1 && log1.edits >= 4, `jedna wiadomość w logach na zamówienie, aktualizowana (${log1?.edits})`);
     assert(
-      ['Zrealizowane', `#${order.serverId}`, 'ltcgood', 'Wpłata wykryta', 'Potwierdzona', 'Mój bot ticketowy', '<@c1>', 'kurs 400.00 zł'].every((t) => log1.json.includes(t)),
-      'log: status, klient, nazwa, kurs, tx i oś czasu',
+      ['Zrealizowane', `#${order.serverId}`, 'ltcgood', 'Wpłata wykryta', 'Potwierdzona', '<@c1>', 'kurs 400.00 zł'].every((t) => log1.json.includes(t)),
+      'log: status, klient, kurs, tx i oś czasu',
     );
     assert(s1.limits.memory === 256 && s1.limits.disk === 1024 && s1.limits.cpu === 25 && s1.limits.swap === 0, 'limity 256 MB / 1 GB / 25%');
     assert(s1.egg === 15 && s1.docker_image === 'ghcr.io/parkervcp/yolks:egg15' && s1.environment.MAIN_FILE === 'index.js' && s1.environment.NODE_PACKAGES === '', 'jajko Node.js z domyślnymi zmiennymi');
@@ -5441,7 +5442,7 @@ async function hostingTest() {
     const recRename = Object.values(g.hosting.servers).find((r) => r.userId === 'c1');
     const renameBtn = interaction('c1', { customId: `hs:rename:${GID}:${recRename.id}` });
     await routeHosting(renameBtn);
-    assert(JSON.stringify(renameBtn.modal.toJSON()).includes('Mój bot ticketowy'), 'formularz nazwy z obecną nazwą');
+    assert(JSON.stringify(renameBtn.modal.toJSON()).includes('Node.js • Wojtek3509'), 'formularz nazwy z obecną nazwą');
     const renameSubmit = interaction('c1', {
       customId: `hs:renamesubmit:${GID}:${recRename.id}`,
       isButton: () => false,
@@ -5484,7 +5485,7 @@ async function hostingTest() {
       customId: `hs:renewsubmit:${GID}:${rec1.id}`,
       isButton: () => false,
       isModalSubmit: () => true,
-      fields: { getStringSelectValues: (id) => [{ period: '3m', pay: 'auto:ltc' }[id]] },
+      fields: { getStringSelectValues: (id) => [{ period: '3m', mode: 'auto', payment: 'ltc' }[id]] },
     });
     await routeHosting(renewSubmit);
     order = lastOrder('c1');
