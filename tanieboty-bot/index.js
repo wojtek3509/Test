@@ -2107,10 +2107,12 @@ command(
         ),
     )
     .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
-    .addStringOption((o) => o.setName('baner').setDescription('Link do obrazka pod panelem (zapamiętywany)')),
+    .addStringOption((o) => o.setName('baner').setDescription('Link do obrazka pod panelem (zapamiętywany)'))
+    .addBooleanOption((o) => o.setName('usun-baner').setDescription('Usuń zapamiętany baner tego panelu')),
   async (i) => {
     const type = i.options.getString('typ');
     const bannerUrl = i.options.getString('baner');
+    if (i.options.getBoolean('usun-baner')) updateGuild(i.guildId, (g) => delete g.settings.banners[type]);
     if (bannerUrl && !isUrl(bannerUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https).');
     const st = guild(i.guildId).settings;
     if (type === 'tickety' && !Object.keys(ticketTypes).some((t) => ticketCategoryFor(st, t))) return replyFail(i, 'Najpierw użyj `/setup` albo `/generuj`.');
