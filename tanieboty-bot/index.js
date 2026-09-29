@@ -38,6 +38,8 @@ const brand = {
   emoji: '🤖',
   tagline: 'Tanie i solidne boty Discord na zamówienie',
   footerEmoji: '💙',
+  // Link do serwera (np. 'https://discord.gg/tanieboty'). Gdy ustawiony, nazwa serwera w regulaminie jest klikalna.
+  invite: null,
 };
 
 // Zdjęcia (miniaturki) pokazujemy tylko przy osobach: w tickecie, opiniach, boostach i powitaniach.
@@ -113,19 +115,33 @@ const ticketTypes = {
   },
 };
 
-// Regulamin: sekcje wybierane z menu.
+// Regulamin: sekcje wybierane z menu. Zamiast „§” sekcje nazywają się „Rozdział 1”, a punkty „1.1”.
+const rulesSectionWord = 'Rozdział';
 const rules = [
   {
     title: 'Postanowienia ogólne',
+    emoji: '📘',
     points: [
-      'Serwer **TanieBoty** zajmuje się tworzeniem i hostingiem botów Discord.',
-      'Składając zamówienie, akceptujesz niniejszy regulamin.',
-      'Obowiązuje kultura osobista — obrażanie, spam i scam kończą się banem.',
-      'Administracja może zmienić regulamin; zmiany ogłaszamy na serwerze.',
+      `Dołączenie do ${brand.invite ? `[serwera ${brand.name}](${brand.invite})` : `serwera **${brand.name}**`} i korzystanie z niego oznacza pełną akceptację niniejszego regulaminu.`,
+      'Każdy użytkownik ma obowiązek zachowywać kulturę osobistą i szacunek wobec innych — w szczególności wobec klientów i właścicieli serwera.',
+      'Handel między użytkownikami w jakiejkolwiek formie jest **zakazany**. Złamanie zakazu grozi wyciszeniem lub stałą blokadą konta.',
+      'Reklamowanie i promowanie czegokolwiek bez wcześniejszej zgody administracji jest surowo zabronione.',
+      'Zabronione jest używanie botów spamujących, exploitów i innych sposobów automatyzacji lub obchodzenia zabezpieczeń serwera.',
+      'Zakazane jest udostępnianie treści naruszających prawa autorskie, patenty lub inną własność intelektualną.',
+      'Administracja może moderować treści na serwerze, w szczególności:\n- usuwać wiadomości nieodpowiednie, niezgodne z regulaminem lub naruszające prawa innych,\n- blokować osoby, które zakłócają działanie serwera lub działają wbrew jego celowi.',
+      'Korzystając z serwera, zgadzasz się na stosowanie narzędzi moderacji oraz przetwarzanie niezbędnych danych w celu zapewnienia bezpieczeństwa — zgodnie z zasadami Discorda i obowiązującym prawem (w tym RODO).',
+      `Błędy techniczne i inne problemy zgłaszaj administracji — dzięki temu ${brand.invite ? `[serwer](${brand.invite})` : 'serwer'} działa sprawnie dla wszystkich.`,
+      'W sporach między użytkownikami administracja może pełnić rolę mediatora, ale nie odpowiada za nieporozumienia poza serwerem.',
+      'Właściciele serwera wykonują swoje obowiązki neutralnie i profesjonalnie.',
+      'Serwer nie odpowiada za straty finansowe wynikające z działań użytkowników, ich błędnych decyzji lub niewłaściwego korzystania z usług.',
+      'Po __zrealizowanym zamówieniu__ klient może wystawić rzetelną opinię o realizacji, jej czasie i przebiegu. Opinie niezgodne z prawdą są usuwane.',
+      'Zniesławianie, publiczne oczernianie, szerzenie dezinformacji lub inne działania szkodzące dobremu imieniu serwera, jego usług lub twórców (publicznie lub prywatnie) to **rażące naruszenie regulaminu**. Skutkuje natychmiastowym zakończeniem wszystkich usług (w tym usunięciem i zablokowaniem bota) oraz stałą blokadą konta — bez zwrotu wpłaconych środków.',
+      'Administracja może zmienić regulamin w każdej chwili. Zmiany obowiązują od momentu publikacji, dlatego warto regularnie do niego zaglądać.',
     ],
   },
   {
     title: 'Polityka zwrotów',
+    emoji: '💸',
     points: [
       'Zwrot jest możliwy, **dopóki prace nad botem się nie rozpoczęły**.',
       'Po rozpoczęciu prac zwracamy część kwoty proporcjonalną do niewykonanej pracy.',
@@ -135,6 +151,7 @@ const rules = [
   },
   {
     title: 'Polityka zamówień',
+    emoji: '🛒',
     points: [
       'Zamówienia składasz wyłącznie przez **ticket**.',
       'Przed startem ustalamy funkcje, cenę i termin — to jest wiążąca wycena.',
@@ -144,6 +161,7 @@ const rules = [
   },
   {
     title: 'Polityka płatności',
+    emoji: '💳',
     points: [
       'Akceptujemy: BLIK, przelew, PayPal, PSC i krypto.',
       'Przy większych zamówieniach pobieramy **zaliczkę 50%**.',
@@ -422,7 +440,7 @@ function ticketsPanel(g, logo) {
 
 function rulesPanel(g, logo) {
   const b = box();
-  header(b, [title('Regulamin', '📜'), '>>> ' + rules.map((r, i) => `**§${i + 1}. ${r.title}.**`).join('\n')].join('\n'), logo);
+  header(b, [title('Regulamin', '📜'), '>>> ' + rules.map((r, i) => `${r.emoji} **${rulesSectionWord} ${i + 1}.** ${r.title}`).join('\n')].join('\n'), logo);
   text(b, `> -# Korzystając z serwera, akceptujesz regulamin. Ostatnia aktualizacja: ${ts(Date.now(), 'D')}`);
   banner(b, g.settings.banners.regulamin);
   sep(b);
@@ -432,7 +450,7 @@ function rulesPanel(g, logo) {
         .setCustomId('rules:show')
         .setPlaceholder(placeholderNone)
         .addOptions(
-          rules.map((rule, idx) => ({ label: `§${idx + 1}. ${rule.title}`, value: String(idx), description: 'Kliknij, aby wyświetlić tą sekcję regulaminu.', emoji: '📄' })),
+          rules.map((rule, idx) => ({ label: `${rulesSectionWord} ${idx + 1}. ${rule.title}`, value: String(idx), description: 'Kliknij, aby wyświetlić ten rozdział regulaminu.', emoji: rule.emoji })),
         ),
     ),
   );
@@ -449,7 +467,7 @@ function rulesPanel(g, logo) {
 function rulesSection(index) {
   const r = rules[index];
   const b = box();
-  text(b, title(`§${index + 1}. ${r.title}`, '📜'));
+  text(b, title(`${rulesSectionWord} ${index + 1}. ${r.title}`, r.emoji));
   sep(b);
   text(b, '>>> ' + r.points.map((p, i) => `\`${index + 1}.${i + 1}\` ${p}`).join('\n'));
   sep(b);
@@ -2433,6 +2451,11 @@ async function flowTest() {
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
   assert(cardJson.includes('"type":11'), 'ticket pokazuje avatar klienta');
+  const rulesJson = rulesSection(0).toJSON();
+  const rulesText = rulesJson.components.map((cmp) => cmp.content ?? '').join('');
+  assert(!JSON.stringify(rulesJson).includes('§') && !JSON.stringify(rulesPanel(g, null).toJSON()).includes('§'), 'regulamin bez §');
+  assert(rulesText.includes('`1.1`') && rulesText.includes('`1.15`') && rulesText.includes('ROZDZIAŁ 1. POSTANOWIENIA OGÓLNE'), 'rozdział 1 z punktami 1.1–1.15');
+  assert(rulesJson.components.every((cmp) => (cmp.content ?? '').length <= 4000), 'każdy blok tekstu w limicie Discorda (4000 znaków)');
   const priceJson = JSON.stringify(pricingPanel(g, null).toJSON());
   assert(['1 miesiąc', '5 zł', '3 miesiące', '14 zł', '1 rok', '50 zł'].every((t) => priceJson.includes(t)), 'cennik: 3 pakiety hostingu');
   assert(!priceJson.includes('tk:quick:bot') && !priceJson.includes('Boty Discord'), 'cennik bez botów');
