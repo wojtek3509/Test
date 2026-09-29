@@ -1,6 +1,7 @@
 // TanieBoty — bot Discord dla sklepu z botami, cały w jednym pliku (Components V2).
 // Uruchomienie: npm install && node index.js   (sprawdzenie offline: node index.js --check)
 import 'dotenv/config';
+import { randomBytes, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,13 +63,77 @@ const colors = {
   boost: 0xf47fff,
 };
 
-// Cennik hostingu (/panel typ:cennik) — te same pakiety są do wyboru w tickecie „Hosting bota discord”.
-// [nazwa, cena, id]
+// Cennik hostingu (/panel typ:cennik) — te same pakiety są do wyboru przy zakupie hostingu.
+// [nazwa, cena, id, liczba dni]
 const hostingPlans = [
-  ['1 miesiąc', '5 zł', '1m'],
-  ['3 miesiące', '14 zł', '3m'],
-  ['1 rok', '50 zł', '12m'],
+  ['1 miesiąc', '5 zł', '1m', 31],
+  ['3 miesiące', '14 zł', '3m', 93],
+  ['1 rok', '50 zł', '12m', 365],
 ];
+
+// Zasoby serwera każdego klienta (MB i % jednego rdzenia). Większe limity: /hosting limity.
+const hostingLimits = { memory: 256, disk: 1024, cpu: 25, io: 500, swap: 0, backups: 1, databases: 0 };
+
+// Języki do wyboru przy zakupie. Jajka (nest/egg) ustawiasz w config.json → hosting.eggs.
+// manualOnly = tylko zakup ręczny (serwer tworzy właściciel).
+const hostingLanguages = {
+  nodejs: { label: 'Node.js (discord.js)', emoji: '🟩', files: '`index.js` + `package.json`' },
+  python: { label: 'Python (discord.py)', emoji: '🐍', files: '`main.py` + `requirements.txt`' },
+  java: { label: 'Java (JDA)', emoji: '☕', files: 'plik `bot.jar` (z zależnościami)' },
+  other: { label: 'Inny język (tylko zakup ręczny)', emoji: '🧩', manualOnly: true },
+};
+
+// Kryptowaluty do automatycznego zakupu. Bot sam sprawdza blockchain i czeka na potwierdzenia.
+// decimals = miejsca po przecinku w sieci, shown = w kwocie dla klienta, step = zaokrąglenie ceny w górę.
+const cryptoCoins = {
+  ltc: { label: 'LTC', network: 'Litecoin', emoji: '💠', chain: 'ltc', decimals: 8, shown: 8, step: 0.00001, gecko: 'litecoin', rep: 'ltc' },
+  eth: { label: 'ETH', network: 'Ethereum', emoji: '💎', chain: 'eth', decimals: 18, shown: 8, step: 0.00001, gecko: 'ethereum', rep: 'eth' },
+  usdc_eth: {
+    label: 'USDC',
+    network: 'Ethereum (ERC-20)',
+    emoji: '💵',
+    chain: 'eth',
+    token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    decimals: 6,
+    shown: 6,
+    step: 0.01,
+    gecko: 'usd-coin',
+    rep: 'usdc',
+  },
+  sol: { label: 'SOL', network: 'Solana', emoji: '🟣', chain: 'sol', decimals: 9, shown: 8, step: 0.00001, gecko: 'solana', rep: 'sol' },
+  usdc_sol: {
+    label: 'USDC',
+    network: 'Solana',
+    emoji: '💵',
+    chain: 'sol',
+    token: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    decimals: 6,
+    shown: 6,
+    step: 0.01,
+    gecko: 'usd-coin',
+    rep: 'usdc',
+  },
+};
+
+// Metody płatności przy zakupie hostingu. Krypto działa automatycznie i ręcznie, reszta tylko ręcznie.
+// Dane do płatności ręcznej (numer BLIK, konto, Revolut) wpisujesz w config.json → hosting.manualPayments.
+const hostingPayments = {
+  ltc: { label: 'LTC (Litecoin)', emoji: '💠' },
+  eth: { label: 'ETH (Ethereum)', emoji: '💎' },
+  usdc_eth: { label: 'USDC (sieć Ethereum)', emoji: '💵' },
+  sol: { label: 'SOL (Solana)', emoji: '🟣' },
+  usdc_sol: { label: 'USDC (sieć Solana)', emoji: '💵' },
+  blik: { label: 'BLIK', emoji: '📱', rep: 'blik' },
+  przelew: { label: 'Przelew', emoji: '🏦', rep: 'przelew' },
+  revolut: { label: 'Revolut', emoji: '💳', rep: 'revolut' },
+};
+
+const hostingTimes = {
+  payMinutes: 30, // czas na wpłatę krypto
+  confirmations: 2, // potwierdzenia LTC i ETH (Solana: status „finalized”)
+  remindDays: [3, 1], // przypomnienia w DM przed końcem
+  deleteNoticeDays: 7, // po tylu dniach blokady bot powiadamia admina, że serwer można usunąć
+};
 
 // Kategorie ticketów (maks. 25). "fields" to pola formularza (maks. 5).
 const ticketTypes = {
@@ -88,14 +153,20 @@ const ticketTypes = {
     emoji: '🖥️',
     description: 'Kliknij, aby zakupić hosting bota.',
     order: true,
+    // Formularz zakupu hostingu: automatyczny (krypto) albo ręczny (ticket, czekasz na właściciela).
     fields: [
-      { id: 'bot', label: 'Jaki bot? (język / biblioteka)', placeholder: 'np. discord.js, Python' },
+      { id: 'lang', label: 'Język bota', select: Object.entries(hostingLanguages).map(([id, l]) => [`${l.emoji} ${l.label}`, id]) },
+      { id: 'period', label: 'Okres hostingu', select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]) },
       {
-        id: 'period',
-        label: 'Okres hostingu',
-        select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]),
+        id: 'mode',
+        label: 'Sposób zakupu',
+        select: [
+          ['⚡ Automatyczny — krypto, serwer od razu', 'auto'],
+          ['⏳ Ręczny — czekasz na właściciela', 'manual'],
+        ],
       },
-      { id: 'notes', label: 'Uwagi', style: 'long', required: false },
+      { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]) },
+      { id: 'email', label: 'E-mail (login do panelu hostingu)', placeholder: 'np. jan.kowalski@gmail.com' },
     ],
   },
   question: {
@@ -264,6 +335,8 @@ const payments = {
   psc: { label: 'PSC', emoji: '🎫' },
   przelew: { label: 'Przelew', emoji: '🏦' },
   revolut: { label: 'Revolut', emoji: '💳' },
+  sol: { label: 'SOL', emoji: '🟣' },
+  usdc: { label: 'USDC', emoji: '💵' },
 };
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 
@@ -418,6 +491,10 @@ function guild(id) {
   g.settings.ticketCategories ??= {};
   g.settings.ticketLogs ??= {};
   g.joins ??= {};
+  g.hosting ??= {};
+  g.hosting.orders ??= {};
+  g.hosting.servers ??= {};
+  g.hosting.usedTx ??= [];
   return g;
 }
 
@@ -688,12 +765,25 @@ function pricingPanel(g, logo) {
     b,
     [
       title('Cennik hostingu', '💰'),
-      '>>> ' + [point('Twój bot działa **24/7** na naszym hostingu.'), point('Kliknij **Kup hosting**, wybierz pakiet i otwórz ticket.')].join('\n'),
+      '>>> ' +
+        [
+          point('Twój bot działa **24/7** na naszym hostingu.'),
+          point('Kliknij **Kup hosting**, wybierz język, okres i płatność.'),
+          point('**⚡ Krypto** (LTC, ETH, USDC, SOL) — serwer tworzy się **automatycznie** zaraz po wpłacie.'),
+          point('**⏳ Ręcznie** (BLIK, przelew, Revolut, krypto) — otwiera się ticket i czekasz na właściciela.'),
+        ].join('\n'),
     ].join('\n'),
     logo,
   );
   sep(b);
-  text(b, [`### 🖥️ ${x} Pakiety`, ...hostingPlans.map(([name, price]) => row(name, `\`${price}\``))].join('\n'));
+  text(
+    b,
+    [
+      `### 🖥️ ${x} Pakiety`,
+      ...hostingPlans.map(([name, price, , days]) => row(name, `\`${price}\` • ${days} dni`)),
+      `-# ${hostingLimits.memory} MB RAM • ${hostingLimits.disk >= 1024 ? `${hostingLimits.disk / 1024} GB` : `${hostingLimits.disk} MB`} dysku • ${hostingLimits.cpu}% CPU • ${Object.values(hostingLanguages).filter((l) => !l.manualOnly).map((l) => l.label.split(' (')[0]).join(', ')}`,
+    ].join('\n'),
+  );
   banner(b, g.settings.banners.cennik);
   sep(b);
   b.addActionRowComponents((r) =>
@@ -833,13 +923,23 @@ function ticketMessage(ticket, user) {
       const value = f.select ? (f.select.find(([, v]) => v === ticket.form[f.id])?.[0] ?? ticket.form[f.id]) : ticket.form[f.id];
       return f.style === 'long' ? `${point(`**${f.label}:**`)}\n${codeBlock(value)}` : row(f.label, `\`${value}\``);
     });
+  const renew = ticket.form.renew && ticket.guildId ? guild(ticket.guildId).hosting.servers[ticket.form.renew] : null;
+  if (ticket.form.renew) answers.unshift(row('🔁 Przedłużenie serwera', `\`${renew?.name ?? '?'}\` (ID \`${ticket.form.renew}\`)`));
+  if (ticket.hostingServerId) answers.push(row('✅ Hosting', `serwer ID \`${ticket.hostingServerId}\` ${ticket.form.renew ? 'przedłużony' : 'utworzony'}`));
   text(b, [`### ${t.emoji} ${x} ${t.label}`, ...answers].join('\n'));
   sep(b);
-  b.addActionRowComponents((r) =>
-    r.setComponents(
-      new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger),
-    ),
-  );
+  const buttons = [new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger)];
+  // Zakup ręczny hostingu: staff potwierdza płatność, a bot sam tworzy (albo przedłuża) serwer.
+  if (ticket.type === 'hosting' && ticket.form.lang && !ticket.hostingServerId && !hostingLanguages[ticket.form.lang]?.manualOnly) {
+    buttons.unshift(
+      new ButtonBuilder()
+        .setCustomId('hs:confirm')
+        .setLabel(ticket.form.renew ? 'Potwierdź płatność i przedłuż' : 'Potwierdź płatność i utwórz serwer')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success),
+    );
+  }
+  b.addActionRowComponents((r) => r.setComponents(...buttons));
   sep(b);
   footer(b);
   return b;
@@ -925,22 +1025,36 @@ async function onTicketSelect(i, type) {
   const { settings } = guild(i.guildId);
   if (!ticketCategoryFor(settings, type)) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup` albo `/generuj`.'));
   const open = openTicketsOf(i.guildId, i.user.id);
-  if (open.length >= settings.maxOpen) return replyV2(i, fail(`Masz już otwarty ticket: ${open.map((t) => `<#${t.channelId}>`).join(', ')}`));
+  // Hosting: zakup automatyczny nie otwiera ticketu, więc limit sprawdzamy dopiero przy zakupie ręcznym.
+  if (type !== 'hosting' && open.length >= settings.maxOpen) {
+    return replyV2(i, fail(`Masz już otwarty ticket: ${open.map((t) => `<#${t.channelId}>`).join(', ')}`));
+  }
   await i.showModal(ticketModal(type));
 }
 
 async function onTicketForm(i, type) {
-  const g = guild(i.guildId);
-  const { settings } = g;
-  if (openTicketsOf(i.guildId, i.user.id).length >= settings.maxOpen) return replyV2(i, fail('Osiągnięto limit otwartych ticketów.'));
-
   const form = {};
   for (const f of ticketTypes[type].fields) {
     form[f.id] = f.select ? (i.fields.getStringSelectValues(f.id)[0] ?? null) : i.fields.getTextInputValue(f.id) || null;
   }
+  // Hosting: zakup automatyczny (krypto) nie otwiera ticketu.
+  if (type === 'hosting') {
+    const error = hostingFormError(form);
+    if (error) return replyV2(i, fail(error));
+    if (form.mode === 'auto') return onAutoPurchase(i, i.guildId, form);
+  }
+  if (openTicketsOf(i.guildId, i.user.id).length >= guild(i.guildId).settings.maxOpen) return replyV2(i, fail('Osiągnięto limit otwartych ticketów.'));
 
   await i.deferReply({ flags: V2_EPHEMERAL });
-  const number = updateGuild(i.guildId, (gg) => gg.counter++).counter;
+  const { channel, error } = await createTicket(i.client, i.guild, i.user, type, form);
+  if (error) return i.editReply({ components: [fail(error)], flags: V2 });
+  await i.editReply({ components: [ok(`Ticket utworzony: ${channel}`)], flags: V2 });
+}
+
+/** Tworzy kanał ticketu z kartą (używane przez formularz i przez przedłużenie hostingu z DM). */
+async function createTicket(client, discordGuild, user, type, form) {
+  const { settings } = guild(discordGuild.id);
+  const number = updateGuild(discordGuild.id, (gg) => gg.counter++).counter;
   const t = ticketTypes[type];
   const allowUser = [
     PermissionFlagsBits.ViewChannel,
@@ -950,41 +1064,44 @@ async function onTicketForm(i, type) {
     PermissionFlagsBits.ReadMessageHistory,
   ];
   const overwrites = [
-    { id: i.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: i.user.id, allow: allowUser },
-    { id: i.client.user.id, allow: [...allowUser, PermissionFlagsBits.ManageChannels] },
+    { id: discordGuild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: user.id, allow: allowUser },
+    { id: client.user.id, allow: [...allowUser, PermissionFlagsBits.ManageChannels] },
   ];
   if (settings.staffRoleId) overwrites.push({ id: settings.staffRoleId, allow: [...allowUser, PermissionFlagsBits.ManageMessages] });
 
   let channel;
   try {
-    channel = await i.guild.channels.create({
-      name: ticketChannelName(i.user),
+    channel = await discordGuild.channels.create({
+      name: ticketChannelName(user),
       type: ChannelType.GuildText,
       parent: ticketCategoryFor(settings, type),
-      topic: `${t.emoji} ${t.label} • ${i.user.tag} (${i.user.id})`,
+      topic: `${t.emoji} ${t.label} • ${user.tag} (${user.id})`,
       permissionOverwrites: overwrites,
     });
   } catch (err) {
     console.error(err);
-    return i.editReply({ components: [fail('Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.')], flags: V2 });
+    return { error: 'Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.' };
   }
 
-  const ticket = { channelId: channel.id, number, type, userId: i.user.id, openedAt: Date.now(), form };
-  const message = await channel.send({ components: [ticketMessage(ticket, i.user)], flags: V2, allowedMentions: { parse: [] } });
+  const ticket = { channelId: channel.id, guildId: discordGuild.id, number, type, userId: user.id, openedAt: Date.now(), form };
+  const message = await channel.send({ components: [ticketMessage(ticket, user)], flags: V2, allowedMentions: { parse: [] } });
   ticket.messageId = message.id;
   await message.pin().catch(() => {});
-  updateGuild(i.guildId, (gg) => {
+  updateGuild(discordGuild.id, (gg) => {
     gg.tickets[channel.id] = ticket;
     gg.stats.opened++;
   });
+  if (type === 'hosting') {
+    await channel.send({ components: [manualPaymentView(form)], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
+  }
 
   const ping = await channel.send({
-    content: [`<@${i.user.id}>`, settings.staffRoleId && `<@&${settings.staffRoleId}>`].filter(Boolean).join(' '),
-    allowedMentions: { users: [i.user.id], roles: [settings.staffRoleId].filter(Boolean) },
+    content: [`<@${user.id}>`, settings.staffRoleId && `<@&${settings.staffRoleId}>`].filter(Boolean).join(' '),
+    allowedMentions: { users: [user.id], roles: [settings.staffRoleId].filter(Boolean) },
   });
   setTimeout(() => ping.delete().catch(() => {}), 3000);
-  await i.editReply({ components: [ok(`Ticket utworzony: ${channel}`)], flags: V2 });
+  return { channel, ticket };
 }
 
 function staffTicket(i) {
@@ -1270,6 +1387,1110 @@ async function finalizeTicket(client, g, channel, { closedBy, reason = null, res
     ?.send({ components: [closedView(closed, `Dziękujemy za skorzystanie z ${brand.name}!`, result === 'done', g.id)], files: [transcript], flags: V2 })
     .catch(() => {});
   setTimeout(() => channel.delete('Ticket zamknięty').catch(console.error), 5000);
+}
+
+// ═══ HOSTING (panel Pterodactyl + płatności krypto) ═══════════════════
+// Dane dostępowe są w config.json → "hosting" (adres panelu, klucze API, jajka, portfele). Opis w README.
+//
+// Zakup automatyczny: klient wybiera krypto → bot podaje adres i unikalną kwotę → co 30 s sprawdza blockchain →
+// po potwierdzeniach sam zakłada konto w panelu i serwer, a dane logowania wysyła w DM.
+// Zakup ręczny: ticket → staff klika „Potwierdź płatność” → bot tworzy (albo przedłuża) serwer.
+// Po terminie serwer jest blokowany (Suspend), a przedłużenie go odblokowuje.
+
+const DAY = 86_400_000;
+let hostingConfig = {};
+// Podmieniane w teście offline.
+let httpFetch = (...args) => fetch(...args);
+let hostingDelay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const hostingApi = () => ({
+  ltc: 'https://litecoinspace.org/api',
+  eth: 'https://eth.blockscout.com/api',
+  ethRpc: 'https://ethereum-rpc.publicnode.com',
+  sol: 'https://api.mainnet-beta.solana.com',
+  prices: 'https://api.coingecko.com/api/v3/simple/price',
+  qr: 'https://api.qrserver.com/v1/create-qr-code/',
+  ...hostingConfig.api,
+});
+const hostingReady = () => Boolean(hostingConfig.panelUrl && hostingConfig.apiKey);
+const panelUrl = () => String(hostingConfig.panelUrl ?? '').replace(/\/+$/, '');
+const walletFor = (coinKey) => hostingConfig.wallets?.[cryptoCoins[coinKey]?.chain] || null;
+const planOf = (id) => hostingPlans.find((p) => p[2] === id) ?? hostingPlans[0];
+const planPln = (id) => parseFloat(String(planOf(id)[1]).replace(',', '.').replace(/[^\d.]/g, ''));
+const langLabel = (id) => (hostingLanguages[id] ? `${hostingLanguages[id].emoji} ${hostingLanguages[id].label}` : `\`${id}\``);
+const payLabel = (id) => (hostingPayments[id] ? `${hostingPayments[id].emoji} ${hostingPayments[id].label}` : `\`${id}\``);
+const repPaymentOf = (id) => cryptoCoins[id]?.rep ?? hostingPayments[id]?.rep ?? id;
+const hostingServers = (guildId) => guild(guildId).hosting.servers;
+const validEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v ?? ''));
+const randomPassword = () => randomBytes(12).toString('base64url');
+const activeOrder = (o) => o.status === 'waiting' || o.status === 'seen';
+
+/** Błąd pokazywany klientowi wprost (np. zajęty e-mail). */
+const userError = (message) => Object.assign(new Error(message), { userFacing: true });
+
+/** Liczba całkowita (w najmniejszych jednostkach) → tekst z przecinkiem dziesiętnym, np. 1823417 → "0.01823417". */
+function unitsToString(units, decimals) {
+  const s = String(units).padStart(decimals + 1, '0');
+  return `${s.slice(0, -decimals)}.${s.slice(-decimals)}`;
+}
+
+async function getJson(url, init = {}) {
+  const res = await httpFetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  const raw = await res.text();
+  let data = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    const detail = data?.errors?.map((e) => e.detail).join(' ') || raw.slice(0, 200);
+    throw Object.assign(new Error(`HTTP ${res.status}: ${detail}`), { status: res.status, data });
+  }
+  return data;
+}
+
+// Ostrzeżenia z pętli (np. API blockchaina nie odpowiada) — najwyżej raz na 10 minut dla danego źródła.
+const warnedAt = new Map();
+function warnOnce(key, message) {
+  if (Date.now() - (warnedAt.get(key) ?? 0) < 10 * 60_000) return;
+  warnedAt.set(key, Date.now());
+  console.warn(message);
+}
+
+// ─── Panel Pterodactyl (Application API) ───────────────────────────────
+
+function ptero(method, path, body, clientApi = false) {
+  const key = clientApi ? hostingConfig.clientApiKey : hostingConfig.apiKey;
+  return getJson(`${panelUrl()}/api/${clientApi ? 'client' : 'application'}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${key}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+const notFound = (err) => err?.status === 404;
+
+/** Nazwa użytkownika w panelu: małe litery, cyfry, _ . - (zaczyna i kończy się literą/cyfrą). */
+function panelUsername(user) {
+  const base = String(user.username ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, '')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+    .slice(0, 30);
+  return base.length >= 3 ? base : `klient${String(user.id).slice(-6)}`;
+}
+
+/** Konto w panelu powiązane z kontem Discord (external_id = discord-<id>). */
+async function findPanelUser(discordId) {
+  try {
+    return (await ptero('GET', `/users/external/discord-${discordId}`)).attributes;
+  } catch (err) {
+    if (notFound(err)) return null;
+    throw err;
+  }
+}
+
+async function emailFree(email) {
+  const res = await ptero('GET', `/users?filter[email]=${encodeURIComponent(email)}`);
+  return !res?.data?.length;
+}
+
+/** Zwraca konto klienta w panelu — istniejące albo nowe (z hasłem do wysłania w DM). */
+async function ensurePanelUser(user, email) {
+  const existing = await findPanelUser(user.id);
+  if (existing) return { user: existing, password: null };
+  if (!validEmail(email)) throw userError('Brak poprawnego adresu e-mail do założenia konta w panelu.');
+  if (!(await emailFree(email))) throw userError(`E-mail \`${email}\` ma już konto w panelu (innej osoby). Potrzebny jest inny adres.`);
+  const password = randomPassword();
+  const base = panelUsername(user);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const username = attempt ? `${base.slice(0, 26)}${randomInt(1000, 9999)}` : base;
+    try {
+      const created = await ptero('POST', '/users', {
+        external_id: `discord-${user.id}`,
+        email,
+        username,
+        first_name: String(user.globalName || user.username || 'Klient').slice(0, 100),
+        last_name: 'Discord',
+        password,
+      });
+      return { user: created.attributes, password };
+    } catch (err) {
+      if (err.status === 422 && /username/i.test(err.message)) continue;
+      if (err.status === 422 && /email/i.test(err.message)) throw userError(`Panel odrzucił e-mail \`${email}\` (nieprawidłowy albo zajęty).`);
+      throw err;
+    }
+  }
+  throw userError('Nie udało się dobrać wolnej nazwy użytkownika w panelu.');
+}
+
+const eggCache = new Map();
+/** Jajko dla języka: obraz Dockera, komenda startowa i domyślne zmienne. */
+async function eggInfo(lang) {
+  const cfg = hostingConfig.eggs?.[lang];
+  if (!cfg?.nest || !cfg?.egg) throw userError(`Brak jajka dla języka \`${lang}\` (config.json → hosting.eggs.${lang}: nest i egg).`);
+  const key = `${cfg.nest}/${cfg.egg}`;
+  if (!eggCache.has(key)) {
+    const a = (await ptero('GET', `/nests/${cfg.nest}/eggs/${cfg.egg}?include=variables`)).attributes;
+    const environment = {};
+    for (const v of a.relationships?.variables?.data ?? []) environment[v.attributes.env_variable] = v.attributes.default_value ?? '';
+    eggCache.set(key, { id: a.id, image: cfg.image || a.docker_image, startup: a.startup, environment });
+  }
+  return eggCache.get(key);
+}
+
+async function deployLocations() {
+  if (hostingConfig.locationId) return [Number(hostingConfig.locationId)];
+  const res = await ptero('GET', '/locations');
+  const ids = (res?.data ?? []).map((l) => l.attributes.id);
+  if (!ids.length) throw new Error('W panelu nie ma żadnej lokalizacji (Admin → Locations).');
+  return ids;
+}
+
+/** Tworzy serwer w panelu. external_id sprawia, że ponowna próba nie utworzy drugiego serwera. */
+async function createPanelServer({ owner, lang, externalId, name, discordId }) {
+  try {
+    return (await ptero('GET', `/servers/external/${externalId}`)).attributes;
+  } catch (err) {
+    if (!notFound(err)) throw err;
+  }
+  const egg = await eggInfo(lang);
+  const res = await ptero('POST', '/servers', {
+    external_id: externalId,
+    name,
+    description: `${brand.name} • Discord ${discordId}`,
+    user: owner,
+    egg: egg.id,
+    docker_image: egg.image,
+    startup: egg.startup,
+    environment: egg.environment,
+    limits: { memory: hostingLimits.memory, swap: hostingLimits.swap, disk: hostingLimits.disk, io: hostingLimits.io, cpu: hostingLimits.cpu, threads: null },
+    feature_limits: { databases: hostingLimits.databases, allocations: 0, backups: hostingLimits.backups },
+    deploy: { locations: await deployLocations(), dedicated_ip: false, port_range: [] },
+    start_on_completion: false,
+  });
+  return res.attributes;
+}
+
+/** Start serwera po odblokowaniu (wymaga klucza Client API administratora). */
+async function startPanelServer(rec) {
+  if (!hostingConfig.clientApiKey) return false;
+  await hostingDelay(5000); // Wings potrzebuje chwili po odblokowaniu
+  return ptero('POST', `/servers/${rec.identifier}/power`, { signal: 'start' }, true)
+    .then(() => true)
+    .catch((err) => (console.warn(`Hosting: nie udało się uruchomić serwera ${rec.id}:`, err.message), false));
+}
+
+async function giveClientRole(client, guildId, userId) {
+  const discordGuild = client.guilds?.cache?.get(guildId);
+  const role = discordGuild?.roles?.cache?.find((r) => r.name === serverLayout.roles.client.name);
+  if (!role) return;
+  const member = await discordGuild.members.fetch(userId).catch(() => null);
+  await member?.roles.add(role, 'Zakup hostingu').catch(() => {});
+}
+
+async function sendHostingDm(client, userId, container) {
+  const user = await client.users.fetch(userId).catch(() => null);
+  return (await user?.send({ components: [container], flags: V2, allowedMentions: { parse: [] } }).catch(() => null)) ?? null;
+}
+
+async function hostingLog(client, guildId, content, color = colors.brand) {
+  const channelId = ticketLogFor(guild(guildId).settings, 'hosting');
+  const channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
+  if (!channel) return console.log(`[hosting] ${content.replace(/[#*`>]/g, '').replace(/\n+/g, ' | ')}`);
+  await channel.send({ components: [notice(content, color)], flags: V2, allowedMentions: { parse: [] } }).catch(console.error);
+}
+
+const recLine = (rec) => row(`\`#${rec.id}\` ${rec.name}`, `<@${rec.userId}> • ${langLabel(rec.lang)} • do ${ts(rec.expiresAt, 'f')}`);
+
+/**
+ * Nowy serwer albo przedłużenie — wspólne dla zakupu automatycznego, ręcznego i /hosting utworz.
+ * key = unikalny identyfikator zakupu (zabezpiecza przed podwójnym serwerem przy ponownej próbie).
+ */
+async function activateHosting(client, guildId, { key, userId, lang, plan, email, renew, payment, source }) {
+  const days = planOf(plan)[3];
+  if (renew) {
+    const rec = await extendHosting(guildId, renew, days);
+    const dm = await sendHostingDm(client, rec.userId, hostingRenewedView(rec, guildId));
+    await hostingLog(
+      client,
+      guildId,
+      [`### 🔁 ${x} Hosting przedłużony (+${days} dni)`, recLine(rec), row('Płatność', `${payLabel(payment)} • ${source}`)].join('\n'),
+      colors.success,
+    );
+    return { rec, dmOk: Boolean(dm) };
+  }
+  const user = await client.users.fetch(userId);
+  const account = await ensurePanelUser(user, email);
+  const server = await createPanelServer({
+    owner: account.user.id,
+    lang,
+    externalId: `tb-${key}`,
+    name: `${hostingLanguages[lang]?.label.split(' (')[0] ?? lang} • ${user.username}`.slice(0, 60),
+    discordId: user.id,
+  });
+  // Ponowna próba po już udanym utworzeniu: serwer jest zapisany, nic nie zmieniamy.
+  const known = hostingServers(guildId)[server.id];
+  if (known && !known.deleted) return { rec: known, account, dmOk: true };
+  const rec = {
+    id: server.id,
+    identifier: server.identifier,
+    name: server.name,
+    userId: user.id,
+    pteroUserId: account.user.id,
+    lang,
+    plan,
+    payment,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + days * DAY,
+    suspended: false,
+    reminded: [],
+  };
+  updateGuild(guildId, (g) => (g.hosting.servers[rec.id] = rec));
+  await giveClientRole(client, guildId, user.id);
+  const dm = await sendHostingDm(client, user.id, hostingReadyView(rec, account, guildId));
+  await hostingLog(
+    client,
+    guildId,
+    [
+      `### 🆕 ${x} Nowy hosting`,
+      recLine(rec),
+      row('Pakiet', `${planOf(plan)[0]} — ${planOf(plan)[1]}`),
+      row('Płatność', `${payLabel(payment)} • ${source}`),
+      account.password ? row('Konto w panelu', `nowe: \`${account.user.username}\``) : row('Konto w panelu', `istniejące: \`${account.user.username}\``),
+      dm ? null : row('⚠️ DM', 'klient ma zablokowane wiadomości prywatne — dane logowania trzeba przekazać ręcznie'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    colors.success,
+  );
+  return { rec, account, dmOk: Boolean(dm) };
+}
+
+/** Dolicza dni (od dziś albo od końca okresu, jeśli jeszcze trwa) i odblokowuje serwer. */
+async function extendHosting(guildId, serverId, days) {
+  const rec = hostingServers(guildId)[serverId];
+  if (!rec || rec.deleted) throw userError(`Nie znam serwera o ID \`${serverId}\`. Dodaj go: \`/hosting dodaj\`.`);
+  const wasSuspended = rec.suspended;
+  if (wasSuspended) await ptero('POST', `/servers/${rec.id}/unsuspend`);
+  updateGuild(guildId, () =>
+    Object.assign(rec, { expiresAt: Math.max(Date.now(), rec.expiresAt) + days * DAY, suspended: false, suspendedAt: null, reminded: [], deleteNotified: false }),
+  );
+  rec.started = wasSuspended ? await startPanelServer(rec) : null;
+  return rec;
+}
+
+async function suspendHosting(guildId, rec) {
+  await ptero('POST', `/servers/${rec.id}/suspend`);
+  updateGuild(guildId, () => Object.assign(rec, { suspended: true, suspendedAt: Date.now() }));
+}
+
+// ─── Widoki hostingu ───────────────────────────────────────────────────
+
+const renewButton = (guildId, rec) =>
+  new ButtonBuilder().setCustomId(`hs:renew:${guildId}:${rec.id}`).setLabel(`Przedłuż: ${rec.name}`.slice(0, 80)).setEmoji('🔁').setStyle(ButtonStyle.Success);
+
+function hostingReadyView(rec, account, guildId) {
+  const b = box(colors.success);
+  text(b, [title('Hosting gotowy', '🖥️'), `Twój serwer **${rec.name}** jest gotowy! 🎉`].join('\n'));
+  sep(b);
+  text(
+    b,
+    '>>> ' +
+      [
+        row('🌐 Panel', panelUrl()),
+        row('📧 Login (e-mail)', `\`${account.user.email}\``),
+        row('🔑 Hasło', account.password ? `||\`${account.password}\`||` : 'to samo, co do Twojego konta w panelu'),
+        row('💻 Język', langLabel(rec.lang)),
+        row('📅 Ważny do', `${ts(rec.expiresAt, 'f')} (${ts(rec.expiresAt)})`),
+        row('🆔 ID serwera', `\`${rec.id}\``),
+      ].join('\n'),
+  );
+  sep(b);
+  text(
+    b,
+    [
+      `### 🚀 ${x} Jak uruchomić bota`,
+      point(`Zaloguj się w panelu i otwórz serwer **${rec.name}**.`),
+      point(`**Files** → **Upload**: wgraj ${hostingLanguages[rec.lang]?.files ?? 'pliki bota'}.`),
+      point('**Console** → **Start**. Biblioteki zainstalują się same przy pierwszym starcie.'),
+      account.password ? point('Po zalogowaniu zmień hasło: ikona konta (prawy górny róg) → **Update Password**.') : null,
+      point('Termin i przedłużenie sprawdzisz komendą `/moj-hosting` na naszym serwerze Discord.'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+  const lc = guild(guildId).settings.lcChannelId;
+  if (lc) text(b, `-# ⭐ Będzie nam miło, jeśli zostawisz voucha na <#${lc}>!`);
+  sep(b);
+  footer(b);
+  return b;
+}
+
+function hostingRenewedView(rec, guildId) {
+  const b = box(colors.success);
+  text(
+    b,
+    [
+      title('Hosting przedłużony', '🔁'),
+      '>>> ' +
+        [
+          row('🖥️ Serwer', `**${rec.name}** (ID \`${rec.id}\`)`),
+          row('📅 Ważny do', `${ts(rec.expiresAt, 'f')} (${ts(rec.expiresAt)})`),
+          rec.started === true ? row('▶️ Status', 'serwer odblokowany i uruchomiony') : null,
+          rec.started === false ? row('▶️ Status', 'serwer odblokowany — kliknij **Start** w panelu') : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      `-# Dziękujemy, że jesteś z ${brand.name}! 💙 Panel: ${panelUrl()}`,
+    ].join('\n'),
+  );
+  return b.addActionRowComponents((r) => r.setComponents(renewButton(guildId, rec).setLabel('Przedłuż ponownie').setStyle(ButtonStyle.Secondary)));
+}
+
+function hostingReminderView(rec, guildId) {
+  const b = box(colors.warning);
+  text(
+    b,
+    [
+      title('Hosting wkrótce wygaśnie', '⏰'),
+      `Twój serwer **${rec.name}** wygasa ${ts(rec.expiresAt)} (${ts(rec.expiresAt, 'f')}).`,
+      point('Po terminie serwer zostanie **zablokowany** (pliki zostają). Przedłuż go, żeby bot działał bez przerwy.'),
+    ].join('\n'),
+  );
+  return b.addActionRowComponents((r) => r.setComponents(renewButton(guildId, rec)));
+}
+
+function hostingExpiredView(rec, guildId) {
+  const b = box(colors.danger);
+  text(
+    b,
+    [
+      title('Hosting zablokowany', '⛔'),
+      `Okres hostingu serwera **${rec.name}** minął — serwer został **zablokowany**.`,
+      point('Twoje pliki są bezpieczne. Po przedłużeniu serwer **odblokuje się automatycznie**.'),
+      point(`Bez przedłużenia serwer może zostać usunięty po ${hostingTimes.deleteNoticeDays} dniach.`),
+    ].join('\n'),
+  );
+  return b.addActionRowComponents((r) => r.setComponents(renewButton(guildId, rec)));
+}
+
+const qrUrl = (data) => `${hostingApi().qr}?size=240x240&margin=8&data=${encodeURIComponent(data)}`;
+
+function orderStatusLine(o) {
+  const need = hostingTimes.confirmations;
+  const sol = cryptoCoins[o.coin]?.chain === 'sol';
+  return {
+    waiting: `⏳ Czekam na płatność — masz czas do ${ts(o.expiresAt, 't')} (${ts(o.expiresAt)})`,
+    seen: sol ? '🔄 Płatność wykryta! Czekam na finalizację w sieci Solana (ok. 15 s)…' : `🔄 Płatność wykryta! Potwierdzenia: **${o.confirmations}/${need}**`,
+    paid: '✅ Płatność potwierdzona — tworzę serwer…',
+    creating: '✅ Płatność potwierdzona — tworzę serwer…',
+    error: '⚠️ Płatność potwierdzona, ale panel chwilowo nie odpowiada — ponawiam automatycznie.',
+    failed: '⚠️ Płatność potwierdzona — administracja dokończy zamówienie ręcznie (dostała powiadomienie).',
+    done: o.renew ? '✅ Gotowe! Hosting przedłużony.' : '✅ Gotowe! Dane do panelu są w osobnej wiadomości.',
+    expired: '⌛ Czas na płatność minął. Jeśli wysłałeś/aś środki, otwórz ticket — sprawdzimy to ręcznie.',
+    cancelled: '❌ Zamówienie anulowane.',
+  }[o.status];
+}
+
+function orderView(o, guildId) {
+  const c = cryptoCoins[o.coin];
+  const waiting = o.status === 'waiting';
+  const color = o.status === 'done' ? colors.success : ['expired', 'cancelled'].includes(o.status) ? colors.neutral : colors.gold;
+  const b = box(color);
+  header(b, [title(o.renew ? 'Przedłużenie hostingu' : 'Płatność za hosting', c.emoji), `### ${orderStatusLine(o)}`].join('\n'), activeOrder(o) ? qrUrl(o.wallet) : null);
+  sep(b);
+  text(
+    b,
+    '>>> ' +
+      [
+        row('💰 Kwota', `\`${o.amount} ${c.label}\` (≈ ${o.pln} zł)`),
+        row('🌐 Sieć', `**${c.network}**`),
+        row('📬 Adres', `\`${o.wallet}\``),
+        row('📦 Pakiet', `${planOf(o.plan)[0]} — ${planOf(o.plan)[1]}`),
+        o.renew ? row('🔁 Serwer', `ID \`${o.renew}\``) : row('💻 Język', langLabel(o.lang)),
+        o.txid ? row('🔗 Transakcja', `\`${o.txid.split(':')[0]}\``) : null,
+        row('🧾 Zamówienie', `\`${o.id}\``),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+  );
+  if (activeOrder(o)) {
+    sep(b);
+    text(
+      b,
+      [
+        `### ⚠️ ${x} Ważne`,
+        point(`Wyślij **dokładnie \`${o.amount}\` ${c.label}** — co do ostatniej cyfry. Po tej kwocie rozpoznajemy Twoją płatność.`),
+        point(`Tylko sieć **${c.network}**${c.token ? ` (token USDC: \`${c.token}\`)` : ''}. Wysłanie inną siecią = utrata środków.`),
+        point('Opłatę sieci płacisz osobno. Wysyłasz z giełdy? Upewnij się, że **dojdzie** dokładnie ta kwota.'),
+        point(`Serwer utworzy się sam po ${c.chain === 'sol' ? 'finalizacji transakcji (ok. 15 s)' : `**${hostingTimes.confirmations} potwierdzeniach** w sieci`}.`),
+      ].join('\n'),
+    );
+    const buttons = [
+      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:addr`).setLabel('Skopiuj adres').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:amt`).setLabel('Skopiuj kwotę').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+    ];
+    if (waiting) buttons.push(new ButtonBuilder().setCustomId(`hs:cancel:${guildId}:${o.id}`).setLabel('Anuluj').setEmoji('❌').setStyle(ButtonStyle.Danger));
+    b.addActionRowComponents((r) => r.setComponents(...buttons));
+  }
+  sep(b);
+  footer(b);
+  return b;
+}
+
+/** Dane do płatności w tickecie zakupu ręcznego. */
+function manualPaymentView(form) {
+  const plan = planOf(form.period);
+  const coin = cryptoCoins[form.payment];
+  const wallet = coin ? walletFor(form.payment) : null;
+  const info = coin
+    ? wallet && `Wyślij równowartość **${plan[1]}** w **${coin.label}** (sieć **${coin.network}**) na adres:\n\`${wallet}\``
+    : hostingConfig.manualPayments?.[form.payment];
+  const b = box(colors.gold);
+  text(
+    b,
+    [
+      title('Płatność', '💳'),
+      '>>> ' + [row('📦 Pakiet', `${plan[0]} — **${plan[1]}**`), row('💳 Metoda', payLabel(form.payment))].join('\n'),
+      '',
+      `### 📬 ${x} Dane do płatności`,
+      info || 'Właściciel poda je w tym tickecie.',
+      '',
+      hostingLanguages[form.lang]?.manualOnly ? '-# 🧩 Inny język: właściciel ustali z Tobą szczegóły w tym tickecie.' : null,
+      '-# Po wpłacie wyślij tutaj potwierdzenie (zrzut ekranu albo ID transakcji). Właściciel sprawdzi płatność, kliknie „Potwierdź”, a serwer utworzy się automatycznie.',
+    ]
+      .filter((l) => l !== null)
+      .join('\n'),
+  );
+  return b;
+}
+
+function myHostingView(recs, orders, guildId) {
+  const b = box();
+  const lines = recs.map((rec) =>
+    [
+      `### ${rec.suspended ? '⛔' : '🟢'} ${x} ${rec.name}`,
+      row('🆔 ID', `\`${rec.id}\``),
+      row('💻 Język', langLabel(rec.lang)),
+      row(rec.suspended ? '⛔ Zablokowany od' : '📅 Ważny do', rec.suspended ? ts(rec.suspendedAt ?? rec.expiresAt, 'f') : `${ts(rec.expiresAt, 'f')} (${ts(rec.expiresAt)})`),
+    ].join('\n'),
+  );
+  const pending = orders.map((o) => row('⏳ Oczekująca płatność', `\`${o.amount} ${cryptoCoins[o.coin].label}\` — szczegóły w DM`));
+  text(
+    b,
+    [title('Mój hosting', '🖥️'), lines.length ? lines.join('\n') : '*Nie masz jeszcze hostingu. Kup go na kanale z cennikiem albo w ticketach.*', ...pending, '', `-# 🌐 Panel: ${panelUrl() || '—'}`].join('\n'),
+  );
+  const buttons = recs.slice(0, 20).map((rec) => renewButton(guildId, rec));
+  for (let n = 0; n < buttons.length; n += 5) b.addActionRowComponents((r) => r.setComponents(...buttons.slice(n, n + 5)));
+  return b;
+}
+
+function hostingListView(recs, heading) {
+  const now = Date.now();
+  const status = (rec) => (rec.suspended ? '⛔' : rec.expiresAt - now < 3 * DAY ? '🟡' : '🟢');
+  const lines = recs
+    .sort((a, b) => a.expiresAt - b.expiresAt)
+    .slice(0, 40)
+    .map((rec) => `${status(rec)} \`#${rec.id}\` **${rec.name}** • <@${rec.userId}> • do ${ts(rec.expiresAt, 'd')} (${ts(rec.expiresAt)})`);
+  const more = recs.length > 40 ? `\n-# …i ${recs.length - 40} więcej` : '';
+  return notice([`## 🖥️ ${x} ${heading} (${recs.length})`, lines.join('\n') || '*Brak serwerów.*'].join('\n') + more);
+}
+
+// ─── Formularze i przyciski hostingu ───────────────────────────────────
+
+function hostingFormError(form) {
+  if (!form.lang || !form.period || !form.mode || !form.payment) return 'Uzupełnij wszystkie pola formularza.';
+  if (!form.renew && !validEmail(form.email)) return 'Podaj poprawny adres e-mail — to będzie login do panelu hostingu.';
+  if (form.mode === 'auto') {
+    if (!form.renew && hostingLanguages[form.lang]?.manualOnly) return 'Ten język obsługujemy tylko przy **zakupie ręcznym** — wybierz „⏳ Ręczny”.';
+    if (!cryptoCoins[form.payment]) return 'Zakup automatyczny działa tylko z kryptowalutami (LTC, ETH, USDC, SOL). Wybierz krypto albo „⏳ Ręczny”.';
+  }
+  return null;
+}
+
+/** Kwota z unikalną końcówką (po niej bot rozpoznaje wpłatę na wspólny adres). */
+function cryptoAmount(coinKey, pln, rate, taken) {
+  const c = cryptoCoins[coinKey];
+  const stepUnits = Math.round(c.step * 10 ** c.shown);
+  const base = Math.ceil(pln / rate / c.step - 1e-9) * stepUnits;
+  const free = [];
+  for (let k = 1; k < 1000; k++) if (!taken.has(base + k)) free.push(k);
+  if (!free.length) throw userError('Za dużo zamówień naraz — spróbuj za kilka minut.');
+  const shownUnits = base + free[randomInt(free.length)];
+  return { shownUnits, amount: unitsToString(shownUnits, c.shown), units: (BigInt(shownUnits) * 10n ** BigInt(c.decimals - c.shown)).toString() };
+}
+
+let priceCache = { at: 0, data: {} };
+async function cryptoPricesPln() {
+  if (Date.now() - priceCache.at < 120_000) return priceCache.data;
+  const ids = [...new Set(Object.values(cryptoCoins).map((c) => c.gecko))].join(',');
+  const data = await getJson(`${hostingApi().prices}?ids=${ids}&vs_currencies=pln`);
+  priceCache = { at: Date.now(), data };
+  return data;
+}
+
+async function createCryptoOrder(guildId, userId, form) {
+  const coin = cryptoCoins[form.payment];
+  const rate = (await cryptoPricesPln())?.[coin.gecko]?.pln;
+  if (!rate) throw new Error(`Brak kursu ${coin.gecko}/PLN`);
+  const g = guild(guildId);
+  const taken = new Set(Object.values(g.hosting.orders).filter((o) => o.coin === form.payment && activeOrder(o)).map((o) => o.shownUnits));
+  const pln = planPln(form.period);
+  const amount = cryptoAmount(form.payment, pln, rate, taken);
+  const id = `${Date.now().toString(36)}${randomInt(36 ** 3).toString(36)}`;
+  const order = {
+    id,
+    userId,
+    coin: form.payment,
+    wallet: walletFor(form.payment),
+    ...amount,
+    pln,
+    rate,
+    plan: form.period,
+    lang: form.lang,
+    email: form.email ?? null,
+    renew: form.renew ?? null,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + hostingTimes.payMinutes * 60_000,
+    status: 'waiting',
+    confirmations: 0,
+    attempts: 0,
+  };
+  updateGuild(guildId, (gg) => (gg.hosting.orders[id] = order));
+  return order;
+}
+
+async function onAutoPurchase(i, guildId, form) {
+  if (!hostingReady()) return replyV2(i, fail('Automatyczny zakup jest chwilowo wyłączony. Wybierz **⏳ zakup ręczny**.'));
+  if (!walletFor(form.payment)) return replyV2(i, fail(`Płatność ${payLabel(form.payment)} jest chwilowo niedostępna. Wybierz inną kryptowalutę albo zakup ręczny.`));
+  if (Object.values(guild(guildId).hosting.orders).some((o) => o.userId === i.user.id && activeOrder(o))) {
+    return replyV2(i, fail('Masz już zamówienie czekające na płatność — szczegóły są w DM (tam możesz je anulować).'));
+  }
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  try {
+    if (!form.renew) {
+      // Sprawdzamy wszystko przed płatnością, żeby klient nie zapłacił za coś, czego bot nie utworzy.
+      await eggInfo(form.lang).catch((err) => {
+        console.error(`Hosting: jajko ${form.lang}:`, err.message);
+        throw userError('Ten język jest chwilowo niedostępny w zakupie automatycznym. Wybierz zakup ręczny.');
+      });
+      if (!(await findPanelUser(i.user.id)) && !(await emailFree(form.email))) {
+        throw userError(`E-mail \`${form.email}\` ma już konto w panelu. Podaj inny adres.`);
+      }
+    }
+    const order = await createCryptoOrder(guildId, i.user.id, form);
+    const dm = await sendHostingDm(i.client, i.user.id, orderView(order, guildId));
+    if (!dm) {
+      updateGuild(guildId, () => (order.status = 'cancelled'));
+      return i.editReply({ components: [fail('Nie mogę wysłać Ci wiadomości prywatnej. Włącz DM od członków serwera (Ustawienia prywatności serwera) i spróbuj ponownie.')], flags: V2 });
+    }
+    updateGuild(guildId, () => (order.dm = { channelId: dm.channelId, messageId: dm.id }));
+    await i.editReply({
+      components: [ok(`Dane do płatności są w DM: **${order.amount} ${cryptoCoins[order.coin].label}**. Masz ${hostingTimes.payMinutes} minut na wpłatę.`)],
+      flags: V2,
+    });
+  } catch (err) {
+    if (!err.userFacing) console.error('Hosting (zakup):', err);
+    const message = err.userFacing ? err.message : 'Nie udało się przygotować płatności (kurs lub panel nie odpowiada). Spróbuj za chwilę albo wybierz zakup ręczny.';
+    await i.editReply({ components: [fail(message)], flags: V2 });
+  }
+}
+
+async function updateOrderMessage(client, guildId, o) {
+  if (!o.dm) return;
+  const channel = await client.channels.fetch(o.dm.channelId).catch(() => null);
+  const message = await channel?.messages.fetch(o.dm.messageId).catch(() => null);
+  await message?.edit({ components: [orderView(o, guildId)], flags: V2 }).catch(() => {});
+}
+
+function renewModal(guildId, serverId) {
+  return new ModalBuilder()
+    .setCustomId(`hs:renewsubmit:${guildId}:${serverId}`)
+    .setTitle('🔁 Przedłuż hosting')
+    .addLabelComponents(
+      ['period', 'mode', 'payment'].map((id) => {
+        const f = ticketTypes.hosting.fields.find((field) => field.id === id);
+        return new LabelBuilder()
+          .setLabel(f.label)
+          .setStringSelectMenuComponent(
+            new StringSelectMenuBuilder()
+              .setCustomId(id)
+              .setPlaceholder('Wybierz…')
+              .addOptions(f.select.map(([label, value]) => ({ label, value }))),
+          );
+      }),
+    );
+}
+
+async function onRenewSubmit(i, guildId, serverId) {
+  const rec = hostingServers(guildId)[serverId];
+  if (!rec || rec.deleted) return replyV2(i, fail('Ten serwer już nie istnieje.'));
+  if (rec.userId !== i.user.id) return replyV2(i, fail('To nie jest Twój serwer.'));
+  const form = {
+    lang: rec.lang,
+    period: i.fields.getStringSelectValues('period')[0],
+    mode: i.fields.getStringSelectValues('mode')[0],
+    payment: i.fields.getStringSelectValues('payment')[0],
+    renew: String(serverId),
+  };
+  const error = hostingFormError(form);
+  if (error) return replyV2(i, fail(error));
+  if (form.mode === 'auto') return onAutoPurchase(i, guildId, form);
+  const discordGuild = i.client.guilds.cache.get(guildId);
+  if (!discordGuild) return replyV2(i, fail('Nie widzę serwera Discord sklepu.'));
+  const open = openTicketsOf(guildId, i.user.id);
+  if (open.length >= guild(guildId).settings.maxOpen) return replyV2(i, fail(`Masz już otwarty ticket: ${open.map((t) => `<#${t.channelId}>`).join(', ')}`));
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  const { channel, error: ticketError } = await createTicket(i.client, discordGuild, i.user, 'hosting', form);
+  await i.editReply({ components: [ticketError ? fail(ticketError) : ok(`Ticket przedłużenia utworzony: ${channel}`)], flags: V2 });
+}
+
+const confirmingTickets = new Set();
+
+/** Staff potwierdza płatność w tickecie → bot tworzy albo przedłuża serwer i prosi klienta o voucha. */
+async function onHostingConfirm(i) {
+  const { ticket, error } = staffTicket(i);
+  if (error) return replyV2(i, fail(error));
+  if (ticket.type !== 'hosting' || !ticket.form?.lang) return replyV2(i, fail('To nie jest ticket zakupu hostingu.'));
+  if (ticket.hostingServerId) return replyV2(i, fail('Hosting z tego ticketu jest już aktywny.'));
+  if (hostingLanguages[ticket.form.lang]?.manualOnly) return replyV2(i, fail('Inny język: utwórz serwer ręcznie w panelu, a potem przypisz go komendą `/hosting dodaj`.'));
+  if (!hostingReady()) return replyV2(i, fail('Brak konfiguracji panelu (config.json → hosting). Uzupełnij ją i zrestartuj bota.'));
+  if (confirmingTickets.has(ticket.channelId)) return replyV2(i, fail('Serwer już się tworzy…'));
+  confirmingTickets.add(ticket.channelId);
+  await i.deferReply();
+  try {
+    const res = await activateHosting(i.client, i.guildId, {
+      key: `t-${ticket.channelId}`,
+      userId: ticket.userId,
+      lang: ticket.form.lang,
+      plan: ticket.form.period,
+      email: ticket.form.email,
+      renew: ticket.form.renew,
+      payment: ticket.form.payment,
+      source: `ręcznie, potwierdził <@${i.user.id}>`,
+    });
+    const plan = planOf(ticket.form.period);
+    const lc = guild(i.guildId).settings.lcChannelId;
+    const deal = { product: `${ticket.form.renew ? 'Przedłużenie hostingu' : 'Hosting'} ${plan[0]}`, price: plan[1], payment: repPaymentOf(ticket.form.payment), sellerId: i.user.id };
+    updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[ticket.channelId], { hostingServerId: res.rec.id, deal, decidedBy: i.user.id, awaitingRep: Boolean(lc) }));
+    const updated = getTicket(i.guildId, ticket.channelId);
+    const user = await i.client.users.fetch(updated.userId);
+    const card = await i.channel.messages.fetch(updated.messageId).catch(() => null);
+    await card?.edit({ components: [ticketMessage(updated, user)], flags: V2 }).catch(() => {});
+    await i.editReply({
+      components: [
+        notice(
+          [
+            `### ✅ ${x} ${ticket.form.renew ? 'Hosting przedłużony' : 'Serwer utworzony'}`,
+            row('🖥️ Serwer', `\`${res.rec.name}\` (ID \`${res.rec.id}\`)`),
+            row('📅 Ważny do', ts(res.rec.expiresAt, 'f')),
+            row('📩 Klient', res.dmOk ? 'dostał szczegóły w DM' : 'ma zablokowane DM — szczegóły poniżej'),
+          ].join('\n'),
+          colors.success,
+        ),
+      ],
+      flags: V2,
+    });
+    if (!res.dmOk && res.account) await i.channel.send({ components: [hostingReadyView(res.rec, res.account, i.guildId)], flags: V2 });
+    if (lc) await i.channel.send({ components: [repRequestView(updated, lc)], flags: V2, allowedMentions: { users: [updated.userId] } });
+  } catch (err) {
+    if (!err.userFacing) console.error('Hosting (potwierdzenie):', err);
+    await i.editReply({ components: [fail(err.userFacing ? err.message : describeError(err))], flags: V2 });
+  } finally {
+    confirmingTickets.delete(ticket.channelId);
+  }
+}
+
+/** Przyciski i formularze hostingu (działają też w DM, więc guildId jest w customId). */
+async function routeHosting(i) {
+  const [, action, guildId, id, extra] = i.customId.split(':');
+  if (action === 'confirm' && i.isButton()) return onHostingConfirm(i);
+  if (action === 'renew' && i.isButton()) {
+    const rec = hostingServers(guildId)[id];
+    if (!rec || rec.deleted) return replyV2(i, fail('Ten serwer już nie istnieje.'));
+    if (rec.userId !== i.user.id) return replyV2(i, fail('To nie jest Twój serwer.'));
+    return i.showModal(renewModal(guildId, id));
+  }
+  if (action === 'renewsubmit' && i.isModalSubmit()) return onRenewSubmit(i, guildId, id);
+  const order = guild(guildId).hosting.orders[id];
+  if (!order || order.userId !== i.user.id) return replyV2(i, fail('Nie znaleziono zamówienia.'));
+  if (action === 'copy' && i.isButton()) {
+    // Zwykły tekst (bez Components V2) — na telefonie łatwo go skopiować przytrzymaniem.
+    return i.reply({ content: extra === 'addr' ? order.wallet : order.amount, flags: MessageFlags.Ephemeral });
+  }
+  if (action === 'cancel' && i.isButton()) {
+    if (order.status !== 'waiting') return replyV2(i, fail('Tego zamówienia nie można już anulować (płatność została wykryta albo zamówienie się zakończyło).'));
+    updateGuild(guildId, () => (order.status = 'cancelled'));
+    return i.update({ components: [orderView(order, guildId)] });
+  }
+}
+
+// ─── Sprawdzanie blockchainu ───────────────────────────────────────────
+// Każdy skaner zwraca wpłaty na adres: { txid, coin, units (BigInt), confirmations, time }.
+
+async function scanLtc(wallet, since) {
+  const api = hostingApi().ltc;
+  const [tip, txs] = await Promise.all([getJson(`${api}/blocks/tip/height`), getJson(`${api}/address/${wallet}/txs`)]);
+  const out = [];
+  for (const tx of txs ?? []) {
+    const units = (tx.vout ?? []).filter((v) => v.scriptpubkey_address === wallet).reduce((sum, v) => sum + BigInt(v.value), 0n);
+    const time = tx.status?.block_time ? tx.status.block_time * 1000 : Date.now();
+    if (units <= 0n || time < since) continue;
+    const confirmations = tx.status?.confirmed ? Number(tip) - tx.status.block_height + 1 : 0;
+    out.push({ txid: tx.txid, coin: 'ltc', units, confirmations, time });
+  }
+  return out;
+}
+
+async function ethApi(params) {
+  const key = hostingConfig.etherscanApiKey;
+  const base = key ? `https://api.etherscan.io/v2/api?chainid=1&apikey=${encodeURIComponent(key)}&` : `${hostingApi().eth}?`;
+  const data = await getJson(base + new URLSearchParams(params));
+  if (Array.isArray(data?.result)) return data.result;
+  if (/no .*(transactions|records|transfers)/i.test(`${data?.message} ${data?.result}`)) return [];
+  throw new Error(`ETH API: ${data?.message ?? '?'} ${typeof data?.result === 'string' ? data.result : ''}`.trim());
+}
+
+let ethTip = { at: 0, n: 0 };
+async function ethBlockNumber() {
+  if (Date.now() - ethTip.at < 10_000) return ethTip.n;
+  const d = await getJson(hostingApi().ethRpc, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+  });
+  ethTip = { at: Date.now(), n: parseInt(d.result, 16) };
+  return ethTip.n;
+}
+
+async function scanEth(wallet, coins, since) {
+  const base = { module: 'account', address: wallet, sort: 'desc', page: 1, offset: 50 };
+  const found = [];
+  if (coins.has('eth')) {
+    for (const tx of await ethApi({ ...base, action: 'txlist' })) {
+      if (tx.isError !== '1' && tx.txreceipt_status !== '0') found.push({ tx, coin: 'eth', txid: tx.hash });
+    }
+    // Wypłaty z giełd i portfeli-kontraktów przychodzą jako transakcje wewnętrzne.
+    for (const tx of await ethApi({ ...base, action: 'txlistinternal' })) {
+      if (tx.isError !== '1') found.push({ tx, coin: 'eth', txid: `${tx.hash}:internal` });
+    }
+  }
+  if (coins.has('usdc_eth')) {
+    const token = cryptoCoins.usdc_eth.token;
+    for (const tx of await ethApi({ ...base, action: 'tokentx', contractaddress: token })) {
+      if (String(tx.contractAddress).toLowerCase() === token) found.push({ tx, coin: 'usdc_eth', txid: `${tx.hash}:${tx.logIndex ?? 0}` });
+    }
+  }
+  const out = [];
+  let tip = null;
+  for (const { tx, coin, txid } of found) {
+    const time = Number(tx.timeStamp) * 1000;
+    if (String(tx.to).toLowerCase() !== wallet.toLowerCase() || time < since) continue;
+    let confirmations = tx.confirmations === undefined || tx.confirmations === '' ? NaN : Number(tx.confirmations);
+    if (Number.isNaN(confirmations)) {
+      tip ??= await ethBlockNumber();
+      confirmations = tip - Number(tx.blockNumber) + 1;
+    }
+    out.push({ txid, coin, units: BigInt(tx.value), confirmations, time });
+  }
+  return out;
+}
+
+async function solRpc(method, params) {
+  const d = await getJson(hostingApi().sol, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  if (d?.error) throw new Error(`Solana RPC: ${d.error.message}`);
+  return d?.result;
+}
+
+/** Ile SOL i USDC (w najmniejszych jednostkach) dostał portfel w transakcji. */
+function parseSolTx(tx, wallet, mint) {
+  if (!tx?.meta || tx.meta.err) return { sol: 0n, usdc: 0n };
+  const keys = (tx.transaction?.message?.accountKeys ?? []).map((k) => (typeof k === 'string' ? k : k.pubkey));
+  const idx = keys.indexOf(wallet);
+  const sol = idx >= 0 ? BigInt(tx.meta.postBalances[idx]) - BigInt(tx.meta.preBalances[idx]) : 0n;
+  const tokens = (list) => (list ?? []).filter((t) => t.mint === mint && t.owner === wallet).reduce((sum, t) => sum + BigInt(t.uiTokenAmount.amount), 0n);
+  return { sol, usdc: tokens(tx.meta.postTokenBalances) - tokens(tx.meta.preTokenBalances) };
+}
+
+const solTxCache = new Map();
+let solTokenAccounts = { at: 0, wallet: '', list: [] };
+
+async function scanSol(wallet, coins, since) {
+  const mint = cryptoCoins.usdc_sol.token;
+  // Portfel łapie SOL i pierwszą wpłatę USDC (gdy tworzy się konto tokenu); kolejne USDC trafiają na konto tokenu.
+  const addresses = [wallet];
+  if (coins.has('usdc_sol')) {
+    const stale = solTokenAccounts.wallet !== wallet || !solTokenAccounts.list.length || Date.now() - solTokenAccounts.at > 10 * 60_000;
+    if (stale) {
+      const res = await solRpc('getTokenAccountsByOwner', [wallet, { mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+      solTokenAccounts = { at: Date.now(), wallet, list: (res?.value ?? []).map((v) => v.pubkey) };
+    }
+    addresses.push(...solTokenAccounts.list);
+  }
+  const sigs = new Map();
+  for (const address of addresses) {
+    for (const s of (await solRpc('getSignaturesForAddress', [address, { limit: 25, commitment: 'confirmed' }])) ?? []) {
+      if (s.err || (s.blockTime && s.blockTime * 1000 < since)) continue;
+      if (sigs.get(s.signature)?.confirmationStatus !== 'finalized') sigs.set(s.signature, s);
+    }
+  }
+  const out = [];
+  for (const s of sigs.values()) {
+    let parsed = solTxCache.get(s.signature);
+    if (!parsed) {
+      const tx = await solRpc('getTransaction', [s.signature, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]);
+      if (!tx) continue;
+      parsed = parseSolTx(tx, wallet, mint);
+      solTxCache.set(s.signature, parsed);
+      if (solTxCache.size > 1000) solTxCache.delete(solTxCache.keys().next().value);
+    }
+    const confirmations = s.confirmationStatus === 'finalized' ? hostingTimes.confirmations : s.confirmationStatus === 'confirmed' ? 1 : 0;
+    const time = (s.blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
+    if (parsed.sol > 0n && coins.has('sol')) out.push({ txid: s.signature, coin: 'sol', units: parsed.sol, confirmations, time });
+    if (parsed.usdc > 0n && coins.has('usdc_sol')) out.push({ txid: `${s.signature}:usdc`, coin: 'usdc_sol', units: parsed.usdc, confirmations, time });
+  }
+  return out;
+}
+
+function scanChain(chain, wallet, coins, since) {
+  if (chain === 'ltc') return scanLtc(wallet, since);
+  if (chain === 'eth') return scanEth(wallet, coins, since);
+  if (chain === 'sol') return scanSol(wallet, coins, since);
+  return Promise.resolve([]);
+}
+
+// ─── Pętla hostingu: płatności co 30 s, terminy co 5 minut ─────────────
+
+async function fulfilOrder(client, guildId, o) {
+  updateGuild(guildId, () => Object.assign(o, { status: 'creating', attempts: (o.attempts ?? 0) + 1 }));
+  await updateOrderMessage(client, guildId, o);
+  try {
+    const res = await activateHosting(client, guildId, {
+      key: o.id,
+      userId: o.userId,
+      lang: o.lang,
+      plan: o.plan,
+      email: o.email,
+      renew: o.renew,
+      payment: o.coin,
+      source: `automatycznie, ${o.amount} ${cryptoCoins[o.coin].label}, tx \`${String(o.txid).split(':')[0]}\``,
+    });
+    updateGuild(guildId, () => Object.assign(o, { status: 'done', serverId: res.rec.id, doneAt: Date.now() }));
+  } catch (err) {
+    const final = err.userFacing || o.attempts >= 10;
+    updateGuild(guildId, () => Object.assign(o, { status: final ? 'failed' : 'error', lastError: String(err.message).slice(0, 300) }));
+    if (!o.errorNotified || final) {
+      updateGuild(guildId, () => (o.errorNotified = true));
+      await hostingLog(
+        client,
+        guildId,
+        [
+          `### ⚠️ ${x} Opłacone zamówienie nie zostało zrealizowane${final ? '' : ' (ponawiam)'}`,
+          row('Klient', `<@${o.userId}>`),
+          row('Zamówienie', `\`${o.id}\` • ${o.amount} ${cryptoCoins[o.coin].label} • tx \`${String(o.txid).split(':')[0]}\``),
+          row('Błąd', `\`${String(err.message).slice(0, 200)}\``),
+          final ? point(o.renew ? `Przedłuż ręcznie: \`/hosting przedluz serwer:${o.renew}\`` : 'Utwórz ręcznie: `/hosting utworz` (klient już zapłacił).') : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        colors.danger,
+      );
+    }
+  }
+  await updateOrderMessage(client, guildId, o);
+}
+
+async function processOrders(client, guildId) {
+  const g = guild(guildId);
+  const now = Date.now();
+  const grace = 5 * 60_000;
+  const orders = Object.values(g.hosting.orders);
+  const need = hostingTimes.confirmations;
+
+  for (const o of orders.filter((o) => o.status === 'waiting' && now > o.expiresAt + grace)) {
+    updateGuild(guildId, () => (o.status = 'expired'));
+    await updateOrderMessage(client, guildId, o);
+  }
+
+  // Jedno zapytanie na sieć i portfel, niezależnie od liczby zamówień.
+  const groups = new Map();
+  for (const o of orders.filter(activeOrder)) {
+    const key = `${cryptoCoins[o.coin].chain}|${o.wallet}`;
+    groups.set(key, [...(groups.get(key) ?? []), o]);
+  }
+  const used = new Set(g.hosting.usedTx);
+  for (const [key, list] of groups) {
+    const [chain, wallet] = key.split('|');
+    let txs;
+    try {
+      txs = await scanChain(chain, wallet, new Set(list.map((o) => o.coin)), Math.min(...list.map((o) => o.createdAt)) - 10 * 60_000);
+    } catch (err) {
+      warnOnce(`scan:${chain}`, `⚠️ Hosting: nie mogę sprawdzić sieci ${chain.toUpperCase()} (${err.message}). Ponowię za 30 s.`);
+      continue;
+    }
+    for (const o of list) {
+      const before = `${o.status}|${o.confirmations}`;
+      if (o.status === 'waiting') {
+        const tx = txs.find(
+          (t) => t.coin === o.coin && t.units === BigInt(o.units) && t.time >= o.createdAt - 2 * 60_000 && t.time <= o.expiresAt + grace && !used.has(t.txid),
+        );
+        if (tx) {
+          used.add(tx.txid);
+          updateGuild(guildId, (gg) => {
+            Object.assign(o, { status: 'seen', txid: tx.txid, seenAt: now });
+            gg.hosting.usedTx = [...gg.hosting.usedTx, tx.txid].slice(-2000);
+          });
+        }
+      }
+      if (o.status === 'seen') {
+        const tx = txs.find((t) => t.txid === o.txid);
+        if (tx) o.confirmations = Math.max(0, Math.min(tx.confirmations, need));
+        if (o.confirmations >= need) Object.assign(o, { status: 'paid', paidAt: now });
+        else if (now - o.seenAt > 6 * 3600_000 && !o.stuckNotified) {
+          o.stuckNotified = true;
+          await hostingLog(client, guildId, `### ⚠️ ${x} Płatność bez potwierdzeń od 6 h\n${row('Klient', `<@${o.userId}>`)}\n${row('Transakcja', `\`${o.txid}\``)}`, colors.warning);
+        }
+      }
+      if (`${o.status}|${o.confirmations}` !== before) {
+        save();
+        await updateOrderMessage(client, guildId, o);
+      }
+    }
+  }
+
+  // 'creating' zostaje tylko po restarcie bota w trakcie tworzenia — external_id chroni przed duplikatem.
+  for (const o of orders.filter((o) => o.status === 'paid' || o.status === 'creating' || (o.status === 'error' && o.attempts < 10))) {
+    await fulfilOrder(client, guildId, o);
+  }
+}
+
+async function checkExpirations(client, guildId) {
+  const now = Date.now();
+  for (const rec of Object.values(hostingServers(guildId))) {
+    if (rec.deleted) continue;
+    if (!rec.suspended && now >= rec.expiresAt) {
+      try {
+        await suspendHosting(guildId, rec);
+      } catch (err) {
+        if (notFound(err)) updateGuild(guildId, () => (rec.deleted = true));
+        else warnOnce(`suspend:${rec.id}`, `⚠️ Hosting: nie mogę zablokować serwera ${rec.id}: ${err.message}`);
+        continue;
+      }
+      await sendHostingDm(client, rec.userId, hostingExpiredView(rec, guildId));
+      await hostingLog(client, guildId, `### ⛔ ${x} Hosting zablokowany (koniec okresu)\n${recLine(rec)}`, colors.warning);
+      continue;
+    }
+    if (!rec.suspended) {
+      const left = rec.expiresAt - now;
+      const due = hostingTimes.remindDays.filter((d) => left <= d * DAY && !(rec.reminded ?? []).includes(d));
+      if (due.length) {
+        const smallest = Math.min(...due);
+        updateGuild(guildId, () => (rec.reminded = [...new Set([...(rec.reminded ?? []), ...hostingTimes.remindDays.filter((d) => d >= smallest)])]));
+        await sendHostingDm(client, rec.userId, hostingReminderView(rec, guildId));
+      }
+    }
+    if (rec.suspended && !rec.deleteNotified && now >= (rec.suspendedAt ?? rec.expiresAt) + hostingTimes.deleteNoticeDays * DAY) {
+      updateGuild(guildId, () => (rec.deleteNotified = true));
+      await hostingLog(
+        client,
+        guildId,
+        [
+          `### 🗑️ ${x} Serwer można usunąć`,
+          recLine(rec),
+          point(`Zablokowany od ${ts(rec.suspendedAt ?? rec.expiresAt, 'f')} i nieprzedłużony.`),
+          point(`Usuń: \`/hosting usun serwer:${rec.id} potwierdz:True\` (albo zostaw — pliki czekają).`),
+        ].join('\n'),
+        colors.danger,
+      );
+    }
+  }
+}
+
+let hostingBusy = false;
+let lastExpiryCheck = 0;
+
+async function hostingTick(client) {
+  if (hostingBusy) return;
+  hostingBusy = true;
+  try {
+    const checkTerms = Date.now() - lastExpiryCheck >= 5 * 60_000;
+    if (checkTerms) lastExpiryCheck = Date.now();
+    for (const [guildId, g] of Object.entries(store.guilds)) {
+      if (!g.hosting) continue;
+      if (Object.values(g.hosting.orders ?? {}).length) await processOrders(client, guildId).catch((err) => console.error('Hosting (płatności):', err));
+      if (checkTerms && hostingReady()) await checkExpirations(client, guildId).catch((err) => console.error('Hosting (terminy):', err));
+    }
+  } finally {
+    hostingBusy = false;
+  }
+}
+
+function hostingLoop(client) {
+  hostingTick(client).catch(console.error);
+  setInterval(() => hostingTick(client).catch(console.error), 30_000);
+}
+
+/** /hosting test — sprawdza po kolei wszystko, czego potrzebuje hosting. */
+async function hostingDiagnostics() {
+  const out = [];
+  const check = async (label, fn) => {
+    try {
+      out.push(`✅ **${label}:** ${(await fn()) ?? 'OK'}`);
+    } catch (err) {
+      out.push(`❌ **${label}:** ${String(err.message).slice(0, 180)}`);
+    }
+  };
+  await check('Panel (klucz Application API)', async () => {
+    if (!hostingReady()) throw new Error('brak `panelUrl` albo `apiKey` w config.json → hosting');
+    return `${panelUrl()} • lokalizacje: ${(await deployLocations()).join(', ')}`;
+  });
+  await check('Węzeł i wolne porty', async () => {
+    const nodes = (await ptero('GET', '/nodes?per_page=100')).data.map((n) => n.attributes);
+    const pub = nodes.filter((n) => n.public);
+    if (!pub.length) throw new Error('żaden węzeł nie jest publiczny (Admin → Nodes → węzeł → Settings → Node Visibility: Public)');
+    let free = 0;
+    for (const node of pub) {
+      const allocs = (await ptero('GET', `/nodes/${node.id}/allocations?per_page=500`)).data ?? [];
+      free += allocs.filter((a) => !a.attributes.assigned).length;
+    }
+    if (!free) throw new Error('brak wolnych portów — dodaj porty: Admin → Nodes → węzeł → Allocation');
+    return `publiczne węzły: ${pub.map((n) => n.name).join(', ')} • wolne porty: ${free}`;
+  });
+  eggCache.clear();
+  for (const lang of Object.keys(hostingLanguages).filter((l) => !hostingLanguages[l].manualOnly)) {
+    await check(`Jajko ${hostingLanguages[lang].label}`, async () => {
+      const egg = await eggInfo(lang);
+      return `egg ${egg.id} • ${egg.image}`;
+    });
+  }
+  await check('Klucz Client API (auto-start)', async () => {
+    if (!hostingConfig.clientApiKey) return 'nie ustawiony — po odblokowaniu klient sam kliknie Start';
+    await ptero('GET', '', null, true);
+    return 'działa';
+  });
+  priceCache.at = 0;
+  await check('Kursy PLN (CoinGecko)', async () =>
+    Object.entries(await cryptoPricesPln())
+      .map(([id, v]) => `${id} ${v.pln} zł`)
+      .join(' • '),
+  );
+  const formats = { ltc: /^(ltc1[a-z0-9]{20,90}|[LM3][a-km-zA-HJ-NP-Z1-9]{25,34})$/, eth: /^0x[0-9a-fA-F]{40}$/, sol: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };
+  for (const chain of ['ltc', 'eth', 'sol']) {
+    await check(`Portfel i API ${chain.toUpperCase()}`, async () => {
+      const wallet = hostingConfig.wallets?.[chain];
+      if (!wallet) throw new Error(`brak adresu w config.json → hosting.wallets.${chain} (ta sieć jest wyłączona)`);
+      if (!formats[chain].test(wallet)) throw new Error(`adres \`${wallet}\` nie wygląda na adres ${chain.toUpperCase()}`);
+      const coins = new Set(Object.keys(cryptoCoins).filter((k) => cryptoCoins[k].chain === chain));
+      const txs = await scanChain(chain, wallet, coins, Date.now() - 30 * DAY);
+      return `\`${wallet}\` • wpłat z 30 dni: ${txs.length}`;
+    });
+  }
+  return out;
 }
 
 // ═══ OPINIE ════════════════════════════════════════════════════════════
@@ -2497,6 +3718,208 @@ command(
   },
 );
 
+const serverOption = (o) => o.setName('serwer').setDescription('ID serwera w panelu (z /hosting lista)').setMinValue(1).setRequired(true);
+const langChoices = (withOther) =>
+  Object.entries(hostingLanguages)
+    .filter(([, l]) => withOther || !l.manualOnly)
+    .map(([value, l]) => ({ name: `${l.emoji} ${l.label}`, value }));
+
+command(
+  new SlashCommandBuilder()
+    .setName('hosting')
+    .setDescription('Hosting klientów (panel Pterodactyl)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addSubcommand((s) =>
+      s
+        .setName('lista')
+        .setDescription('Serwery klientów i ich terminy')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Tylko serwery tej osoby')),
+    )
+    .addSubcommand((s) => s.setName('zamowienia').setDescription('Zamówienia krypto czekające na płatność lub z błędem'))
+    .addSubcommand((s) =>
+      s
+        .setName('utworz')
+        .setDescription('Utwórz serwer klientowi (bez płatności przez bota)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Klient').setRequired(true))
+        .addStringOption((o) => o.setName('jezyk').setDescription('Język bota').setRequired(true).addChoices(...langChoices(false)))
+        .addStringOption((o) =>
+          o
+            .setName('okres')
+            .setDescription('Okres hostingu')
+            .setRequired(true)
+            .addChoices(...hostingPlans.map(([name, price, value, days]) => ({ name: `${name} — ${price} (${days} dni)`, value }))),
+        )
+        .addStringOption((o) => o.setName('email').setDescription('E-mail klienta (login do panelu; pomijany, jeśli klient ma już konto)').setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('dodaj')
+        .setDescription('Przypisz istniejący serwer z panelu do klienta (terminy, przypomnienia, blokada)')
+        .addUserOption((o) => o.setName('uzytkownik').setDescription('Klient').setRequired(true))
+        .addIntegerOption(serverOption)
+        .addIntegerOption((o) => o.setName('dni').setDescription('Ile dni hostingu zostało').setMinValue(0).setMaxValue(3650).setRequired(true))
+        .addStringOption((o) => o.setName('jezyk').setDescription('Język bota (domyślnie Node.js)').addChoices(...langChoices(true))),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('przedluz')
+        .setDescription('Przedłuż hosting (odblokowuje serwer)')
+        .addIntegerOption(serverOption)
+        .addIntegerOption((o) => o.setName('dni').setDescription('Ile dni dodać').setMinValue(1).setMaxValue(3650).setRequired(true)),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('limity')
+        .setDescription('Zmień zasoby serwera (np. większy RAM ustalony w tickecie)')
+        .addIntegerOption(serverOption)
+        .addIntegerOption((o) => o.setName('ram').setDescription('RAM w MB, np. 512').setMinValue(64).setMaxValue(32768))
+        .addIntegerOption((o) => o.setName('dysk').setDescription('Dysk w MB, np. 2048').setMinValue(256).setMaxValue(512000))
+        .addIntegerOption((o) => o.setName('cpu').setDescription('CPU w % (100 = 1 rdzeń)').setMinValue(5).setMaxValue(800)),
+    )
+    .addSubcommand((s) => s.setName('zablokuj').setDescription('Zablokuj serwer (Suspend)').addIntegerOption(serverOption))
+    .addSubcommand((s) => s.setName('odblokuj').setDescription('Odblokuj serwer (bez zmiany terminu)').addIntegerOption(serverOption))
+    .addSubcommand((s) =>
+      s
+        .setName('usun')
+        .setDescription('USUŃ serwer z panelu razem z plikami (nieodwracalne)')
+        .addIntegerOption(serverOption)
+        .addBooleanOption((o) => o.setName('potwierdz').setDescription('True = tak, usuń serwer i wszystkie pliki').setRequired(true)),
+    )
+    .addSubcommand((s) => s.setName('test').setDescription('Sprawdź połączenie z panelem, jajka, portfele i API blockchainów')),
+  async (i) => {
+    const sub = i.options.getSubcommand();
+    const g = guild(i.guildId);
+    const servers = g.hosting.servers;
+
+    if (sub === 'lista') {
+      const user = i.options.getUser('uzytkownik');
+      const recs = Object.values(servers).filter((r) => !r.deleted && (!user || r.userId === user.id));
+      return i.reply({ components: [hostingListView(recs, user ? `Hosting: ${user.username}` : 'Serwery klientów')], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+    }
+    if (sub === 'zamowienia') {
+      const list = Object.values(g.hosting.orders).filter((o) => ['waiting', 'seen', 'paid', 'creating', 'error', 'failed'].includes(o.status));
+      const lines = list
+        .slice(-25)
+        .map((o) => row(`\`${o.id}\` <@${o.userId}>`, `${o.amount} ${cryptoCoins[o.coin].label} • **${o.status}**${o.lastError ? ` • \`${o.lastError.slice(0, 80)}\`` : ''}`));
+      return i.reply({
+        components: [notice([`## 🧾 ${x} Zamówienia krypto (${list.length})`, lines.join('\n') || '*Brak aktywnych zamówień.*'].join('\n'))],
+        flags: V2_EPHEMERAL,
+        allowedMentions: { parse: [] },
+      });
+    }
+    if (sub === 'test') {
+      await i.deferReply({ flags: V2_EPHEMERAL });
+      const results = await hostingDiagnostics();
+      return i.editReply({ components: [notice([`## 🩺 ${x} Test hostingu`, ...results].join('\n'), results.some((r) => r.startsWith('❌')) ? colors.warning : colors.success)], flags: V2 });
+    }
+
+    if (!hostingReady()) return replyFail(i, 'Brak konfiguracji panelu: uzupełnij `hosting.panelUrl` i `hosting.apiKey` w config.json i zrestartuj bota.');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const done = (content) => i.editReply({ components: [ok(content)], flags: V2, allowedMentions: { parse: [] } });
+    const failed = (content) => i.editReply({ components: [fail(content)], flags: V2, allowedMentions: { parse: [] } });
+    const serverId = i.options.getInteger('serwer');
+    const rec = serverId ? servers[serverId] : null;
+
+    try {
+      if (sub === 'utworz') {
+        const user = i.options.getUser('uzytkownik');
+        const res = await activateHosting(i.client, i.guildId, {
+          key: `m-${Date.now().toString(36)}`,
+          userId: user.id,
+          lang: i.options.getString('jezyk'),
+          plan: i.options.getString('okres'),
+          email: i.options.getString('email').trim(),
+          payment: 'reczne',
+          source: `/hosting utworz przez <@${i.user.id}>`,
+        });
+        return done(`Utworzono serwer **${res.rec.name}** (ID \`${res.rec.id}\`) dla ${user}, ważny do ${ts(res.rec.expiresAt, 'f')}.${res.dmOk ? '' : '\n⚠️ Klient ma zablokowane DM — przekaż mu dane logowania ręcznie.'}`);
+      }
+      if (sub === 'dodaj') {
+        const user = i.options.getUser('uzytkownik');
+        const a = (await ptero('GET', `/servers/${serverId}`)).attributes;
+        const days = i.options.getInteger('dni');
+        const added = {
+          id: a.id,
+          identifier: a.identifier,
+          name: a.name,
+          userId: user.id,
+          pteroUserId: a.user,
+          lang: i.options.getString('jezyk') ?? 'nodejs',
+          plan: null,
+          payment: null,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + days * DAY,
+          suspended: Boolean(a.suspended),
+          suspendedAt: a.suspended ? Date.now() : null,
+          reminded: [],
+        };
+        updateGuild(i.guildId, (gg) => (gg.hosting.servers[a.id] = added));
+        return done(`Serwer **${a.name}** (ID \`${a.id}\`) przypisany do ${user}, ważny do ${ts(added.expiresAt, 'f')}.${added.suspended ? '\n⚠️ Serwer jest zablokowany — odblokuj go `/hosting odblokuj` albo przedłuż.' : ''}`);
+      }
+      if (!rec || rec.deleted) return failed(`Nie znam serwera o ID \`${serverId}\`. Sprawdź \`/hosting lista\` albo dodaj go: \`/hosting dodaj\`.`);
+      if (sub === 'przedluz') {
+        const extended = await extendHosting(i.guildId, serverId, i.options.getInteger('dni'));
+        await sendHostingDm(i.client, extended.userId, hostingRenewedView(extended, i.guildId));
+        await hostingLog(i.client, i.guildId, [`### 🔁 ${x} Hosting przedłużony (+${i.options.getInteger('dni')} dni)`, recLine(extended), row('Przez', `<@${i.user.id}>`)].join('\n'), colors.success);
+        return done(`Serwer **${extended.name}** ważny do ${ts(extended.expiresAt, 'f')}.${extended.started === false ? '\n-# Serwer odblokowany — klient musi kliknąć Start (brak `clientApiKey`).' : ''}`);
+      }
+      if (sub === 'limity') {
+        const ram = i.options.getInteger('ram');
+        const disk = i.options.getInteger('dysk');
+        const cpu = i.options.getInteger('cpu');
+        if (!ram && !disk && !cpu) return failed('Podaj co najmniej jedną wartość: ram, dysk albo cpu.');
+        const a = (await ptero('GET', `/servers/${serverId}`)).attributes;
+        const limits = { ...a.limits, memory: ram ?? a.limits.memory, disk: disk ?? a.limits.disk, cpu: cpu ?? a.limits.cpu };
+        await ptero('PATCH', `/servers/${serverId}/build`, {
+          allocation: a.allocation,
+          memory: limits.memory,
+          swap: limits.swap,
+          disk: limits.disk,
+          io: limits.io,
+          cpu: limits.cpu,
+          threads: limits.threads,
+          feature_limits: a.feature_limits,
+        });
+        return done(`Nowe limity **${rec.name}**: RAM \`${limits.memory} MB\`, dysk \`${limits.disk} MB\`, CPU \`${limits.cpu}%\`.\n-# Zmiany działają po restarcie serwera.`);
+      }
+      if (sub === 'zablokuj') {
+        if (rec.suspended) return failed('Ten serwer jest już zablokowany.');
+        await suspendHosting(i.guildId, rec);
+        return done(`Zablokowano **${rec.name}**.`);
+      }
+      if (sub === 'odblokuj') {
+        if (!rec.suspended) return failed('Ten serwer nie jest zablokowany.');
+        await ptero('POST', `/servers/${rec.id}/unsuspend`);
+        updateGuild(i.guildId, () => Object.assign(rec, { suspended: false, suspendedAt: null, deleteNotified: false }));
+        return done(`Odblokowano **${rec.name}**. Termin bez zmian: ${ts(rec.expiresAt, 'f')}${rec.expiresAt < Date.now() ? ' — **już minął**, bot zablokuje go ponownie w ciągu 5 minut. Użyj `/hosting przedluz`.' : '.'}`);
+      }
+      if (sub === 'usun') {
+        if (!i.options.getBoolean('potwierdz')) return failed('Usunięcie wymaga `potwierdz:True`.');
+        await ptero('DELETE', `/servers/${rec.id}`).catch((err) => {
+          if (!notFound(err)) throw err;
+        });
+        updateGuild(i.guildId, () => Object.assign(rec, { deleted: true, deletedAt: Date.now() }));
+        await hostingLog(i.client, i.guildId, `### 🗑️ ${x} Serwer usunięty\n${recLine(rec)}\n${row('Przez', `<@${i.user.id}>`)}`, colors.danger);
+        return done(`Usunięto serwer **${rec.name}** (ID \`${rec.id}\`) z panelu.`);
+      }
+    } catch (err) {
+      if (!err.userFacing) console.error(`/hosting ${sub}:`, err);
+      return failed(err.userFacing ? err.message : describeError(err));
+    }
+  },
+);
+
+command(
+  new SlashCommandBuilder().setName('moj-hosting').setDescription('Twój hosting: termin ważności i przedłużenie').setDMPermission(false),
+  (i) => {
+    const g = guild(i.guildId);
+    const recs = Object.values(g.hosting.servers).filter((r) => r.userId === i.user.id && !r.deleted);
+    const orders = Object.values(g.hosting.orders).filter((o) => o.userId === i.user.id && activeOrder(o));
+    return i.reply({ components: [myHostingView(recs, orders, i.guildId)], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+  },
+);
+
 // ═══ ROUTING INTERAKCJI ════════════════════════════════════════════════
 
 const inviteUrl = (clientId) => `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=8&scope=bot%20applications.commands`;
@@ -2518,6 +3941,7 @@ async function route(i) {
     if (action === 'open' && i.isButton()) return onReviewOpen(i, guildId);
     if (action === 'submit' && i.isModalSubmit()) return onReviewSubmit(i, guildId);
   }
+  if (scope === 'hs') return routeHosting(i);
   if (!i.inGuild()) return;
 
   if (scope === 'tk') {
@@ -2615,7 +4039,9 @@ function selfTest() {
   const base = { channelId: '1', number: 7, userId: '2', openedAt: Date.now(), };
   const tickets = [
     { ...base, type: 'bot', form: { desc: 'Bot z ticketami', budget: '50', deadline: null } },
-    { ...base, type: 'hosting', form: { bot: 'discord.js', period: '3m', notes: 'x' } },
+    { ...base, type: 'hosting', form: { lang: 'python', period: '3m', mode: 'manual', payment: 'blik', email: 'a@b.pl' } },
+    { ...base, type: 'hosting', guildId: 'selftest', form: { lang: 'nodejs', period: '1m', mode: 'manual', payment: 'ltc', renew: '5' } },
+    { ...base, type: 'hosting', form: { bot: 'discord.js', period: '3m', notes: 'stary ticket' } },
     { ...base, type: 'question', form: { question: 'Ile kosztuje?' } },
     { ...base, type: 'partner', form: { server: null, offer: 'Reklama' } },
   ];
@@ -2644,6 +4070,7 @@ function selfTest() {
     vouchPanel(g, img),
     closedView({ ...dealTicket, closedAt: Date.now(), closedBy: null, result: 'done', lcUrl: 'https://discord.com/channels/1/2/3' }, 'Serwer', true, '9'),
     boostView(user, 23, 2),
+    ...hostingViewsForTest(),
   ];
   for (const item of built) item.toJSON();
   if (parseDuration('1d 2h 30m') !== 95_400_000) throw new Error('parseDuration');
@@ -3301,6 +4728,557 @@ async function autoLcTest() {
   console.log('✅ Test auto LC i spójności bazy: 5 scenariuszy OK');
 }
 
+// ─── Test hostingu (symulacja panelu, blockchainów i Discorda) ─────────
+
+function hostingViewsForTest() {
+  const rec = { id: 7, identifier: 'abcd1234', name: 'Node.js • wojtek', userId: '2', lang: 'nodejs', plan: '1m', expiresAt: Date.now() + 5 * DAY, suspended: false };
+  const order = (status, coin = 'ltc') => ({
+    id: 'o1',
+    userId: '2',
+    coin,
+    wallet: 'ltc1qexample',
+    amount: '0.01250417',
+    pln: 5,
+    plan: '1m',
+    lang: 'nodejs',
+    status,
+    confirmations: 1,
+    txid: 'abc:internal',
+    expiresAt: Date.now() + 1e6,
+  });
+  return [
+    hostingReadyView(rec, { user: { email: 'a@b.pl' }, password: 'x' }, '9'),
+    hostingReadyView({ ...rec, lang: 'other' }, { user: { email: 'a@b.pl' }, password: null }, '9'),
+    hostingRenewedView({ ...rec, started: true }, '9'),
+    hostingRenewedView({ ...rec, started: false }, '9'),
+    hostingReminderView(rec, '9'),
+    hostingExpiredView(rec, '9'),
+    ...['waiting', 'seen', 'paid', 'creating', 'error', 'failed', 'done', 'expired', 'cancelled'].map((s) => orderView(order(s), '9')),
+    ...Object.keys(cryptoCoins).map((coin) => orderView(order('seen', coin), '9')),
+    orderView({ ...order('done'), renew: '7' }, '9'),
+    ...Object.keys(hostingPayments).map((payment) => manualPaymentView({ lang: 'nodejs', period: '1m', payment })),
+    manualPaymentView({ lang: 'other', period: '12m', payment: 'blik' }),
+    myHostingView([rec, { ...rec, id: 8, suspended: true }], [order('waiting')], '9'),
+    myHostingView([], [], '9'),
+    hostingListView([rec, { ...rec, id: 8, suspended: true }], 'Serwery'),
+    hostingListView([], 'Serwery'),
+    renewModal('9', '7'),
+  ];
+}
+
+async function hostingTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test hostingu nie przeszedł: ${msg}`);
+  };
+  const J = (p) => JSON.stringify(p?.components?.[0]?.toJSON?.() ?? p);
+  const GID = 'hosting-guild';
+  const now = Date.now();
+  const LTC = 'ltc1qtestaddressxxxxxxxxxxxxxxxxxxxxxxxxxx';
+  const ETH = '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01';
+  const SOL = 'So1anaWa11etAddre55111111111111111111111111';
+  const SOL_ATA = 'UsdcTokenAccount1111111111111111111111111111';
+
+  const savedConfig = hostingConfig;
+  const savedFetch = httpFetch;
+  const savedDelay = hostingDelay;
+  hostingConfig = {
+    panelUrl: 'http://panel.test/',
+    apiKey: 'ptla_test',
+    clientApiKey: 'ptlc_test',
+    eggs: { nodejs: { nest: 5, egg: 15 }, python: { nest: 5, egg: 16 }, java: { nest: 5, egg: 17 } },
+    wallets: { ltc: LTC, eth: ETH, sol: SOL },
+    manualPayments: { blik: 'Numer BLIK: 123 456 789' },
+  };
+  hostingDelay = async () => {};
+  eggCache.clear();
+  priceCache = { at: 0, data: {} };
+  solTxCache.clear();
+  solTokenAccounts = { at: 0, wallet: '', list: [] };
+
+  // ── Symulowany panel Pterodactyl ──
+  const panel = { users: [], servers: [], calls: [], power: [] };
+  let serverSeq = 100;
+  const eggVars = {
+    15: [{ env_variable: 'MAIN_FILE', default_value: 'index.js' }, { env_variable: 'NODE_PACKAGES', default_value: null }],
+    16: [{ env_variable: 'PY_FILE', default_value: 'main.py' }, { env_variable: 'REQUIREMENTS_FILE', default_value: 'requirements.txt' }],
+    17: [{ env_variable: 'JARFILE', default_value: 'bot.jar' }],
+  };
+  const serverAttrs = (s) => ({ ...s, limits: { ...s.limits }, feature_limits: { ...s.feature_limits } });
+  function panelRoute(method, path, body) {
+    panel.calls.push([method, path, body]);
+    let m;
+    if ((m = /^\/api\/application\/users\/external\/discord-(\w+)$/.exec(path))) {
+      const u = panel.users.find((x) => x.external_id === `discord-${m[1]}`);
+      return u ? [200, { attributes: u }] : [404, { errors: [{ detail: 'not found' }] }];
+    }
+    if ((m = /^\/api\/application\/users\?filter\[email\]=(.+)$/.exec(path))) {
+      const email = decodeURIComponent(m[1]);
+      return [200, { data: panel.users.filter((u) => u.email === email).map((u) => ({ attributes: u })) }];
+    }
+    if (method === 'POST' && path === '/api/application/users') {
+      if (panel.users.some((u) => u.username === body.username)) return [422, { errors: [{ detail: 'The username has already been taken.' }] }];
+      const u = { id: panel.users.length + 1, ...body };
+      delete u.password;
+      panel.users.push(u);
+      return [201, { attributes: u }];
+    }
+    if ((m = /^\/api\/application\/nests\/5\/eggs\/(\d+)\?include=variables$/.exec(path))) {
+      const id = Number(m[1]);
+      return [
+        200,
+        {
+          attributes: {
+            id,
+            docker_image: `ghcr.io/parkervcp/yolks:egg${id}`,
+            startup: `start-${id}`,
+            relationships: { variables: { data: eggVars[id].map((v) => ({ attributes: v })) } },
+          },
+        },
+      ];
+    }
+    if (path === '/api/application/locations') return [200, { data: [{ attributes: { id: 1 } }] }];
+    if (path === '/api/client') return [200, { data: [] }];
+    if (path === '/api/application/nodes?per_page=100') return [200, { data: [{ attributes: { id: 1, name: 'Node1', public: true } }] }];
+    if (path === '/api/application/nodes/1/allocations?per_page=500') return [200, { data: [{ attributes: { assigned: true } }, { attributes: { assigned: false } }] }];
+    if ((m = /^\/api\/application\/servers\/external\/(.+)$/.exec(path))) {
+      const s = panel.servers.find((x) => x.external_id === m[1]);
+      return s ? [200, { attributes: serverAttrs(s) }] : [404, { errors: [{ detail: 'not found' }] }];
+    }
+    if (method === 'POST' && path === '/api/application/servers') {
+      const s = {
+        id: ++serverSeq,
+        identifier: `id${serverSeq}`,
+        external_id: body.external_id,
+        name: body.name,
+        user: body.user,
+        egg: body.egg,
+        docker_image: body.docker_image,
+        environment: body.environment,
+        limits: body.limits,
+        feature_limits: body.feature_limits,
+        allocation: 900 + serverSeq,
+        suspended: false,
+        deploy: body.deploy,
+      };
+      panel.servers.push(s);
+      return [201, { attributes: serverAttrs(s) }];
+    }
+    if ((m = /^\/api\/application\/servers\/(\d+)(\/[a-z]+)?$/.exec(path))) {
+      const s = panel.servers.find((x) => x.id === Number(m[1]));
+      if (!s) return [404, { errors: [{ detail: 'not found' }] }];
+      if (method === 'GET') return [200, { attributes: serverAttrs(s) }];
+      if (m[2] === '/suspend') return (s.suspended = true), [204, null];
+      if (m[2] === '/unsuspend') return (s.suspended = false), [204, null];
+      if (m[2] === '/build') {
+        s.lastBuild = body;
+        Object.assign(s.limits, { memory: body.memory, disk: body.disk, cpu: body.cpu });
+        return [200, { attributes: serverAttrs(s) }];
+      }
+      if (method === 'DELETE') return (panel.servers = panel.servers.filter((x) => x !== s)), [204, null];
+    }
+    if ((m = /^\/api\/client\/servers\/(\w+)\/power$/.exec(path))) return panel.power.push([m[1], body.signal]), [204, null];
+    return [500, { errors: [{ detail: `nieznana ścieżka ${method} ${path}` }] }];
+  }
+
+  // ── Symulowane blockchainy ──
+  const chain = { ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
+  function chainRoute(url, init) {
+    if (url.startsWith('https://api.coingecko.com/')) return [200, { litecoin: { pln: 400 }, ethereum: { pln: 12000 }, solana: { pln: 600 }, 'usd-coin': { pln: 3.65 } }];
+    if (url === 'https://litecoinspace.org/api/blocks/tip/height') return [200, chain.ltcTip];
+    if (url === `https://litecoinspace.org/api/address/${LTC}/txs`) return [200, chain.ltcTxs];
+    if (url.startsWith('https://eth.blockscout.com/api?')) {
+      const q = new URL(url).searchParams;
+      assert(q.get('address') === ETH, 'ETH: zapytanie o właściwy adres');
+      const list = { txlist: chain.ethTxs, txlistinternal: chain.ethInternal, tokentx: chain.ethTokens }[q.get('action')];
+      return [200, list.length ? { status: '1', message: 'OK', result: list } : { status: '0', message: 'No transactions found', result: [] }];
+    }
+    if (url === 'https://ethereum-rpc.publicnode.com') return [200, { jsonrpc: '2.0', id: 1, result: `0x${chain.ethBlock.toString(16)}` }];
+    if (url === 'https://api.mainnet-beta.solana.com') {
+      const { method, params } = JSON.parse(init.body);
+      if (method === 'getTokenAccountsByOwner') return [200, { result: { value: [{ pubkey: SOL_ATA }] } }];
+      if (method === 'getSignaturesForAddress') return [200, { result: chain.solSigs[params[0]] ?? [] }];
+      if (method === 'getTransaction') return [200, { result: chain.solTxs[params[0]] ?? null }];
+    }
+    return [500, 'nieznany adres'];
+  }
+  httpFetch = async (url, init = {}) => {
+    const [status, body] = url.startsWith('http://panel.test/api/')
+      ? panelRoute(init.method ?? 'GET', url.slice('http://panel.test'.length), init.body ? JSON.parse(init.body) : null)
+      : chainRoute(url, init);
+    if (url.startsWith('http://panel.test/')) assert(init.headers?.Authorization?.startsWith('Bearer ptl'), 'klucz API w nagłówku');
+    return { ok: status < 400, status, text: async () => (body === null ? '' : typeof body === 'string' ? body : JSON.stringify(body)) };
+  };
+
+  // ── Symulowany Discord ──
+  const dms = [];
+  const dmEdits = [];
+  const logs = [];
+  const channelSends = [];
+  const mkUser = (id, username, dmOpen = true) => ({
+    id,
+    username,
+    globalName: username,
+    tag: username,
+    displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png',
+    send: async (p) => {
+      if (!dmOpen) throw new Error('Cannot send messages to this user');
+      dms.push([id, p]);
+      return { id: `dm${dms.length}`, channelId: `dmch-${id}` };
+    },
+  });
+  const users = { c1: mkUser('c1', 'Wojtek3509'), c2: mkUser('c2', 'klient2'), c3: mkUser('c3', 'x'), closed: mkUser('closed', 'zamkniete', false), c4: mkUser('c4', 'nowy4'), staff: mkUser('staff', 'staff') };
+  const roleAdds = [];
+  const fakeGuild = {
+    id: GID,
+    roles: { cache: { find: (fn) => [{ id: 'role-client', name: serverLayout.roles.client.name }].find(fn) } },
+    members: { fetch: async (id) => ({ id, roles: { add: async (r) => roleAdds.push([id, r.id]) } }) },
+  };
+  const ticketChannel = {
+    id: 'hticket',
+    send: async (p) => (channelSends.push(p), { id: `tm${channelSends.length}` }),
+    messages: { fetch: async () => ({ edit: async (p) => channelSends.push(['card', p]) }) },
+  };
+  const client = {
+    user: { id: 'bot' },
+    users: { fetch: async (id) => users[id] },
+    guilds: { cache: { get: (id) => (id === GID ? fakeGuild : null) } },
+    channels: {
+      fetch: async (id) => {
+        if (id === 'hlog') return { send: async (p) => logs.push(J(p)) };
+        if (id.startsWith('dmch-')) return { messages: { fetch: async (mid) => ({ edit: async (p) => dmEdits.push([mid, J(p)]) }) } };
+        return null;
+      },
+    },
+  };
+  const g = guild(GID);
+  Object.assign(g.settings, { staffRoleId: 'staff-role', ticketLogs: { hosting: 'hlog' }, lcChannelId: 'lc' });
+  const interaction = (userId, extra = {}) => ({
+    user: users[userId],
+    client,
+    guildId: GID,
+    guild: fakeGuild,
+    channelId: 'hticket',
+    channel: ticketChannel,
+    member: { permissions: { has: () => false }, roles: { cache: { has: (r) => userId === 'staff' && r === 'staff-role' } } },
+    replies: [],
+    reply(p) {
+      this.replies.push(p);
+      return Promise.resolve();
+    },
+    deferReply() {
+      this.deferred = true;
+      return Promise.resolve();
+    },
+    editReply(p) {
+      this.replies.push(p);
+      return Promise.resolve();
+    },
+    update(p) {
+      this.replies.push(p);
+      return Promise.resolve();
+    },
+    showModal(m) {
+      this.modal = m;
+      return Promise.resolve();
+    },
+    isButton: () => true,
+    isModalSubmit: () => false,
+    ...extra,
+  });
+  const purchase = async (userId, form) => {
+    const i = interaction(userId, {
+      fields: { getStringSelectValues: (id) => (form[id] ? [form[id]] : []), getTextInputValue: (id) => form[id] ?? '' },
+    });
+    await onTicketForm(i, 'hosting');
+    return i;
+  };
+  const lastOrder = (userId) => Object.values(g.hosting.orders).filter((o) => o.userId === userId).at(-1);
+  const tick = () => processOrders(client, GID);
+
+  try {
+    // 1. Kwoty z unikalną końcówką.
+    const ltcAmt = cryptoAmount('ltc', 5, 400, new Set());
+    assert(ltcAmt.amount.startsWith('0.01250') && ltcAmt.amount.length === 10 && BigInt(ltcAmt.units) === BigInt(ltcAmt.shownUnits), `LTC: 5 zł / 400 zł = 0.0125 + końcówka (${ltcAmt.amount})`);
+    const ethAmt = cryptoAmount('eth', 5, 12000, new Set());
+    assert(ethAmt.amount.startsWith('0.00042') && BigInt(ethAmt.units) === BigInt(ethAmt.shownUnits) * 10n ** 10n, `ETH: 8 miejsc po przecinku, jednostki w wei (${ethAmt.amount})`);
+    const usdcAmt = cryptoAmount('usdc_eth', 5, 3.65, new Set());
+    assert(usdcAmt.amount.startsWith('1.370') && usdcAmt.amount.length === 8, `USDC: 1.37 + końcówka (${usdcAmt.amount})`);
+    const taken = new Set(Array.from({ length: 998 }, (_, k) => 1_250_000 + k + 1));
+    assert(cryptoAmount('ltc', 5, 400, taken).shownUnits === 1_250_999, 'zajęte końcówki są pomijane');
+    assert(unitsToString(5, 8) === '0.00000005' && unitsToString(123456789, 8) === '1.23456789', 'zapis kwot');
+
+    // 2. Walidacja formularza.
+    const form = (extra) => ({ lang: 'nodejs', period: '1m', mode: 'auto', payment: 'ltc', email: 'jan@gmail.com', ...extra });
+    assert(hostingFormError(form()) === null, 'poprawny formularz');
+    assert(/krypto/i.test(hostingFormError(form({ payment: 'blik' }))), 'auto + BLIK → błąd');
+    assert(/ręcznym/.test(hostingFormError(form({ lang: 'other' }))), 'inny język + auto → błąd');
+    assert(hostingFormError(form({ lang: 'other', mode: 'manual', payment: 'blik' })) === null, 'inny język ręcznie OK');
+    assert(/e-mail/.test(hostingFormError(form({ email: 'zly' }))), 'zły e-mail');
+    assert(hostingFormError(form({ email: null, renew: '5', lang: 'other' })) === null, 'przedłużenie bez e-maila i dla innego języka');
+    const modalJson = JSON.stringify(ticketModal('hosting').toJSON());
+    assert(['Język bota', 'Sposób zakupu', 'Automatyczny', 'Ręczny', 'USDC (sieć Solana)', 'Revolut', 'E-mail'].every((t) => modalJson.includes(t)), 'formularz zakupu: język, sposób, płatność, e-mail');
+
+    // 3. Zakup automatyczny LTC: DM z kwotą → wpłata w mempoolu → 2 potwierdzenia → serwer.
+    let i = await purchase('c1', form());
+    let order = lastOrder('c1');
+    assert(order?.status === 'waiting' && order.wallet === LTC && order.amount.startsWith('0.01250'), 'zamówienie LTC utworzone');
+    assert(J(i.replies.at(-1)).includes('DM') && dms.length === 1 && J(dms[0][1]).includes(order.amount) && J(dms[0][1]).includes(LTC), 'DM z adresem i kwotą');
+    assert(J(dms[0][1]).includes('api.qrserver.com'), 'kod QR adresu');
+    i = await purchase('c1', form());
+    assert(J(i.replies.at(-1)).includes('czekające na płatność'), 'drugie zamówienie przy oczekującym → błąd');
+
+    const copy = interaction('c1', { customId: `hs:copy:${GID}:${order.id}:amt` });
+    await routeHosting(copy);
+    assert(copy.replies[0].content === order.amount, 'przycisk „Skopiuj kwotę” daje czysty tekst');
+
+    chain.ltcTxs = [{ txid: 'ltcwrong', vout: [{ scriptpubkey_address: LTC, value: Number(order.units) + 1 }], status: { confirmed: false } }];
+    await tick();
+    assert(order.status === 'waiting', 'inna kwota nie jest zaliczana');
+    chain.ltcTxs.push({ txid: 'ltcgood', vout: [{ scriptpubkey_address: 'ltc1qinny', value: 5 }, { scriptpubkey_address: LTC, value: Number(order.units) }], status: { confirmed: false } });
+    await tick();
+    assert(order.status === 'seen' && order.txid === 'ltcgood' && order.confirmations === 0, 'wpłata wykryta w mempoolu');
+    assert(dmEdits.at(-1)[1].includes('Płatność wykryta') && dmEdits.at(-1)[1].includes('0/2'), 'DM: 0/2 potwierdzeń');
+    chain.ltcTxs[1].status = { confirmed: true, block_height: chain.ltcTip, block_time: Math.floor(Date.now() / 1000) };
+    await tick();
+    assert(order.status === 'seen' && order.confirmations === 1, '1 potwierdzenie → jeszcze czekamy');
+    chain.ltcTip++;
+    await tick();
+    assert(order.status === 'done' && order.serverId, `2 potwierdzenia → serwer utworzony (${order.status} ${order.lastError ?? ''})`);
+    const s1 = panel.servers.find((s) => s.id === order.serverId);
+    assert(s1.limits.memory === 256 && s1.limits.disk === 1024 && s1.limits.cpu === 25 && s1.limits.swap === 0, 'limity 256 MB / 1 GB / 25%');
+    assert(s1.egg === 15 && s1.docker_image === 'ghcr.io/parkervcp/yolks:egg15' && s1.environment.MAIN_FILE === 'index.js' && s1.environment.NODE_PACKAGES === '', 'jajko Node.js z domyślnymi zmiennymi');
+    assert(s1.deploy.locations[0] === 1 && s1.external_id === `tb-${order.id}`, 'automatyczny port (deploy) i external_id');
+    const u1 = panel.users.find((u) => u.external_id === 'discord-c1');
+    assert(u1 && u1.username === 'wojtek3509' && u1.email === 'jan@gmail.com', 'konto w panelu: nazwa z Discorda, e-mail z formularza');
+    const credentials = dms.find(([id, p]) => id === 'c1' && J(p).includes('HOSTING GOTOWY'));
+    assert(credentials && J(credentials[1]).includes('jan@gmail.com') && /\|\|`[\w-]{16}`\|\|/.test(J(credentials[1])), 'DM z loginem i hasłem (pod spoilerem)');
+    assert(logs.some((l) => l.includes('Nowy hosting') && l.includes('automatycznie') && l.includes('ltcgood')), 'log zakupu');
+    assert(roleAdds.some(([id, r]) => id === 'c1' && r === 'role-client'), 'rola klienta');
+    const rec1 = g.hosting.servers[order.serverId];
+    assert(rec1 && Math.abs(rec1.expiresAt - (Date.now() + 31 * DAY)) < 60_000, 'ważny 31 dni');
+    const serversBefore = panel.servers.length;
+    await fulfilOrder(client, GID, { ...order, id: order.id, status: 'paid', attempts: 0 });
+    assert(panel.servers.length === serversBefore, 'ponowna próba nie tworzy drugiego serwera (external_id)');
+
+    // 4. ETH: wpłata przez transakcję wewnętrzną (giełda), potwierdzenia liczone z numeru bloku.
+    await purchase('c2', form({ payment: 'eth', lang: 'python', email: 'k2@wp.pl' }));
+    order = lastOrder('c2');
+    const tsNow = String(Math.floor(Date.now() / 1000));
+    chain.ethTxs = [{ hash: '0xnormal', to: ETH.toLowerCase(), value: '1', isError: '0', txreceipt_status: '1', confirmations: '50', timeStamp: tsNow, blockNumber: '1' }];
+    chain.ethInternal = [{ hash: '0xinternal', to: ETH.toLowerCase(), value: order.units, isError: '0', timeStamp: tsNow, blockNumber: String(chain.ethBlock) }];
+    await tick();
+    assert(order.status === 'seen' && order.confirmations === 1 && order.txid === '0xinternal:internal', 'ETH wewnętrzna: 1 potwierdzenie');
+    chain.ethBlock++;
+    ethTip.at = 0;
+    await tick();
+    assert(order.status === 'done', 'ETH: 2 potwierdzenia → serwer');
+    const s2 = panel.servers.find((s) => s.id === order.serverId);
+    assert(s2.egg === 16 && s2.environment.PY_FILE === 'main.py', 'jajko Python');
+
+    // 5. USDC (Ethereum) przez tokentx.
+    await purchase('c3', form({ payment: 'usdc_eth', lang: 'java', email: 'c3@o2.pl' }));
+    order = lastOrder('c3');
+    chain.ethTokens = [{ hash: '0xtoken', logIndex: '7', to: ETH.toLowerCase(), value: order.units, contractAddress: cryptoCoins.usdc_eth.token, confirmations: '3', timeStamp: tsNow }];
+    await tick();
+    assert(order.status === 'done' && order.txid === '0xtoken:7', 'USDC ERC-20 → serwer');
+    assert(panel.users.find((u) => u.external_id === 'discord-c3').username === 'klientc3', 'za krótka nazwa → klient<id>');
+
+    // 6. Solana: SOL (confirmed → finalized) i USDC na koncie tokenu.
+    delete g.hosting.servers[order.serverId];
+    await purchase('c3', form({ payment: 'sol', lang: 'java', email: 'c3@o2.pl' }));
+    order = lastOrder('c3');
+    const blockTime = Math.floor(Date.now() / 1000);
+    chain.solSigs[SOL] = [{ signature: 'solsig1', err: null, blockTime, confirmationStatus: 'confirmed' }];
+    chain.solTxs.solsig1 = {
+      meta: { err: null, preBalances: [5_000_000_000, 1_000], postBalances: [4_990_000_000, 1_000 + Number(order.units)], preTokenBalances: [], postTokenBalances: [] },
+      transaction: { message: { accountKeys: [{ pubkey: 'Payer111' }, { pubkey: SOL }] } },
+    };
+    await tick();
+    assert(order.status === 'seen' && order.confirmations === 1, 'SOL confirmed → czekamy na finalized');
+    chain.solSigs[SOL][0].confirmationStatus = 'finalized';
+    await tick();
+    assert(order.status === 'done', 'SOL finalized → serwer (istniejące konto w panelu)');
+    assert(dms.filter(([id, p]) => id === 'c3' && J(p).includes('to samo, co do Twojego konta')).length === 1, 'istniejące konto: bez nowego hasła');
+
+    await purchase('c2', form({ payment: 'usdc_sol', lang: 'nodejs' }));
+    order = lastOrder('c2');
+    chain.solSigs[SOL_ATA] = [{ signature: 'solsig2', err: null, blockTime, confirmationStatus: 'finalized' }];
+    chain.solTxs.solsig2 = {
+      meta: {
+        err: null,
+        preBalances: [1, 2],
+        postBalances: [1, 2],
+        preTokenBalances: [{ accountIndex: 1, mint: cryptoCoins.usdc_sol.token, owner: SOL, uiTokenAmount: { amount: '1000000' } }],
+        postTokenBalances: [{ accountIndex: 1, mint: cryptoCoins.usdc_sol.token, owner: SOL, uiTokenAmount: { amount: String(1_000_000 + Number(order.units)) } }],
+      },
+      transaction: { message: { accountKeys: ['Payer222', SOL_ATA] } },
+    };
+    await tick();
+    assert(order.status === 'done' && order.txid === 'solsig2:usdc', 'USDC (Solana) → serwer');
+
+    // 7. Wygasłe i anulowane zamówienia, zamknięte DM.
+    await purchase('c1', form({ payment: 'ltc' }));
+    order = lastOrder('c1');
+    order.expiresAt = Date.now() - 6 * 60_000;
+    await tick();
+    assert(order.status === 'expired' && dmEdits.at(-1)[1].includes('Czas na płatność minął'), 'zamówienie wygasa po 30 min (+5 min zapasu)');
+    await purchase('c1', form({ payment: 'sol' }));
+    order = lastOrder('c1');
+    const cancel = interaction('c1', { customId: `hs:cancel:${GID}:${order.id}` });
+    await routeHosting(cancel);
+    assert(order.status === 'cancelled' && J(cancel.replies[0]).includes('anulowane'), 'anulowanie zamówienia');
+    const other = interaction('c2', { customId: `hs:cancel:${GID}:${order.id}` });
+    await routeHosting(other);
+    assert(J(other.replies[0]).includes('Nie znaleziono'), 'cudzego zamówienia nie można anulować');
+    i = await purchase('closed', form({ email: 'z@z.pl' }));
+    assert(J(i.replies.at(-1)).includes('wiadomości prywatnej') && lastOrder('closed').status === 'cancelled', 'zamknięte DM → zamówienie anulowane');
+    i = await purchase('c4', form({ email: 'jan@gmail.com' }));
+    assert(J(i.replies.at(-1)).includes('ma już konto'), 'e-mail innej osoby → błąd przed płatnością');
+
+    // 8. Terminy: przypomnienia, blokada, powiadomienie o usunięciu.
+    const dmCount = () => dms.filter(([id]) => id === 'c1').length;
+    rec1.expiresAt = Date.now() + 2 * DAY;
+    let before = dmCount();
+    await checkExpirations(client, GID);
+    assert(dmCount() === before + 1 && J(dms.at(-1)[1]).includes('WKRÓTCE WYGAŚNIE') && rec1.reminded.includes(3), `przypomnienie 3 dni przed (${dmCount() - before} ${J(dms.at(-1)[1]).slice(0, 200)} ${rec1.reminded})`);
+    await checkExpirations(client, GID);
+    assert(dmCount() === before + 1, 'przypomnienie tylko raz');
+    rec1.expiresAt = Date.now() + 12 * 3600_000;
+    await checkExpirations(client, GID);
+    assert(dmCount() === before + 2 && rec1.reminded.includes(1), 'przypomnienie 1 dzień przed');
+    rec1.expiresAt = Date.now() - 1000;
+    await checkExpirations(client, GID);
+    assert(rec1.suspended && panel.servers.find((s) => s.id === rec1.id).suspended, 'po terminie serwer zablokowany w panelu');
+    assert(J(dms.at(-1)[1]).includes('ZABLOKOWANY') && J(dms.at(-1)[1]).includes(`hs:renew:${GID}:${rec1.id}`), 'DM o blokadzie z przyciskiem przedłużenia');
+    assert(logs.some((l) => l.includes('Hosting zablokowany')), 'log blokady');
+    rec1.suspendedAt = Date.now() - 8 * DAY;
+    await checkExpirations(client, GID);
+    assert(rec1.deleteNotified && logs.some((l) => l.includes('Serwer można usunąć')), 'po 7 dniach: powiadomienie, że można usunąć');
+    assert(panel.servers.some((s) => s.id === rec1.id), 'bot sam nie usuwa serwera');
+
+    // 9. Przedłużenie automatyczne z DM: odblokowanie + start.
+    const renewBtn = interaction('c1', { customId: `hs:renew:${GID}:${rec1.id}` });
+    await routeHosting(renewBtn);
+    assert(renewBtn.modal && JSON.stringify(renewBtn.modal.toJSON()).includes(`hs:renewsubmit:${GID}:${rec1.id}`), 'przycisk „Przedłuż” otwiera formularz');
+    const renewSubmit = interaction('c1', {
+      customId: `hs:renewsubmit:${GID}:${rec1.id}`,
+      isButton: () => false,
+      isModalSubmit: () => true,
+      fields: { getStringSelectValues: (id) => [{ period: '3m', mode: 'auto', payment: 'ltc' }[id]] },
+    });
+    await routeHosting(renewSubmit);
+    order = lastOrder('c1');
+    assert(order.status === 'waiting' && order.renew === String(rec1.id) && order.pln === 14, 'zamówienie przedłużenia (3 miesiące, 14 zł)');
+    chain.ltcTxs.push({ txid: 'ltcrenew', vout: [{ scriptpubkey_address: LTC, value: Number(order.units) }], status: { confirmed: true, block_height: chain.ltcTip - 1, block_time: blockTime } });
+    await tick();
+    assert(order.status === 'done', 'przedłużenie opłacone');
+    assert(!rec1.suspended && !panel.servers.find((s) => s.id === rec1.id).suspended, 'serwer odblokowany');
+    assert(Math.abs(rec1.expiresAt - (Date.now() + 93 * DAY)) < 60_000 && rec1.reminded.length === 0, '+93 dni od dziś');
+    assert(panel.power.some(([id, sig]) => id === rec1.identifier && sig === 'start'), 'serwer uruchomiony po odblokowaniu');
+    assert(J(dms.at(-1)[1]).includes('PRZEDŁUŻONY') && J(dms.at(-1)[1]).includes('uruchomiony'), 'DM o przedłużeniu');
+    const stranger = interaction('c2', { customId: `hs:renew:${GID}:${rec1.id}` });
+    await routeHosting(stranger);
+    assert(!stranger.modal && J(stranger.replies[0]).includes('nie jest Twój'), 'cudzego serwera nie można przedłużyć');
+
+    // 10. Zakup ręczny: staff klika „Potwierdź płatność” w tickecie.
+    g.tickets.hticket = {
+      channelId: 'hticket',
+      guildId: GID,
+      number: 50,
+      type: 'hosting',
+      userId: 'c2',
+      openedAt: Date.now(),
+      messageId: 'card',
+      form: { lang: 'java', period: '12m', mode: 'manual', payment: 'blik', email: 'k2@wp.pl' },
+    };
+    const cardJson = J({ components: [ticketMessage(g.tickets.hticket, users.c2)] });
+    assert(cardJson.includes('hs:confirm') && cardJson.includes('Potwierdź płatność i utwórz serwer'), 'karta ticketu z przyciskiem potwierdzenia');
+    assert(J({ components: [manualPaymentView(g.tickets.hticket.form)] }).includes('Numer BLIK: 123 456 789'), 'dane BLIK z config.json');
+    const byClient = interaction('c2', { customId: 'hs:confirm' });
+    await routeHosting(byClient);
+    assert(J(byClient.replies[0]).includes('Tylko staff'), 'klient nie potwierdzi sam');
+    const confirm = interaction('staff', { customId: 'hs:confirm' });
+    await routeHosting(confirm);
+    const t = g.tickets.hticket;
+    assert(t.hostingServerId && J(confirm.replies.at(-1)).includes('Serwer utworzony'), `serwer z ticketu (${J(confirm.replies.at(-1)).slice(0, 300)})`);
+    const s3 = panel.servers.find((s) => s.id === t.hostingServerId);
+    assert(s3.egg === 17 && s3.environment.JARFILE === 'bot.jar' && s3.external_id === 'tb-t-hticket', 'jajko Java, external_id ticketu');
+    assert(Math.abs(g.hosting.servers[s3.id].expiresAt - (Date.now() + 365 * DAY)) < 60_000, '1 rok = 365 dni');
+    assert(t.deal.product === 'Hosting 1 rok' && t.deal.price === '50 zł' && t.deal.payment === 'blik' && t.awaitingRep, 'dane do voucha');
+    assert(channelSends.some((p) => J(p).includes('+rep')), 'prośba o voucha w tickecie');
+    assert(!J(channelSends.find((p) => p[0] === 'card')[1]).includes('hs:confirm'), 'przycisk potwierdzenia znika po utworzeniu');
+    const again = interaction('staff', { customId: 'hs:confirm' });
+    await routeHosting(again);
+    assert(J(again.replies[0]).includes('już aktywny'), 'drugie potwierdzenie nic nie tworzy');
+
+    // 11. /hosting limity, zablokuj, odblokuj, usun, lista, /moj-hosting.
+    const cmd = (sub, opts = {}) =>
+      interaction('staff', {
+        options: {
+          getSubcommand: () => sub,
+          getInteger: (n) => opts[n] ?? null,
+          getString: (n) => opts[n] ?? null,
+          getUser: (n) => (opts[n] ? users[opts[n]] : null),
+          getBoolean: (n) => opts[n] ?? null,
+        },
+      });
+    let c = cmd('limity', { serwer: s3.id, ram: 512 });
+    await commands.get('hosting').execute(c);
+    assert(s3.lastBuild.memory === 512 && s3.lastBuild.disk === 1024 && s3.lastBuild.allocation === s3.allocation && s3.lastBuild.feature_limits.backups === 1, 'limity: RAM 512, reszta bez zmian');
+    c = cmd('zablokuj', { serwer: s3.id });
+    await commands.get('hosting').execute(c);
+    assert(s3.suspended && g.hosting.servers[s3.id].suspended, '/hosting zablokuj');
+    c = cmd('odblokuj', { serwer: s3.id });
+    await commands.get('hosting').execute(c);
+    assert(!s3.suspended && !g.hosting.servers[s3.id].suspended, '/hosting odblokuj');
+    c = cmd('przedluz', { serwer: s3.id, dni: 10 });
+    await commands.get('hosting').execute(c);
+    assert(Math.abs(g.hosting.servers[s3.id].expiresAt - (Date.now() + 375 * DAY)) < 60_000, '/hosting przedluz dolicza do końca okresu');
+    c = cmd('dodaj', { uzytkownik: 'c1', serwer: s2.id, dni: 5, jezyk: 'python' });
+    await commands.get('hosting').execute(c);
+    assert(g.hosting.servers[s2.id].userId === 'c1' && g.hosting.servers[s2.id].lang === 'python', '/hosting dodaj');
+    c = cmd('usun', { serwer: s2.id, potwierdz: false });
+    await commands.get('hosting').execute(c);
+    assert(panel.servers.some((s) => s.id === s2.id), 'usunięcie bez potwierdzenia nic nie robi');
+    c = cmd('usun', { serwer: s2.id, potwierdz: true });
+    await commands.get('hosting').execute(c);
+    assert(!panel.servers.some((s) => s.id === s2.id) && g.hosting.servers[s2.id].deleted, '/hosting usun');
+    c = cmd('utworz', { uzytkownik: 'c2', jezyk: 'nodejs', okres: '1m', email: 'k2@wp.pl' });
+    await commands.get('hosting').execute(c);
+    assert(J(c.replies.at(-1)).includes('Utworzono serwer'), '/hosting utworz');
+    c = cmd('lista');
+    await commands.get('hosting').execute(c);
+    assert(J(c.replies[0]).includes('SERWERY KLIENTÓW') === false && J(c.replies[0]).includes('Serwery klientów'), '/hosting lista');
+    c = interaction('c1');
+    await commands.get('moj-hosting').execute(c);
+    assert(J(c.replies[0]).includes(`hs:renew:${GID}:${rec1.id}`) && !J(c.replies[0]).includes(`#${s3.id}`), '/moj-hosting pokazuje tylko własne serwery');
+
+    // 12. Błąd panelu → ponawianie, a potem powiadomienie admina.
+    await purchase('c1', form({ payment: 'ltc', lang: 'java' }));
+    order = lastOrder('c1');
+    const savedEggs = hostingConfig.eggs;
+    hostingConfig.eggs = { ...savedEggs, java: undefined };
+    eggCache.clear();
+    order.status = 'paid';
+    order.txid = 'ltcx';
+    await tick();
+    assert(order.status === 'failed' && logs.at(-1).includes('nie zostało zrealizowane') && logs.at(-1).includes('/hosting utworz'), 'brak jajka → admin dostaje powiadomienie');
+    hostingConfig.eggs = savedEggs;
+
+    // 13. /hosting test.
+    const diag = await hostingDiagnostics();
+    assert(diag.length === 10 && diag.every((l) => l.startsWith('✅')), `diagnostyka: wszystko OK\n${diag.join('\n')}`);
+  } finally {
+    hostingConfig = savedConfig;
+    httpFetch = savedFetch;
+    hostingDelay = savedDelay;
+    eggCache.clear();
+    priceCache = { at: 0, data: {} };
+    delete store.guilds[GID];
+  }
+  console.log('✅ Test hostingu: zakup krypto (LTC, ETH, USDC, SOL), ręczny, terminy, blokada, przedłużenie, komendy OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
@@ -3310,6 +5288,7 @@ if (process.argv.includes('--check')) {
   await registerTest();
   await welcomeTest();
   await autoLcTest();
+  await hostingTest();
   process.exit(0);
 }
 
@@ -3318,6 +5297,7 @@ const configFile = join(dirname(fileURLToPath(import.meta.url)), 'config.json');
 const fileConfig = existsSync(configFile) ? JSON.parse(readFileSync(configFile, 'utf8')) : {};
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || fileConfig.token;
 const GUILD_ID = process.env.GUILD_ID || fileConfig.guildId;
+hostingConfig = fileConfig.hosting ?? {};
 if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
   console.error('Brak tokena. Wpisz go w config.json w polu "token" (albo ustaw DISCORD_TOKEN).');
   process.exit(1);
@@ -3342,6 +5322,13 @@ async function onReady(ready) {
     loopsStarted = true;
     giveawayTicker(ready);
     counterLoop(ready);
+    hostingLoop(ready);
+  }
+  if (hostingReady()) {
+    const coins = Object.keys(cryptoCoins).filter(walletFor);
+    console.log(`🖥️ Hosting: panel ${panelUrl()} • automatyczny zakup: ${coins.length ? coins.map((k) => cryptoCoins[k].label + (k.includes('_') ? `/${cryptoCoins[k].network.split(' ')[0]}` : '')).join(', ') : 'brak portfeli'}`);
+  } else {
+    console.warn('⚠️ Hosting: brak konfiguracji panelu (config.json → hosting) — działa tylko zakup ręczny bez tworzenia serwerów.');
   }
 
   let guildId = GUILD_ID;

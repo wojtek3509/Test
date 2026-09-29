@@ -1,4 +1,25 @@
 {
   "token": "TUTAJ_WKLEJ_TOKEN",
-  "guildId": ""
+  "guildId": "",
+  "hosting": {
+    "panelUrl": "http://194.92.50.117",
+    "apiKey": "",
+    "clientApiKey": "",
+    "locationId": 1,
+    "eggs": {
+      "nodejs": { "nest": 0, "egg": 0 },
+      "python": { "nest": 0, "egg": 0 },
+      "java": { "nest": 0, "egg": 0 }
+    },
+    "wallets": {
+      "ltc": "",
+      "eth": "",
+      "sol": ""
+    },
+    "manualPayments": {
+      "blik": "Numer telefonu do BLIK: 000 000 000",
+      "przelew": "Odbiorca: Imię Nazwisko\nNumer konta: 00 0000 0000 0000 0000 0000 0000\nTytuł: nazwa konta Discord",
+      "revolut": "Revtag: @twojrevtag"
+    }
+  }
 }

@@ -1,0 +1,54 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2024-04-02T14:19:30+02:00",
+    "name": "TanieBoty - Bot Discord (Java)",
+    "author": "tanieboty@discord",
+    "description": "Hosting bota Discord w Javie (JDA, Javacord…). Wgraj zbudowany plik .jar (z zależnościami, np. shadowJar) i ustaw jego nazwę.",
+    "features": null,
+    "docker_images": {
+        "Java 21": "ghcr.io/parkervcp/yolks:java_21",
+        "Java 17": "ghcr.io/parkervcp/yolks:java_17",
+        "Java 11": "ghcr.io/parkervcp/yolks:java_11"
+    },
+    "file_denylist": [],
+    "startup": "java -Xms64M -XX:MaxRAMPercentage=90.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{JARFILE}} {{JAVA_ARGS}}",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": [\"Zalogowano jako\", \"Logged in as\", \"Ready!\", \"is online\", \"ready\", \"Bot is ready\", \"Finished Loading\"]}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Pliki bota wgrywasz sam przez Files — biblioteki instalują się przy starcie.\nmkdir -p /mnt/server\necho \"Instalacja zakończona — wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
+            "container": "debian:bookworm-slim",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Jar file",
+            "description": "Nazwa pliku .jar bota.",
+            "env_variable": "JARFILE",
+            "default_value": "bot.jar",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:64",
+            "field_type": "text"
+        },
+        {
+            "name": "Additional Arguments",
+            "description": "Argumenty przekazywane do bota.",
+            "env_variable": "JAVA_ARGS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128",
+            "field_type": "text"
+        }
+    ]
+}
