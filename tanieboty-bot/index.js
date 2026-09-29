@@ -1408,6 +1408,7 @@ const hostingApi = () => ({
   eth: 'https://eth.blockscout.com/api',
   ethRpc: 'https://ethereum-rpc.publicnode.com',
   sol: 'https://api.mainnet-beta.solana.com',
+  coinbase: 'https://api.coinbase.com/v2/exchange-rates',
   prices: 'https://api.coingecko.com/api/v3/simple/price',
   qr: 'https://api.qrserver.com/v1/create-qr-code/',
   ...hostingConfig.api,
@@ -1435,7 +1436,9 @@ function unitsToString(units, decimals) {
 }
 
 async function getJson(url, init = {}) {
-  const res = await httpFetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+  // Część serwisów (np. CloudFront) odrzuca zapytania bez nagłówka User-Agent.
+  const headers = { 'User-Agent': `${brand.name}-bot/1.0`, Accept: 'application/json', ...init.headers };
+  const res = await httpFetch(url, { ...init, headers, signal: AbortSignal.timeout(20_000) });
   const raw = await res.text();
   let data = null;
   try {
@@ -1444,7 +1447,7 @@ async function getJson(url, init = {}) {
     data = null;
   }
   if (!res.ok) {
-    const detail = data?.errors?.map((e) => e.detail).join(' ') || raw.slice(0, 200);
+    const detail = data?.errors?.map((e) => e.detail).join(' ') || raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
     throw Object.assign(new Error(`HTTP ${res.status}: ${detail}`), { status: res.status, data });
   }
   return data;
@@ -1922,12 +1925,36 @@ function cryptoAmount(coinKey, pln, rate, taken) {
 }
 
 let priceCache = { at: 0, data: {} };
+/** Kursy w PLN w formacie { litecoin: { pln: 400 }, … }. Najpierw Coinbase, a gdy nie odpowiada — CoinGecko. */
 async function cryptoPricesPln() {
   if (Date.now() - priceCache.at < 120_000) return priceCache.data;
-  const ids = [...new Set(Object.values(cryptoCoins).map((c) => c.gecko))].join(',');
-  const data = await getJson(`${hostingApi().prices}?ids=${ids}&vs_currencies=pln`);
-  priceCache = { at: Date.now(), data };
-  return data;
+  const coins = Object.values(cryptoCoins);
+  const errors = [];
+  const sources = [
+    async () => {
+      // Coinbase podaje, ile danej waluty dostaniesz za 1 PLN — kurs to odwrotność.
+      const rates = (await getJson(`${hostingApi().coinbase}?currency=PLN`))?.data?.rates ?? {};
+      return Object.fromEntries(coins.filter((c) => Number(rates[c.label]) > 0).map((c) => [c.gecko, { pln: 1 / Number(rates[c.label]) }]));
+    },
+    async () => {
+      const ids = [...new Set(coins.map((c) => c.gecko))].join(',');
+      const key = hostingConfig.coingeckoApiKey;
+      return getJson(`${hostingApi().prices}?ids=${ids}&vs_currencies=pln`, key ? { headers: { 'x-cg-demo-api-key': key } } : {});
+    },
+  ];
+  for (const source of sources) {
+    try {
+      const data = await source();
+      if (coins.every((c) => data?.[c.gecko]?.pln > 0)) {
+        priceCache = { at: Date.now(), data };
+        return data;
+      }
+      errors.push('niepełne kursy');
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  throw new Error(`Brak kursów krypto: ${errors.join(' | ')}`);
 }
 
 async function createCryptoOrder(guildId, userId, form) {
@@ -2474,7 +2501,7 @@ async function hostingDiagnostics() {
     return 'działa';
   });
   priceCache.at = 0;
-  await check('Kursy PLN (CoinGecko)', async () =>
+  await check('Kursy PLN', async () =>
     Object.entries(await cryptoPricesPln())
       .map(([id, v]) => `${id} ${v.pln} zł`)
       .join(' • '),
@@ -4881,9 +4908,18 @@ async function hostingTest() {
   }
 
   // ── Symulowane blockchainy ──
-  const chain = { ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
+  const chain = { coinbaseDown: false, geckoDown: true, ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
   function chainRoute(url, init) {
-    if (url.startsWith('https://api.coingecko.com/')) return [200, { litecoin: { pln: 400 }, ethereum: { pln: 12000 }, solana: { pln: 600 }, 'usd-coin': { pln: 3.65 } }];
+    assert(init.headers?.['User-Agent'], 'nagłówek User-Agent');
+    // Coinbase blokuje (jak CoinGecko na niektórych serwerach) → kursy z zapasowego źródła; potem Coinbase działa.
+    if (url.startsWith('https://api.coinbase.com/')) {
+      if (chain.coinbaseDown) return [403, '<HTML><TITLE>ERROR</TITLE>blocked</HTML>'];
+      return [200, { data: { currency: 'PLN', rates: { LTC: String(1 / 400), ETH: String(1 / 12000), SOL: String(1 / 600), USDC: String(1 / 3.65), BTC: '0.000003' } } }];
+    }
+    if (url.startsWith('https://api.coingecko.com/')) {
+      if (chain.geckoDown) return [403, '<!DOCTYPE HTML><HTML><TITLE>ERROR</TITLE></HTML>'];
+      return [200, { litecoin: { pln: 400 }, ethereum: { pln: 12000 }, solana: { pln: 600 }, 'usd-coin': { pln: 3.65 } }];
+    }
     if (url === 'https://litecoinspace.org/api/blocks/tip/height') return [200, chain.ltcTip];
     if (url === `https://litecoinspace.org/api/address/${LTC}/txs`) return [200, chain.ltcTxs];
     if (url.startsWith('https://eth.blockscout.com/api?')) {
@@ -5006,6 +5042,20 @@ async function hostingTest() {
     const taken = new Set(Array.from({ length: 998 }, (_, k) => 1_250_000 + k + 1));
     assert(cryptoAmount('ltc', 5, 400, taken).shownUnits === 1_250_999, 'zajęte końcówki są pomijane');
     assert(unitsToString(5, 8) === '0.00000005' && unitsToString(123456789, 8) === '1.23456789', 'zapis kwot');
+
+    // Kursy: Coinbase (CoinGecko zablokowany jak na serwerze Wojtka), zapasowo CoinGecko, oba padnięte → błąd.
+    let prices = await cryptoPricesPln();
+    assert(Math.abs(prices.litecoin.pln - 400) < 1e-6 && Math.abs(prices['usd-coin'].pln - 3.65) < 1e-6, 'kursy z Coinbase');
+    Object.assign(chain, { coinbaseDown: true, geckoDown: false });
+    priceCache.at = 0;
+    prices = await cryptoPricesPln();
+    assert(prices.ethereum.pln === 12000, 'zapasowo kursy z CoinGecko');
+    Object.assign(chain, { geckoDown: true });
+    priceCache.at = 0;
+    const noPrices = await cryptoPricesPln().catch((err) => err.message);
+    assert(/Brak kursów/.test(noPrices) && noPrices.includes('HTTP 403: ERROR blocked'), `oba źródła padnięte → czytelny błąd (${noPrices})`);
+    Object.assign(chain, { coinbaseDown: false });
+    priceCache.at = 0;
 
     // 2. Walidacja formularza.
     const form = (extra) => ({ lang: 'nodejs', period: '1m', mode: 'auto', payment: 'ltc', email: 'jan@gmail.com', ...extra });

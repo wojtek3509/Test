@@ -82,7 +82,7 @@ Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język
 
 **⚡ Automatyczny (tylko krypto: LTC, ETH, USDC na Ethereum, SOL, USDC na Solanie):**
 1. Bot przelicza cenę na krypto po aktualnym kursie i dodaje **unikalną końcówkę kwoty** (np. `0.01250417 LTC`). Po niej rozpoznaje wpłatę na Twój jeden adres. W DM wysyła adres, kwotę, kod QR i przyciski „Skopiuj adres” i „Skopiuj kwotę”.
-2. Klient ma 30 minut na wpłatę. Bot co 30 sekund sprawdza blockchain przez darmowe publiczne API (litecoinspace.org, Blockscout, Solana RPC).
+2. Klient ma 30 minut na wpłatę. Bot co 30 sekund sprawdza blockchain przez darmowe publiczne API (litecoinspace.org, Blockscout, Solana RPC). Kursy PLN pobiera z Coinbase, a gdy nie odpowiada, z CoinGecko (opcjonalnie `coingeckoApiKey`, darmowy klucz „Demo”).
 3. Po **2 potwierdzeniach** (LTC, ETH) albo statusie **finalized** (Solana) bot sam zakłada konto w panelu, tworzy serwer (256 MB RAM, 1 GB dysku, 25% CPU) i wysyła klientowi w DM link, login i hasło. Log trafia na `logi-hosting`.
 4. Zła kwota nie jest zaliczana. Takie wpłaty i wygasłe zamówienia sprawdzasz ręcznie w tickecie, a serwer tworzysz komendą `/hosting utworz`.
 
@@ -115,6 +115,6 @@ Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język
 6. **Płatności ręczne**: teksty w `manualPayments` (BLIK, przelew, Revolut).
 7. Zrestartuj bota i uruchom `/hosting test`. Wszystko powinno być na zielono.
 
-`panelUrl` to adres panelu. Jeśli bot działa na tym samym serwerze co panel i `/hosting test` nie łączy się z publicznym IP, wpisz `http://172.18.0.1` (adres hosta widziany z kontenera). Opcjonalnie: `etherscanApiKey` (darmowy klucz Etherscan zamiast Blockscout) i `api` (własne adresy API: `ltc`, `eth`, `ethRpc`, `sol`, `prices`, `qr`).
+`panelUrl` to adres panelu. Jeśli bot działa na tym samym serwerze co panel i `/hosting test` nie łączy się z publicznym IP, wpisz `http://172.18.0.1` (adres hosta widziany z kontenera). Opcjonalnie: `etherscanApiKey` (darmowy klucz Etherscan zamiast Blockscout) i `api` (własne adresy API: `ltc`, `eth`, `ethRpc`, `sol`, `coinbase`, `prices`, `qr`).
 
 Klucze API i config.json trzymaj tylko na swoim serwerze bota. Nie dawaj klientom dostępu do tego serwera.
