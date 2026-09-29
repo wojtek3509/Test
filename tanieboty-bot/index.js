@@ -142,36 +142,115 @@ const rules = [
   {
     title: 'Polityka zwrotów',
     emoji: '💸',
-    points: [
-      'Zwrot jest możliwy, **dopóki prace nad botem się nie rozpoczęły**.',
-      'Po rozpoczęciu prac zwracamy część kwoty proporcjonalną do niewykonanej pracy.',
-      'Gotowy i przekazany bot nie podlega zwrotowi.',
-      'Za niedziałający hosting z naszej winy zwracamy środki za niewykorzystany okres.',
+    sections: [
+      {
+        title: 'Boty Discord na zamówienie',
+        points: [
+          'Zwrot przysługuje **tylko wtedy**, gdy nie wykonamy zamówionego bota w ustalonym lub maksymalnym terminie, zgodnie z zaakceptowanymi wymaganiami.',
+          'Składając zamówienie, akceptujesz specyfikację projektu oraz niniejszą politykę zwrotów.',
+          'W pozostałych sytuacjach zwrot nie przysługuje, m.in. gdy:\n- bot działa zgodnie z zaakceptowaną specyfikacją, ale jego funkcje Ci nie odpowiadają,\n- nie wiesz, jak obsługiwać bota,\n- zmienisz zdanie lub zrezygnujesz po rozpoczęciu prac.',
+        ],
+      },
+      {
+        title: 'Hosting',
+        points: [
+          'Za hosting zwrot przysługuje **wyłącznie**, gdy:\n- opłacona usługa nie ruszyła w ciągu **48 godzin** z naszej winy,\n- usługa była niedostępna dłużej niż **72 godziny** z przyczyn leżących po naszej stronie.',
+          'Problemy z winy użytkownika (np. zła konfiguracja, niewłaściwe użytkowanie, blokady IP) nie są podstawą do zwrotu.',
+          'Hosting służy **wyłącznie** do utrzymania bota Discord:\n- zakazane jest m.in. kopanie kryptowalut, przechowywanie dużych plików, ataki sieciowe i procesy nadmiernie obciążające serwer,\n- w razie nadużyć założyciele mogą **natychmiast zablokować usługę i zakończyć współpracę bez zwrotu opłat.**',
+          'Zwrot nie przysługuje, gdy współpraca zostanie przerwana z winy użytkownika, w tym za złamanie regulaminu (zwłaszcza punktu `1.14`).',
+        ],
+      },
+      {
+        title: 'Postanowienia końcowe',
+        points: [
+          'Płatności za nasze usługi są **bezzwrotne**, poza wyjątkami opisanymi wyżej.',
+          'Masz problem z usługą? Zanim poprosisz o zwrot, napisz do nas w tickecie — postaramy się rozwiązać go jak najszybciej.',
+          'Prośbę o zwrot zgłaszasz na piśmie (w tickecie) z dokładnym uzasadnieniem, najpóźniej **7 dni** od sytuacji, która ją uzasadnia.',
+          'Ostateczną decyzję o zwrocie podejmują założyciele i **nie podlega ona negocjacjom**.',
+        ],
+      },
     ],
   },
   {
     title: 'Polityka zamówień',
     emoji: '🛒',
-    points: [
-      'Zamówienia składasz wyłącznie przez **ticket**.',
-      'Przed startem ustalamy funkcje, cenę i termin — to jest wiążąca wycena.',
-      'Dodatkowe funkcje spoza wyceny są płatne osobno.',
-      'Po oddaniu bota masz **7 dni** na zgłoszenie błędów, które poprawiamy za darmo.',
+    sections: [
+      {
+        title: 'Składanie zamówień',
+        points: [
+          'Zamówienie składasz przez ticket, podając opis wymagań (funkcje, integracje) oraz informacje o hostingu (okres, nazwa, forma płatności).',
+          'Każde zamówienie wyceniamy indywidualnie — dostajesz plan z listą funkcji, ceną i szacowanym terminem.',
+          'Zamówienie trafia do realizacji dopiero po **pełnej płatności z góry**.',
+          'Bot działa na jednym, wybranym serwerze. Przeniesienie go na inny serwer kosztuje **5 zł**.',
+        ],
+      },
+      {
+        title: 'Realizacja zamówienia',
+        points: [
+          'Prace zaczynamy od razu po otrzymaniu płatności i potwierdzeniu specyfikacji przez klienta.',
+          'Maksymalny czas realizacji to **14 dni kalendarzowych**.',
+          'Termin może się wydłużyć:\n- w szczególnych sytuacjach (np. zmiany w API Discorda, problemy techniczne) — poinformujemy Cię o nowej dacie i ewentualnej rekompensacie,\n- w okresie świąt i ogłoszonych przerw,\n- gdy klient opóźnia przekazanie potrzebnych informacji.',
+          'Po zakończeniu dostajesz gotowego bota oraz wsparcie techniczne.',
+          '**Cena obejmuje przygotowanie i utrzymanie bota.** __Kod źródłowy (src) nie wchodzi w skład zamówienia.__',
+          'Kod źródłowy można dokupić za **40% wartości zamówienia**:\n- założyciele mogą odmówić jego sprzedaży, jeśli istnieje ryzyko odsprzedaży, upublicznienia lub przekazania kodu innym,\n- zakup kodu to licencja niewyłączna — prawa autorskie majątkowe zostają przy autorze,\n- bez pisemnej zgody założyciela **nie wolno** kodu odsprzedawać, udostępniać ani sublicencjonować,\n- kod możesz dowolnie modyfikować na własne potrzeby.',
+        ],
+      },
+      {
+        title: 'Poprawki i wsparcie techniczne',
+        points: [
+          'Przez **14 dni** od oddania bota masz prawo do drobnych poprawek zgodnych z pierwotną specyfikacją.',
+          'Zmiany wykraczające poza specyfikację traktujemy jako nowe zamówienie.',
+          'Zapewniamy pełne wsparcie techniczne, aby bot działał sprawnie.',
+        ],
+      },
+      {
+        title: 'Anulowanie zamówienia',
+        points: [
+          'Opłacone zamówienie jest wiążące i **nie można go anulować**.',
+          'Gdy klient nie współpracuje (np. nie dostarcza materiałów na czas, nie nada bota uprawnień na serwerze), możemy wstrzymać realizację do czasu uzupełnienia braków — bez zwrotu płatności.',
+          'Brak kontaktu ze strony klienta przez **30 dni** oznacza anulowanie zamówienia.',
+          'Możemy odmówić realizacji, jeśli klient łamie regulamin Discorda. Kwestie finansowe rozstrzygamy wtedy indywidualnie.',
+        ],
+      },
     ],
   },
   {
     title: 'Polityka płatności',
     emoji: '💳',
-    points: [
-      'Akceptujemy: BLIK, przelew, PayPal, PSC i krypto.',
-      'Przy większych zamówieniach pobieramy **zaliczkę 50%**.',
-      'Hosting opłacasz z góry za wybrany okres.',
-      'Płatności przyjmuje wyłącznie administracja — **nigdy nie płać w DM osobom spoza staffu**.',
+    sections: [
+      {
+        title: 'Metody płatności',
+        points: [
+          'Płatności przyjmujemy **wyłącznie na naszym Discordzie** (w tickecie). Dostępne metody:\n- BLIK,\n- PayPal,\n- Litecoin (LTC),\n- PaySafeCard (kod) — *bez prowizji od kwoty*.',
+        ],
+      },
+      {
+        title: 'BLIK',
+        points: ['Płatność BLIK wykonujesz opcją **„BLIK — przelew na telefon”**, czyli szybkim przelewem na numer telefonu.'],
+      },
+      {
+        title: 'PayPal',
+        points: [
+          'Płacisz wyłącznie opcją **Friends & Family (F&F)** i **bez żadnej notatki** w tytule.',
+          'Płatność z notatką lub z innym błędem nie zostanie uznana, a zwrot za nią nie przysługuje.',
+          'Klient odpowiada za wykonanie płatności zgodnie z instrukcją — błędy mogą opóźnić realizację zamówienia.',
+        ],
+      },
+      {
+        title: 'Litecoin',
+        points: [
+          'Płatności w Litecoin realizujemy zgodnie z zasadami bezpieczeństwa transakcji kryptowalutowych.',
+          'Transakcje krypto są **nieodwracalne** — klient w pełni odpowiada za poprawność płatności (adres, kwota, sieć).',
+        ],
+      },
+      {
+        title: 'Bezpieczeństwo płatności',
+        points: ['Płatności przechodzą przez bezpieczne systemy, które chronią dane osobowe i finansowe użytkowników.'],
+      },
     ],
   },
 ];
 
-// Cennik (/panel typ:cennik).
 // Metody płatności w formularzu „Zrealizowane” (maks. 25). Emoji może być własne: '<:ltc:123…>'.
 const payments = {
   blik: { label: 'BLIK', emoji: '📱' },
@@ -464,15 +543,44 @@ function rulesPanel(g, logo) {
   return b;
 }
 
-function rulesSection(index) {
+/** Bloki tekstu rozdziału: zwykła lista punktów (1.1, 1.2…) albo podrozdziały (2.1 → 2.1.1, 2.1.2…). */
+function rulesBlocks(index) {
   const r = rules[index];
-  const b = box();
-  text(b, title(`${rulesSectionWord} ${index + 1}. ${r.title}`, r.emoji));
-  sep(b);
-  text(b, '>>> ' + r.points.map((p, i) => `\`${index + 1}.${i + 1}\` ${p}`).join('\n'));
-  sep(b);
-  footer(b);
-  return b;
+  const n = index + 1;
+  const list = (prefix, points) => '>>> ' + points.map((p, i) => `\`${prefix}.${i + 1}\` ${p}`).join('\n');
+  if (!r.sections) return [list(n, r.points)];
+  return r.sections.map((sec, si) => `### ${x} \`${n}.${si + 1}\` ${sec.title}\n${list(`${n}.${si + 1}`, sec.points)}`);
+}
+
+// Discord pozwala na maks. 4000 znaków tekstu w jednej wiadomości — długie rozdziały dzielimy na kilka.
+const RULES_MESSAGE_LIMIT = 3600;
+
+/** Wiadomości z rozdziałem regulaminu (zwykle jedna, przy długich rozdziałach kilka). */
+function rulesMessages(index) {
+  const r = rules[index];
+  const messages = [];
+  let current = null;
+  let size = 0;
+  const open = (first) => {
+    current = box();
+    size = 0;
+    if (first) {
+      const head = title(`${rulesSectionWord} ${index + 1}. ${r.title}`, r.emoji);
+      text(current, head);
+      size += head.length;
+    }
+    messages.push(current);
+  };
+  open(true);
+  for (const block of rulesBlocks(index)) {
+    if (size + block.length > RULES_MESSAGE_LIMIT && size > 0 && messages.length) open(false);
+    sep(current);
+    text(current, block);
+    size += block.length;
+  }
+  sep(current);
+  footer(current);
+  return messages;
 }
 
 function reviewSummary(reviews) {
@@ -2269,7 +2377,9 @@ async function route(i) {
 
   if (scope === 'rules') {
     if (i.isStringSelectMenu() && action === 'show') {
-      await replyV2(i, rulesSection(Number(i.values[0])));
+      const [first, ...rest] = rulesMessages(Number(i.values[0]));
+      await replyV2(i, first);
+      for (const more of rest) await i.followUp({ components: [more], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
       return i.message.edit({ components: [rulesPanel(guild(i.guildId), logoOf(i.guild, i.client))], flags: V2 }).catch(() => {});
     }
     if (i.isButton() && action === 'accept') {
@@ -2338,7 +2448,7 @@ function selfTest() {
   const built = [
     ...[...commands.values()].map((cmd) => cmd.data),
     ...Object.values(panelBuilders).flatMap((fn) => [fn(g, img), fn(guild('empty'), null)]),
-    ...rules.map((_, idx) => rulesSection(idx)),
+    ...rules.flatMap((_, idx) => rulesMessages(idx)),
     reviewCard(review, user),
     reviewModal('9'),
     ...Object.keys(ticketTypes).map(ticketModal),
@@ -2451,11 +2561,16 @@ async function flowTest() {
   assert(!cardJson.includes('tk:status'), 'ticket nie może mieć menu statusu');
   assert(!cardJson.includes('tk:claim'), 'ticket nie może mieć przycisku Przejmij');
   assert(cardJson.includes('"type":11'), 'ticket pokazuje avatar klienta');
-  const rulesJson = rulesSection(0).toJSON();
-  const rulesText = rulesJson.components.map((cmp) => cmp.content ?? '').join('');
-  assert(!JSON.stringify(rulesJson).includes('§') && !JSON.stringify(rulesPanel(g, null).toJSON()).includes('§'), 'regulamin bez §');
-  assert(rulesText.includes('`1.1`') && rulesText.includes('`1.15`') && rulesText.includes('ROZDZIAŁ 1. POSTANOWIENIA OGÓLNE'), 'rozdział 1 z punktami 1.1–1.15');
-  assert(rulesJson.components.every((cmp) => (cmp.content ?? '').length <= 4000), 'każdy blok tekstu w limicie Discorda (4000 znaków)');
+  const texts = (j) => (j.components ?? []).flatMap((cmp) => (cmp.content ? [cmp.content] : texts(cmp)));
+  const rulesMsgs = rules.map((_, idx) => rulesMessages(idx).map((m) => m.toJSON()));
+  assert(!JSON.stringify(rulesMsgs).includes('§') && !JSON.stringify(rulesPanel(g, null).toJSON()).includes('§'), 'regulamin bez §');
+  for (const msgs of rulesMsgs) for (const m of msgs) assert(texts(m).join('').length <= 4000, 'każda wiadomość regulaminu w limicie 4000 znaków');
+  const ch1 = texts(rulesMsgs[0][0]).join('\n');
+  assert(ch1.includes('`1.1`') && ch1.includes('`1.15`') && ch1.includes('ROZDZIAŁ 1. POSTANOWIENIA OGÓLNE'), 'rozdział 1: punkty 1.1–1.15');
+  const ch3 = rulesMsgs[2].map((m) => texts(m).join('\n')).join('\n');
+  assert(ch3.includes('`3.1` Składanie zamówień') && ch3.includes('`3.2.6`') && ch3.includes('`3.4.4`'), 'rozdział 3: podrozdziały 3.1–3.4');
+  assert(texts(rulesMsgs[3][0]).join('').includes('`4.5.1`'), 'rozdział 4: punkt 4.5.1');
+  assert(texts(rulesMsgs[1][0]).join('').includes('punktu `1.14`'), 'odwołanie do punktu 1.14 w zwrotach');
   const priceJson = JSON.stringify(pricingPanel(g, null).toJSON());
   assert(['1 miesiąc', '5 zł', '3 miesiące', '14 zł', '1 rok', '50 zł'].every((t) => priceJson.includes(t)), 'cennik: 3 pakiety hostingu');
   assert(!priceJson.includes('tk:quick:bot') && !priceJson.includes('Boty Discord'), 'cennik bez botów');
