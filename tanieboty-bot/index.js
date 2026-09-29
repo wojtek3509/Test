@@ -157,15 +157,16 @@ const ticketTypes = {
     fields: [
       { id: 'lang', label: 'Język bota', select: Object.entries(hostingLanguages).map(([id, l]) => [`${l.emoji} ${l.label}`, id]) },
       { id: 'period', label: 'Okres hostingu', select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]) },
+      // ⚡ = automatycznie (tylko krypto, serwer od razu), ⏳ = ręcznie (ticket, czekasz na właściciela).
       {
-        id: 'mode',
-        label: 'Sposób zakupu',
+        id: 'pay',
+        label: 'Płatność i sposób zakupu',
         select: [
-          ['⚡ Automatyczny — krypto, serwer od razu', 'auto'],
-          ['⏳ Ręczny — czekasz na właściciela', 'manual'],
+          ...Object.keys(cryptoCoins).map((id) => [`⚡ ${hostingPayments[id].label} — automatycznie, serwer od razu`, `auto:${id}`]),
+          ...Object.entries(hostingPayments).map(([id, p]) => [`⏳ ${p.label} — ręcznie (czekasz na właściciela)`, `manual:${id}`]),
         ],
       },
-      { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]) },
+      { id: 'name', label: 'Nazwa serwera (opcjonalnie)', placeholder: 'np. Mój bot ticketowy', required: false, max: 40 },
       { id: 'email', label: 'E-mail (login do panelu hostingu)', placeholder: 'np. jan.kowalski@gmail.com' },
     ],
   },
@@ -448,6 +449,7 @@ const serverLayout = {
       channels: [
         { emoji: '💻', name: 'logi-boty', mode: 'open', ticketLog: 'bot' },
         { emoji: '🖥️', name: 'logi-hosting', mode: 'open', ticketLog: 'hosting' },
+        { emoji: '🧾', name: 'logi-zakupy', mode: 'open', setting: 'purchaseLogChannelId' },
         { emoji: '❓', name: 'logi-pytania', mode: 'open', ticketLog: 'question' },
         { emoji: '🤝', name: 'logi-współpraca', mode: 'open', ticketLog: 'partner' },
         { emoji: '💬', name: 'staff-czat', mode: 'open', report: true },
@@ -897,7 +899,7 @@ function ticketModal(type) {
           .setCustomId(f.id)
           .setStyle(f.style === 'long' ? TextInputStyle.Paragraph : TextInputStyle.Short)
           .setRequired(f.required !== false)
-          .setMaxLength(f.style === 'long' ? 1000 : 100);
+          .setMaxLength(f.max ?? (f.style === 'long' ? 1000 : 100));
         if (f.placeholder) input.setPlaceholder(f.placeholder);
         return label.setTextInputComponent(input);
       }),
@@ -1039,6 +1041,7 @@ async function onTicketForm(i, type) {
   }
   // Hosting: zakup automatyczny (krypto) nie otwiera ticketu.
   if (type === 'hosting') {
+    normalizeHostingForm(form);
     const error = hostingFormError(form);
     if (error) return replyV2(i, fail(error));
     if (form.mode === 'auto') return onAutoPurchase(i, i.guildId, form);
@@ -1612,7 +1615,7 @@ const recLine = (rec) => row(`\`#${rec.id}\` ${rec.name}`, `<@${rec.userId}> •
  * Nowy serwer albo przedłużenie — wspólne dla zakupu automatycznego, ręcznego i /hosting utworz.
  * key = unikalny identyfikator zakupu (zabezpiecza przed podwójnym serwerem przy ponownej próbie).
  */
-async function activateHosting(client, guildId, { key, userId, lang, plan, email, renew, payment, source }) {
+async function activateHosting(client, guildId, { key, userId, lang, plan, email, renew, payment, source, name }) {
   const days = planOf(plan)[3];
   if (renew) {
     const rec = await extendHosting(guildId, renew, days);
@@ -1631,7 +1634,7 @@ async function activateHosting(client, guildId, { key, userId, lang, plan, email
     owner: account.user.id,
     lang,
     externalId: `tb-${key}`,
-    name: `${hostingLanguages[lang]?.label.split(' (')[0] ?? lang} • ${user.username}`.slice(0, 60),
+    name: cleanServerName(name) ?? `${hostingLanguages[lang]?.label.split(' (')[0] ?? lang} • ${user.username}`.slice(0, 60),
     discordId: user.id,
   });
   // Ponowna próba po już udanym utworzeniu: serwer jest zapisany, nic nie zmieniamy.
@@ -1692,6 +1695,8 @@ async function suspendHosting(guildId, rec) {
 
 // ─── Widoki hostingu ───────────────────────────────────────────────────
 
+const renameButton = (guildId, rec) =>
+  new ButtonBuilder().setCustomId(`hs:rename:${guildId}:${rec.id}`).setLabel('Zmień nazwę').setEmoji('✏️').setStyle(ButtonStyle.Secondary);
 const renewButton = (guildId, rec) =>
   new ButtonBuilder().setCustomId(`hs:renew:${guildId}:${rec.id}`).setLabel(`Przedłuż: ${rec.name}`.slice(0, 80)).setEmoji('🔁').setStyle(ButtonStyle.Success);
 
@@ -1727,6 +1732,7 @@ function hostingReadyView(rec, account, guildId) {
   );
   const lc = guild(guildId).settings.lcChannelId;
   if (lc) text(b, `-# ⭐ Będzie nam miło, jeśli zostawisz voucha na <#${lc}>!`);
+  b.addActionRowComponents((r) => r.setComponents(renameButton(guildId, rec)));
   sep(b);
   footer(b);
   return b;
@@ -1886,8 +1892,9 @@ function myHostingView(recs, orders, guildId) {
     b,
     [title('Mój hosting', '🖥️'), lines.length ? lines.join('\n') : '*Nie masz jeszcze hostingu. Kup go na kanale z cennikiem albo w ticketach.*', ...pending, '', `-# 🌐 Panel: ${panelUrl() || '—'}`].join('\n'),
   );
-  const buttons = recs.slice(0, 20).map((rec) => renewButton(guildId, rec));
-  for (let n = 0; n < buttons.length; n += 5) b.addActionRowComponents((r) => r.setComponents(...buttons.slice(n, n + 5)));
+  // Każdy serwer ma swój rząd: „Przedłuż” i „Zmień nazwę” (limit wiadomości Discorda: 10 serwerów).
+  for (const rec of recs.slice(0, 10)) b.addActionRowComponents((r) => r.setComponents(renewButton(guildId, rec), renameButton(guildId, rec)));
+  if (recs.length > 10) text(b, `-# …i ${recs.length - 10} więcej — napisz do administracji.`);
   return b;
 }
 
@@ -1904,8 +1911,26 @@ function hostingListView(recs, heading) {
 
 // ─── Formularze i przyciski hostingu ───────────────────────────────────
 
+/** Nazwa serwera od klienta: bez znaków sterujących i podwójnych spacji, maks. 40 znaków. */
+function cleanServerName(value) {
+  const name = String(value ?? '')
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+  return name || null;
+}
+
+/** „auto:ltc” → mode + payment; nazwa serwera oczyszczona. */
+function normalizeHostingForm(form) {
+  if (form.pay) [form.mode, form.payment] = form.pay.split(':');
+  form.name = cleanServerName(form.name);
+  return form;
+}
+
 function hostingFormError(form) {
   if (!form.lang || !form.period || !form.mode || !form.payment) return 'Uzupełnij wszystkie pola formularza.';
+  if (!hostingPayments[form.payment] || !['auto', 'manual'].includes(form.mode)) return 'Wybierz sposób płatności z listy.';
   if (!form.renew && !validEmail(form.email)) return 'Podaj poprawny adres e-mail — to będzie login do panelu hostingu.';
   if (form.mode === 'auto') {
     if (!form.renew && hostingLanguages[form.lang]?.manualOnly) return 'Ten język obsługujemy tylko przy **zakupie ręcznym** — wybierz „⏳ Ręczny”.';
@@ -1978,6 +2003,7 @@ async function createCryptoOrder(guildId, userId, form) {
     rate,
     plan: form.period,
     lang: form.lang,
+    name: form.name ?? null,
     email: form.email ?? null,
     renew: form.renew ?? null,
     createdAt: Date.now(),
@@ -2015,6 +2041,7 @@ async function onAutoPurchase(i, guildId, form) {
       return i.editReply({ components: [fail('Nie mogę wysłać Ci wiadomości prywatnej. Włącz DM od członków serwera (Ustawienia prywatności serwera) i spróbuj ponownie.')], flags: V2 });
     }
     updateGuild(guildId, () => (order.dm = { channelId: dm.channelId, messageId: dm.id }));
+    await syncOrder(i.client, guildId, order);
     await i.editReply({
       components: [ok(`Dane do płatności są w DM: **${order.amount} ${cryptoCoins[order.coin].label}**. Masz ${hostingTimes.payMinutes} minut na wpłatę.`)],
       flags: V2,
@@ -2033,12 +2060,83 @@ async function updateOrderMessage(client, guildId, o) {
   await message?.edit({ components: [orderView(o, guildId)], flags: V2 }).catch(() => {});
 }
 
+// ─── Logi zakupów automatycznych: jedna wiadomość na zamówienie, aktualizowana na żywo ───
+
+const purchaseLogChannel = (guildId) => {
+  const { settings } = guild(guildId);
+  return settings.purchaseLogChannelId ?? ticketLogFor(settings, 'hosting');
+};
+
+function orderLogStatus(o) {
+  const c = cryptoCoins[o.coin];
+  return {
+    waiting: `⏳ Czeka na wpłatę (do ${ts(o.expiresAt, 't')})`,
+    seen: c.chain === 'sol' ? '🔄 Wpłata wykryta — czeka na finalizację' : `🔄 Wpłata wykryta — potwierdzenia ${o.confirmations}/${hostingTimes.confirmations}`,
+    paid: '✅ Opłacone — tworzenie serwera',
+    creating: '✅ Opłacone — tworzenie serwera',
+    error: '⚠️ Opłacone, błąd panelu — bot ponawia',
+    failed: '❌ Opłacone, ale serwer NIE powstał — dokończ ręcznie',
+    done: o.renew ? '🖥️ Zrealizowane — hosting przedłużony' : '🖥️ Zrealizowane — serwer utworzony',
+    expired: '⌛ Wygasło — brak wpłaty',
+    cancelled: '❌ Anulowane przez klienta',
+  }[o.status];
+}
+
+function orderLogView(o) {
+  const c = cryptoCoins[o.coin];
+  const plan = planOf(o.plan);
+  const color =
+    o.status === 'done' ? colors.success : ['failed', 'error'].includes(o.status) ? colors.danger : ['expired', 'cancelled'].includes(o.status) ? colors.neutral : colors.gold;
+  const tx = o.txid ? `\`${String(o.txid).split(':')[0]}\`` : null;
+  return notice(
+    [
+      `### 🧾 ${x} Zamówienie \`${o.id}\`${o.renew ? ' • przedłużenie' : ''}`,
+      row('Status', `**${orderLogStatus(o)}**`),
+      row('Klient', `<@${o.userId}> (\`${o.userId}\`)`),
+      row('Pakiet', `${plan[0]} — ${plan[1]}`),
+      o.renew ? row('Serwer', `ID \`${o.renew}\``) : row('Język', langLabel(o.lang)),
+      o.renew ? null : row('Nazwa serwera', o.name ? `\`${o.name}\`` : '*domyślna*'),
+      row('Kwota', `\`${o.amount} ${c.label}\` (${c.network}) ≈ ${o.pln} zł • kurs ${Number(o.rate).toFixed(2)} zł`),
+      row('Adres', `\`${o.wallet}\``),
+      '',
+      point(`🧾 Utworzone ${ts(o.createdAt, 'T')}`),
+      o.seenAt ? point(`🔄 Wpłata wykryta ${ts(o.seenAt, 'T')} • tx ${tx}`) : null,
+      o.paidAt ? point(`✅ Potwierdzona ${ts(o.paidAt, 'T')}`) : null,
+      o.doneAt ? point(`🖥️ Serwer \`#${o.serverId}\` ${o.renew ? 'przedłużony' : 'utworzony'} ${ts(o.doneAt, 'T')}`) : null,
+      o.endedAt ? point(`${o.status === 'expired' ? '⌛ Wygasło' : '❌ Anulowane'} ${ts(o.endedAt, 'T')}`) : null,
+      o.lastError && o.status !== 'done' ? point(`⚠️ Błąd (próba ${o.attempts}): \`${String(o.lastError).slice(0, 150)}\``) : null,
+      o.status === 'failed' ? point(o.renew ? `Przedłuż ręcznie: \`/hosting przedluz serwer:${o.renew}\`` : 'Utwórz ręcznie: `/hosting utworz` (klient zapłacił).') : null,
+    ]
+      .filter((l) => l !== null)
+      .join('\n'),
+    color,
+  );
+}
+
+async function updateOrderLog(client, guildId, o) {
+  if (o.log) {
+    const channel = await client.channels.fetch(o.log.channelId).catch(() => null);
+    const message = await channel?.messages.fetch(o.log.messageId).catch(() => null);
+    if (message) return message.edit({ components: [orderLogView(o)], flags: V2, allowedMentions: { parse: [] } }).catch(() => {});
+  }
+  const channelId = purchaseLogChannel(guildId);
+  const channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
+  const message = await channel?.send({ components: [orderLogView(o)], flags: V2, allowedMentions: { parse: [] } }).catch(() => null);
+  if (message) updateGuild(guildId, () => (o.log = { channelId: message.channelId ?? channelId, messageId: message.id }));
+}
+
+/** Aktualizuje wiadomość klienta (DM) i log zamówienia. */
+async function syncOrder(client, guildId, o) {
+  await updateOrderMessage(client, guildId, o);
+  await updateOrderLog(client, guildId, o);
+}
+
 function renewModal(guildId, serverId) {
   return new ModalBuilder()
     .setCustomId(`hs:renewsubmit:${guildId}:${serverId}`)
     .setTitle('🔁 Przedłuż hosting')
     .addLabelComponents(
-      ['period', 'mode', 'payment'].map((id) => {
+      ['period', 'pay'].map((id) => {
         const f = ticketTypes.hosting.fields.find((field) => field.id === id);
         return new LabelBuilder()
           .setLabel(f.label)
@@ -2056,13 +2154,12 @@ async function onRenewSubmit(i, guildId, serverId) {
   const rec = hostingServers(guildId)[serverId];
   if (!rec || rec.deleted) return replyV2(i, fail('Ten serwer już nie istnieje.'));
   if (rec.userId !== i.user.id) return replyV2(i, fail('To nie jest Twój serwer.'));
-  const form = {
+  const form = normalizeHostingForm({
     lang: rec.lang,
     period: i.fields.getStringSelectValues('period')[0],
-    mode: i.fields.getStringSelectValues('mode')[0],
-    payment: i.fields.getStringSelectValues('payment')[0],
+    pay: i.fields.getStringSelectValues('pay')[0],
     renew: String(serverId),
-  };
+  });
   const error = hostingFormError(form);
   if (error) return replyV2(i, fail(error));
   if (form.mode === 'auto') return onAutoPurchase(i, guildId, form);
@@ -2093,6 +2190,7 @@ async function onHostingConfirm(i) {
       key: `t-${ticket.channelId}`,
       userId: ticket.userId,
       lang: ticket.form.lang,
+      name: ticket.form.name,
       plan: ticket.form.period,
       email: ticket.form.email,
       renew: ticket.form.renew,
@@ -2131,6 +2229,41 @@ async function onHostingConfirm(i) {
   }
 }
 
+function renameModal(guildId, rec) {
+  return new ModalBuilder()
+    .setCustomId(`hs:renamesubmit:${guildId}:${rec.id}`)
+    .setTitle('✏️ Nazwa serwera')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Nowa nazwa serwera')
+        .setTextInputComponent(new TextInputBuilder().setCustomId('name').setStyle(TextInputStyle.Short).setMinLength(1).setMaxLength(40).setValue(rec.name.slice(0, 40))),
+    );
+}
+
+/** Właściciel serwera (albo staff na serwerze Discord) może zmienić jego nazwę w panelu. */
+function canManageHosting(i, rec) {
+  return rec.userId === i.user.id || (i.inGuild?.() && isStaff(i.member, guild(i.guildId).settings));
+}
+
+async function onRenameSubmit(i, guildId, rec) {
+  const name = cleanServerName(i.fields.getTextInputValue('name'));
+  if (!name) return replyV2(i, fail('Nazwa nie może być pusta.'));
+  if (!hostingReady()) return replyV2(i, fail('Panel jest chwilowo niedostępny. Spróbuj później.'));
+  await i.deferReply({ flags: V2_EPHEMERAL });
+  try {
+    // PATCH /details wymaga też właściciela i external_id — przepisujemy obecne wartości.
+    const a = (await ptero('GET', `/servers/${rec.id}`)).attributes;
+    await ptero('PATCH', `/servers/${rec.id}/details`, { name, user: a.user, external_id: a.external_id ?? null, description: a.description ?? null });
+    const old = rec.name;
+    updateGuild(guildId, () => (rec.name = name));
+    await hostingLog(i.client, guildId, `### ✏️ ${x} Zmiana nazwy serwera\n${row('Serwer', `\`#${rec.id}\` ${old} → **${name}**`)}\n${row('Przez', `<@${i.user.id}>`)}`);
+    await i.editReply({ components: [ok(`Nowa nazwa serwera: **${name}**`)], flags: V2 });
+  } catch (err) {
+    if (!err.userFacing) console.error('Hosting (nazwa):', err);
+    await i.editReply({ components: [fail(notFound(err) ? 'Ten serwer już nie istnieje w panelu.' : 'Nie udało się zmienić nazwy — spróbuj za chwilę.')], flags: V2 });
+  }
+}
+
 /** Przyciski i formularze hostingu (działają też w DM, więc guildId jest w customId). */
 async function routeHosting(i) {
   const [, action, guildId, id, extra] = i.customId.split(':');
@@ -2142,6 +2275,13 @@ async function routeHosting(i) {
     return i.showModal(renewModal(guildId, id));
   }
   if (action === 'renewsubmit' && i.isModalSubmit()) return onRenewSubmit(i, guildId, id);
+  if (action === 'rename' || action === 'renamesubmit') {
+    const rec = hostingServers(guildId)[id];
+    if (!rec || rec.deleted) return replyV2(i, fail('Ten serwer już nie istnieje.'));
+    if (!canManageHosting(i, rec)) return replyV2(i, fail('To nie jest Twój serwer.'));
+    if (action === 'rename' && i.isButton()) return i.showModal(renameModal(guildId, rec));
+    if (action === 'renamesubmit' && i.isModalSubmit()) return onRenameSubmit(i, guildId, rec);
+  }
   const order = guild(guildId).hosting.orders[id];
   if (!order || order.userId !== i.user.id) return replyV2(i, fail('Nie znaleziono zamówienia.'));
   if (action === 'copy' && i.isButton()) {
@@ -2150,8 +2290,9 @@ async function routeHosting(i) {
   }
   if (action === 'cancel' && i.isButton()) {
     if (order.status !== 'waiting') return replyV2(i, fail('Tego zamówienia nie można już anulować (płatność została wykryta albo zamówienie się zakończyło).'));
-    updateGuild(guildId, () => (order.status = 'cancelled'));
-    return i.update({ components: [orderView(order, guildId)] });
+    updateGuild(guildId, () => Object.assign(order, { status: 'cancelled', endedAt: Date.now() }));
+    await i.update({ components: [orderView(order, guildId)] });
+    return updateOrderLog(i.client, guildId, order);
   }
 }
 
@@ -2338,12 +2479,13 @@ function scanChain(chain, wallet, coins, since) {
 
 async function fulfilOrder(client, guildId, o) {
   updateGuild(guildId, () => Object.assign(o, { status: 'creating', attempts: (o.attempts ?? 0) + 1 }));
-  await updateOrderMessage(client, guildId, o);
+  await syncOrder(client, guildId, o);
   try {
     const res = await activateHosting(client, guildId, {
       key: o.id,
       userId: o.userId,
       lang: o.lang,
+      name: o.name,
       plan: o.plan,
       email: o.email,
       renew: o.renew,
@@ -2372,7 +2514,7 @@ async function fulfilOrder(client, guildId, o) {
       );
     }
   }
-  await updateOrderMessage(client, guildId, o);
+  await syncOrder(client, guildId, o);
 }
 
 async function processOrders(client, guildId) {
@@ -2383,8 +2525,8 @@ async function processOrders(client, guildId) {
   const need = hostingTimes.confirmations;
 
   for (const o of orders.filter((o) => o.status === 'waiting' && now > o.expiresAt + grace)) {
-    updateGuild(guildId, () => (o.status = 'expired'));
-    await updateOrderMessage(client, guildId, o);
+    updateGuild(guildId, () => Object.assign(o, { status: 'expired', endedAt: now }));
+    await syncOrder(client, guildId, o);
   }
 
   // Jedno zapytanie na sieć i portfel, niezależnie od liczby zamówień.
@@ -2428,7 +2570,7 @@ async function processOrders(client, guildId) {
       }
       if (`${o.status}|${o.confirmations}` !== before) {
         save();
-        await updateOrderMessage(client, guildId, o);
+        await syncOrder(client, guildId, o);
       }
     }
   }
@@ -3820,7 +3962,8 @@ command(
             .setRequired(true)
             .addChoices(...hostingPlans.map(([name, price, value, days]) => ({ name: `${name} — ${price} (${days} dni)`, value }))),
         )
-        .addStringOption((o) => o.setName('email').setDescription('E-mail klienta (login do panelu; pomijany, jeśli klient ma już konto)').setRequired(true)),
+        .addStringOption((o) => o.setName('email').setDescription('E-mail klienta (login do panelu; pomijany, jeśli klient ma już konto)').setRequired(true))
+        .addStringOption((o) => o.setName('nazwa').setDescription('Nazwa serwera (domyślnie: język • nazwa klienta)').setMaxLength(40)),
     )
     .addSubcommand((s) =>
       s
@@ -3856,6 +3999,12 @@ command(
         .addIntegerOption(serverOption)
         .addBooleanOption((o) => o.setName('potwierdz').setDescription('True = tak, usuń serwer i wszystkie pliki').setRequired(true)),
     )
+    .addSubcommand((s) =>
+      s
+        .setName('logi')
+        .setDescription('Kanał logów zakupów automatycznych (jedna wiadomość na zamówienie)')
+        .addChannelOption((o) => o.setName('kanal').setDescription('Kanał logów zakupów').addChannelTypes(ChannelType.GuildText).setRequired(true)),
+    )
     .addSubcommand((s) => s.setName('test').setDescription('Sprawdź połączenie z panelem, jajka, portfele i API blockchainów')),
   async (i) => {
     const sub = i.options.getSubcommand();
@@ -3877,6 +4026,11 @@ command(
         flags: V2_EPHEMERAL,
         allowedMentions: { parse: [] },
       });
+    }
+    if (sub === 'logi') {
+      const channel = i.options.getChannel('kanal');
+      updateGuild(i.guildId, (gg) => (gg.settings.purchaseLogChannelId = channel.id));
+      return replyOk(i, `Logi zakupów automatycznych będą na ${channel}.\n-# Każde zamówienie to jedna wiadomość aktualizowana na żywo: wpłata, potwierdzenia, serwer, wygaśnięcie.`);
     }
     if (sub === 'test') {
       await i.deferReply({ flags: V2_EPHEMERAL });
@@ -3900,6 +4054,7 @@ command(
           lang: i.options.getString('jezyk'),
           plan: i.options.getString('okres'),
           email: i.options.getString('email').trim(),
+          name: i.options.getString('nazwa'),
           payment: 'reczne',
           source: `/hosting utworz przez <@${i.user.id}>`,
         });
@@ -4547,7 +4702,7 @@ async function generatorTest() {
   assert(deleted.includes('old1') && deleted.includes('oldcat'), 'stare kanały usunięte');
   assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
   assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
-  assert(cats.length === 11 && chans.length === 21, `11 kategorii i 21 kanałów (${cats.length}/${chans.length})`);
+  assert(cats.length === 11 && chans.length === 22, `11 kategorii i 22 kanały (${cats.length}/${chans.length})`);
   assert(['👋┃witamy', '📩┃zaproszenia'].every((n) => created.find((item) => item.id === byName(n).parent)?.name === '━━ 👋 WITAMY ━━'), 'WITAMY: witamy i zaproszenia');
   assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
   const parentOf = (name) => created.find((item) => item.id === byName(name).parent)?.name;
@@ -4560,7 +4715,7 @@ async function generatorTest() {
   assert(dms.some(([t, id]) => t === 'role' && id === 'admin-user'), 'rola Administracja dla osoby, która generuje');
 
   const everyoneDeny = (ch) => ch.permissionOverwrites.find((o) => o.id === 'everyone').deny;
-  assert(['💻┃logi-boty', '🖥️┃logi-hosting', '❓┃logi-pytania', '🤝┃logi-współpraca'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '4 kanały logów ukryte przed wszystkimi');
+  assert(['💻┃logi-boty', '🖥️┃logi-hosting', '🧾┃logi-zakupy', '❓┃logi-pytania', '🤝┃logi-współpraca'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '5 kanałów logów ukrytych przed wszystkimi');
   assert(['━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '4 kategorie ticketów prywatne');
   assert(!everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria z panelem ticketów publiczna');
   assert(everyoneDeny(byName('📜┃regulamin')).includes(F.SendMessages), 'regulamin tylko do czytania');
@@ -4939,6 +5094,7 @@ async function hostingTest() {
       if (method === 'GET') return [200, { attributes: serverAttrs(s) }];
       if (m[2] === '/suspend') return (s.suspended = true), [204, null];
       if (m[2] === '/unsuspend') return (s.suspended = false), [204, null];
+      if (m[2] === '/details') return Object.assign(s, { name: body.name, lastDetails: body }), [200, { attributes: serverAttrs(s) }];
       if (m[2] === '/build') {
         s.lastBuild = body;
         Object.assign(s.limits, { memory: body.memory, disk: body.disk, cpu: body.cpu });
@@ -5011,6 +5167,7 @@ async function hostingTest() {
   const dmEdits = [];
   const logs = [];
   const channelSends = [];
+  const purchaseLogs = [];
   const mkUser = (id, username, dmOpen = true) => ({
     id,
     username,
@@ -5042,13 +5199,23 @@ async function hostingTest() {
     channels: {
       fetch: async (id) => {
         if (id === 'hlog') return { send: async (p) => logs.push(J(p)) };
+        if (id === 'plog')
+          return {
+            send: async (p) => (purchaseLogs.push({ id: `pl${purchaseLogs.length}`, json: J(p), edits: 0 }), { id: `pl${purchaseLogs.length - 1}`, channelId: 'plog' }),
+            messages: {
+              fetch: async (mid) => {
+                const entry = purchaseLogs.find((e) => e.id === mid);
+                return entry && { edit: async (p) => Object.assign(entry, { json: J(p), edits: entry.edits + 1 }) };
+              },
+            },
+          };
         if (id.startsWith('dmch-')) return { messages: { fetch: async (mid) => ({ edit: async (p) => dmEdits.push([mid, J(p)]) }) } };
         return null;
       },
     },
   };
   const g = guild(GID);
-  Object.assign(g.settings, { staffRoleId: 'staff-role', ticketLogs: { hosting: 'hlog' }, lcChannelId: 'lc' });
+  Object.assign(g.settings, { staffRoleId: 'staff-role', ticketLogs: { hosting: 'hlog' }, lcChannelId: 'lc', purchaseLogChannelId: 'plog' });
   const interaction = (userId, extra = {}) => ({
     user: users[userId],
     client,
@@ -5080,11 +5247,15 @@ async function hostingTest() {
     },
     isButton: () => true,
     isModalSubmit: () => false,
+    inGuild: () => true,
     ...extra,
   });
   const purchase = async (userId, form) => {
     const i = interaction(userId, {
-      fields: { getStringSelectValues: (id) => (form[id] ? [form[id]] : []), getTextInputValue: (id) => form[id] ?? '' },
+      fields: {
+        getStringSelectValues: (id) => (id === 'pay' ? [`${form.mode}:${form.payment}`] : form[id] ? [form[id]] : []),
+        getTextInputValue: (id) => form[id] ?? '',
+      },
     });
     await onTicketForm(i, 'hosting');
     return i;
@@ -5127,10 +5298,17 @@ async function hostingTest() {
     assert(/e-mail/.test(hostingFormError(form({ email: 'zly' }))), 'zły e-mail');
     assert(hostingFormError(form({ email: null, renew: '5', lang: 'other' })) === null, 'przedłużenie bez e-maila i dla innego języka');
     const modalJson = JSON.stringify(ticketModal('hosting').toJSON());
-    assert(['Język bota', 'Sposób zakupu', 'Automatyczny', 'Ręczny', 'USDC (sieć Solana)', 'Revolut', 'E-mail'].every((t) => modalJson.includes(t)), 'formularz zakupu: język, sposób, płatność, e-mail');
+    assert(
+      ['Język bota', 'Płatność i sposób zakupu', 'auto:usdc_sol', 'manual:ltc', 'manual:revolut', 'automatycznie', 'ręcznie', 'Nazwa serwera', 'E-mail'].every((t) => modalJson.includes(t)),
+      'formularz zakupu: język, okres, płatność ze sposobem, nazwa, e-mail',
+    );
+    assert(ticketModal('hosting').toJSON().components.length === 5, 'formularz ma 5 pól (limit Discorda)');
+    assert(cleanServerName('  Mój\u200b   bot\n ticketowy  ') === 'Mój bot ticketowy' && cleanServerName('   ') === null && cleanServerName('x'.repeat(60)).length === 40, 'czyszczenie nazwy serwera');
+    assert(normalizeHostingForm({ pay: 'manual:usdc_sol' }).mode === 'manual' && normalizeHostingForm({ pay: 'auto:eth' }).payment === 'eth', 'płatność i sposób z jednego menu');
+    assert(/z listy/.test(hostingFormError(normalizeHostingForm({ lang: 'nodejs', period: '1m', pay: 'auto:btc', email: 'a@b.pl' }))), 'nieznana płatność → błąd');
 
     // 3. Zakup automatyczny LTC: DM z kwotą → wpłata w mempoolu → 2 potwierdzenia → serwer.
-    let i = await purchase('c1', form());
+    let i = await purchase('c1', form({ name: '  Mój   bot ticketowy ' }));
     let order = lastOrder('c1');
     assert(order?.status === 'waiting' && order.wallet === LTC && order.amount.startsWith('0.01250'), 'zamówienie LTC utworzone');
     assert(J(i.replies.at(-1)).includes('DM') && dms.length === 1 && J(dms[0][1]).includes(order.amount) && J(dms[0][1]).includes(LTC), 'DM z adresem i kwotą');
@@ -5158,6 +5336,13 @@ async function hostingTest() {
     await tick();
     assert(order.status === 'done' && order.serverId, `2 potwierdzenia → serwer utworzony (${order.status} ${order.lastError ?? ''})`);
     const s1 = panel.servers.find((s) => s.id === order.serverId);
+    assert(s1.name === 'Mój bot ticketowy' && order.name === 'Mój bot ticketowy', 'nazwa serwera od klienta');
+    const log1 = purchaseLogs.find((e) => e.json.includes(order.id));
+    assert(purchaseLogs.filter((e) => e.json.includes(order.id)).length === 1 && log1.edits >= 4, `jedna wiadomość w logach na zamówienie, aktualizowana (${log1?.edits})`);
+    assert(
+      ['Zrealizowane', `#${order.serverId}`, 'ltcgood', 'Wpłata wykryta', 'Potwierdzona', 'Mój bot ticketowy', '<@c1>', 'kurs 400.00 zł'].every((t) => log1.json.includes(t)),
+      'log: status, klient, nazwa, kurs, tx i oś czasu',
+    );
     assert(s1.limits.memory === 256 && s1.limits.disk === 1024 && s1.limits.cpu === 25 && s1.limits.swap === 0, 'limity 256 MB / 1 GB / 25%');
     assert(s1.egg === 15 && s1.docker_image === 'ghcr.io/parkervcp/yolks:egg15' && s1.environment.MAIN_FILE === 'index.js' && s1.environment.NODE_PACKAGES === '', 'jajko Node.js z domyślnymi zmiennymi');
     assert(s1.deploy.locations[0] === 1 && s1.external_id === `tb-${order.id}`, 'automatyczny port (deploy) i external_id');
@@ -5186,6 +5371,7 @@ async function hostingTest() {
     await tick();
     assert(order.status === 'done', 'ETH: 2 potwierdzenia → serwer');
     const s2 = panel.servers.find((s) => s.id === order.serverId);
+    assert(s2.name === 'Python • klient2', 'domyślna nazwa serwera: język • nazwa klienta');
     assert(s2.egg === 16 && s2.environment.PY_FILE === 'main.py', 'jajko Python');
 
     // 5. USDC (Ethereum) przez tokentx.
@@ -5235,11 +5421,13 @@ async function hostingTest() {
     order.expiresAt = Date.now() - 6 * 60_000;
     await tick();
     assert(order.status === 'expired' && dmEdits.at(-1)[1].includes('Czas na płatność minął'), 'zamówienie wygasa po 30 min (+5 min zapasu)');
+    assert(purchaseLogs.find((e) => e.json.includes(order.id)).json.includes('Wygasło'), 'log: wygasło');
     await purchase('c1', form({ payment: 'sol' }));
     order = lastOrder('c1');
     const cancel = interaction('c1', { customId: `hs:cancel:${GID}:${order.id}` });
     await routeHosting(cancel);
     assert(order.status === 'cancelled' && J(cancel.replies[0]).includes('anulowane'), 'anulowanie zamówienia');
+    assert(purchaseLogs.find((e) => e.json.includes(order.id)).json.includes('Anulowane przez klienta'), 'log: anulowane');
     const other = interaction('c2', { customId: `hs:cancel:${GID}:${order.id}` });
     await routeHosting(other);
     assert(J(other.replies[0]).includes('Nie znaleziono'), 'cudzego zamówienia nie można anulować');
@@ -5247,6 +5435,25 @@ async function hostingTest() {
     assert(J(i.replies.at(-1)).includes('wiadomości prywatnej') && lastOrder('closed').status === 'cancelled', 'zamknięte DM → zamówienie anulowane');
     i = await purchase('c4', form({ email: 'jan@gmail.com' }));
     assert(J(i.replies.at(-1)).includes('ma już konto'), 'e-mail innej osoby → błąd przed płatnością');
+
+    // 7b. Zmiana nazwy serwera (przycisk w DM i w /moj-hosting).
+    assert(J(credentials[1]).includes(`hs:rename:${GID}:${order.serverId ?? ''}`.split(':').slice(0, 3).join(':')), 'DM z danymi ma przycisk „Zmień nazwę”');
+    const recRename = Object.values(g.hosting.servers).find((r) => r.userId === 'c1');
+    const renameBtn = interaction('c1', { customId: `hs:rename:${GID}:${recRename.id}` });
+    await routeHosting(renameBtn);
+    assert(JSON.stringify(renameBtn.modal.toJSON()).includes('Mój bot ticketowy'), 'formularz nazwy z obecną nazwą');
+    const renameSubmit = interaction('c1', {
+      customId: `hs:renamesubmit:${GID}:${recRename.id}`,
+      isButton: () => false,
+      isModalSubmit: () => true,
+      fields: { getTextInputValue: () => '  Bot  Sklepu  ' },
+    });
+    await routeHosting(renameSubmit);
+    const renamed = panel.servers.find((s) => s.id === recRename.id);
+    assert(recRename.name === 'Bot Sklepu' && renamed.name === 'Bot Sklepu' && renamed.lastDetails.user === renamed.user && renamed.lastDetails.external_id === renamed.external_id, 'nazwa zmieniona w panelu (właściciel i external_id bez zmian)');
+    const renameStranger = interaction('c2', { customId: `hs:rename:${GID}:${recRename.id}` });
+    await routeHosting(renameStranger);
+    assert(!renameStranger.modal && J(renameStranger.replies[0]).includes('nie jest Twój'), 'cudzej nazwy nie można zmienić');
 
     // 8. Terminy: przypomnienia, blokada, powiadomienie o usunięciu.
     const dmCount = () => dms.filter(([id]) => id === 'c1').length;
@@ -5277,7 +5484,7 @@ async function hostingTest() {
       customId: `hs:renewsubmit:${GID}:${rec1.id}`,
       isButton: () => false,
       isModalSubmit: () => true,
-      fields: { getStringSelectValues: (id) => [{ period: '3m', mode: 'auto', payment: 'ltc' }[id]] },
+      fields: { getStringSelectValues: (id) => [{ period: '3m', pay: 'auto:ltc' }[id]] },
     });
     await routeHosting(renewSubmit);
     order = lastOrder('c1');
@@ -5364,7 +5571,11 @@ async function hostingTest() {
     assert(J(c.replies[0]).includes('SERWERY KLIENTÓW') === false && J(c.replies[0]).includes('Serwery klientów'), '/hosting lista');
     c = interaction('c1');
     await commands.get('moj-hosting').execute(c);
-    assert(J(c.replies[0]).includes(`hs:renew:${GID}:${rec1.id}`) && !J(c.replies[0]).includes(`#${s3.id}`), '/moj-hosting pokazuje tylko własne serwery');
+    assert(J(c.replies[0]).includes(`hs:renew:${GID}:${rec1.id}`) && J(c.replies[0]).includes(`hs:rename:${GID}:${rec1.id}`) && !J(c.replies[0]).includes(`#${s3.id}`), '/moj-hosting: tylko własne serwery, przedłuż i zmień nazwę');
+    c = cmd('logi', { kanal: 'nowe-logi' });
+    c.options.getChannel = () => ({ id: 'nowe-logi', toString: () => '<#nowe-logi>' });
+    await commands.get('hosting').execute(c);
+    assert(g.settings.purchaseLogChannelId === 'nowe-logi', '/hosting logi ustawia kanał');
 
     // 12. Błąd panelu → ponawianie, a potem powiadomienie admina.
     await purchase('c1', form({ payment: 'ltc', lang: 'java' }));
