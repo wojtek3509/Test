@@ -284,7 +284,14 @@ const reviewProducts = {
 // Jak często jedna osoba może dodać opinię (minuty).
 const reviewCooldownMinutes = 60;
 
-// „Czy legit?”: reakcja ❌ jest zawsze usuwana, a autor dostaje przerwę (dni, 0 = bez przerwy, maks. 28).
+// „Czy legit?”: emoji reakcji. Własne emoji z serwera, na którym jest bot (animowane: '<a:nazwa:id>').
+// Gdy bot nie może ich użyć, dodaje zwykłe ✅ / ❌ — obie wersje są liczone tak samo.
+const legitEmojis = {
+  yes: '<a:TAK:1554504948211785778>', // zielone TAK
+  no: '<a:NIE:1554505001492021248>', // czerwone NIE
+};
+
+// „Czy legit?”: reakcja NIE jest zawsze usuwana, a autor dostaje przerwę (dni, 0 = bez przerwy, maks. 28).
 // Staff i admini nie dostają przerwy (Discord i tak nie pozwala wyciszyć właściciela ani administratorów).
 const legitTimeoutDays = 7;
 // Konto młodsze niż tyle dni liczy się jako fałszywe zaproszenie.
@@ -662,13 +669,13 @@ function legitPanel(logo) {
     [
       title('Czy legit?', '🤔'),
       `## ❓ Czy nasz serwer __${brand.name}__ jest LEGIT?`,
-      `- ✅ Jeżeli uważasz, że __**TAK**__ zaznacz reakcję ✅ poniżej!`,
-      `- ❌ Jeżeli uważasz, że __**NIE**__ zaznacz reakcję ❌ poniżej!`,
+      `- ${legitEmojis.yes} Jeżeli uważasz, że __**TAK**__ — zaznacz zieloną reakcję ${legitEmojis.yes} poniżej!`,
+      `- ${legitEmojis.no} Jeżeli uważasz, że __**NIE**__ — zaznacz czerwoną reakcję ${legitEmojis.no} poniżej!`,
     ].join('\n'),
     logo,
   );
   if (legitTimeoutDays > 0) {
-    text(b, `> -# Zaznaczenie reakcji ❌ bez dowodu skutkuje **automatyczną przerwą na ${legitTimeoutDays} dni!** Dowody zgłaszaj w tickecie.`);
+    text(b, `> -# Zaznaczenie reakcji ${legitEmojis.no} bez dowodu skutkuje **automatyczną przerwą na ${legitTimeoutDays} dni!** Dowody zgłaszaj w tickecie.`);
   }
   sep(b);
   footer(b);
@@ -1380,8 +1387,15 @@ async function postPanel(client, discordGuild, channel, type) {
   updateGuild(discordGuild.id, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
   if (type === 'legit') {
     updateGuild(discordGuild.id, (gg) => (gg.legitVotes = { yes: 0, no: 0 }));
-    await message.react('✅').catch(() => {});
-    await message.react('❌').catch(() => {});
+    for (const [custom, fallback] of [
+      [legitEmojis.yes, '✅'],
+      [legitEmojis.no, '❌'],
+    ]) {
+      await message.react(custom).catch(async (err) => {
+        console.warn(`Czy legit: nie mogę użyć emoji ${custom} (${err.message}) — dodaję ${fallback}. Bot musi być na serwerze, z którego jest to emoji.`);
+        await message.react(fallback).catch(() => {});
+      });
+    }
   }
   return { message, warning };
 }
@@ -1437,10 +1451,21 @@ function counterLoop(client) {
 
 // ═══ CZY LEGIT ═════════════════════════════════════════════════════════
 
-/** Liczba reakcji bez reakcji samego bota. */
-function votesOf(message, name) {
-  const r = message.reactions.cache.get(name);
-  return r ? Math.max(0, r.count - (r.me ? 1 : 0)) : 0;
+const emojiId = (e) => /:(\d+)>$/.exec(e)?.[1] ?? null;
+/** Czy reakcja to TAK / NIE (własne emoji z legitEmojis albo zapasowe ✅ / ❌). */
+const isLegitEmoji = (emoji, kind) => {
+  const custom = legitEmojis[kind];
+  const fallback = kind === 'yes' ? '✅' : '❌';
+  return (emoji.id && emoji.id === emojiId(custom)) || emoji.name === fallback;
+};
+
+/** Liczba głosów danego rodzaju bez reakcji samego bota. */
+function votesOf(message, kind) {
+  let total = 0;
+  for (const r of message.reactions.cache.values()) {
+    if (isLegitEmoji(r.emoji, kind)) total += Math.max(0, r.count - (r.me ? 1 : 0));
+  }
+  return total;
 }
 
 async function onLegitReaction(reaction, user, added) {
@@ -1451,15 +1476,13 @@ async function onLegitReaction(reaction, user, added) {
   if (!message.guildId) return;
   const g = guild(message.guildId);
   if (g.panels.legit?.messageId !== message.id) return;
-  const emoji = reaction.emoji.name;
-
-  if (emoji === '❌' && added) {
-    // ❌ zawsze znika, a autor (poza staffem) dostaje przerwę.
-    await reaction.users.remove(user.id).catch((err) => console.warn('Usuwanie ❌:', err.message));
+  if (isLegitEmoji(reaction.emoji, 'no') && added) {
+    // NIE zawsze znika, a autor (poza staffem) dostaje przerwę.
+    await reaction.users.remove(user.id).catch((err) => console.warn('Usuwanie reakcji NIE:', err.message));
     const member = await message.guild.members.fetch(user.id).catch(() => null);
     if (legitTimeoutDays > 0 && member && !isStaff(member, g.settings) && member.moderatable) {
       const timedOut = await member
-        .timeout(legitTimeoutDays * 86_400_000, 'Czy legit: reakcja ❌ bez dowodu')
+        .timeout(legitTimeoutDays * 86_400_000, 'Czy legit: reakcja NIE bez dowodu')
         .then(() => true)
         .catch((err) => (console.warn('Przerwa:', err.message), false));
       if (timedOut) {
@@ -1467,7 +1490,7 @@ async function onLegitReaction(reaction, user, added) {
           .send({
             components: [
               notice(
-                `### 🔇 ${x} Otrzymałeś/aś przerwę na ${legitTimeoutDays} dni\nReakcja ❌ na **czy legit** wymaga dowodu. Jeśli go masz — napisz do administracji.`,
+                `### 🔇 ${x} Otrzymałeś/aś przerwę na ${legitTimeoutDays} dni\nReakcja ${legitEmojis.no} na **czy legit** wymaga dowodu. Jeśli go masz — napisz do administracji.`,
                 colors.warning,
               ),
             ],
@@ -1480,7 +1503,7 @@ async function onLegitReaction(reaction, user, added) {
   }
 
   // ✅ — zapisujemy liczbę od razu; nazwa kanału aktualizuje się automatycznie co 10 minut.
-  if (emoji === '✅') updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, '✅'), no: 0 }));
+  if (isLegitEmoji(reaction.emoji, 'yes')) updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, 'yes'), no: 0 }));
 }
 
 /** Przy starcie: przelicza ✅ na panelu (reakcje dodane, gdy bot był wyłączony). */
@@ -1490,7 +1513,7 @@ async function syncLegitVotes(client) {
     if (!ref || !client.guilds.cache.has(guildId)) continue;
     const channel = await client.channels.fetch(ref.channelId).catch(() => null);
     const message = await channel?.messages.fetch(ref.messageId).catch(() => null);
-    if (message) updateGuild(guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, '✅'), no: 0 }));
+    if (message) updateGuild(guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, 'yes'), no: 0 }));
   }
 }
 
@@ -2712,34 +2735,43 @@ async function flowTest() {
 
   // 10. „Czy legit?” — ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
   g.panels.legit = { channelId: LEGIT_CH, messageId: 'legit-msg' };
+  const YES = { id: '1554504948211785778', name: 'TAK', animated: true };
+  const NO = { id: '1554505001492021248', name: 'NIE', animated: true };
   const reactions = new Map([
-    ['✅', { count: 405, me: true }],
-    ['❌', { count: 2, me: true }],
+    [YES.id, { emoji: YES, count: 405, me: true }],
+    [NO.id, { emoji: NO, count: 2, me: true }],
+    ['✅', { emoji: { id: null, name: '✅' }, count: 3, me: false }],
   ]);
   const removed = [];
-  const reaction = (name) => ({
+  const reaction = (emoji) => ({
     partial: false,
-    emoji: { name },
-    users: { remove: async (id) => removed.push([name, id]) },
+    emoji,
+    users: { remove: async (id) => removed.push([emoji.name, id]) },
     message: { id: 'legit-msg', partial: false, guildId: GID, guild: fakeGuild, channelId: LEGIT_CH, client: fakeClient, reactions: { cache: reactions } },
   });
-  await onLegitReaction(reaction('✅'), mkUser('fan'), true);
-  assert(g.legitVotes.yes === 404, 'głosy ✅ zapisane w bazie bez reakcji bota');
-  await onLegitReaction(reaction('❌'), mkUser('hater'), true);
-  assert(removed.some(([e, id]) => e === '❌' && id === 'hater'), '❌ usunięte');
+  await onLegitReaction(reaction(YES), mkUser('fan'), true);
+  assert(g.legitVotes.yes === 407, `TAK (własne emoji) + zapasowe ✅ liczone razem, bez bota (${g.legitVotes.yes})`);
+  await onLegitReaction(reaction(NO), mkUser('hater'), true);
+  assert(removed.some(([e, id]) => e === 'NIE' && id === 'hater'), 'reakcja NIE usunięta');
   const hater = log.find(([type, id]) => type === 'timeout' && id === 'hater');
-  assert(hater && hater[2] === 7 * 86_400_000, 'przerwa 7 dni za ❌');
+  assert(hater && hater[2] === 7 * 86_400_000, 'przerwa 7 dni za NIE');
   assert(log.some(([type, id]) => type === 'dm' && id === 'hater'), 'DM o przerwie');
   const timeoutsBefore = log.filter(([type]) => type === 'timeout').length;
-  await onLegitReaction(reaction('❌'), mkUser(STAFF), true);
-  assert(removed.some(([e, id]) => e === '❌' && id === STAFF), '❌ staffu też usunięte');
+  await onLegitReaction(reaction(NO), mkUser(STAFF), true);
+  assert(removed.some(([e, id]) => e === 'NIE' && id === STAFF), 'NIE od staffu też usunięte');
   assert(log.filter(([type]) => type === 'timeout').length === timeoutsBefore, 'staff bez przerwy');
-  assert(g.legitVotes.yes === 404, '❌ nie zmienia licznika');
-  reactions.get('✅').count = 404;
-  await onLegitReaction(reaction('✅'), mkUser('fan'), false);
-  assert(g.legitVotes.yes === 403, 'cofnięcie ✅ zmniejsza licznik');
-  reactions.get('✅').count = 405;
-  await onLegitReaction(reaction('✅'), mkUser('fan'), true);
+  assert(g.legitVotes.yes === 407, 'NIE nie zmienia licznika');
+  await onLegitReaction(reaction({ id: '999', name: 'inne' }), mkUser('x'), true);
+  assert(g.legitVotes.yes === 407 && !removed.some(([e]) => e === 'inne'), 'inne emoji ignorowane');
+  reactions.delete('✅');
+  reactions.get(YES.id).count = 404;
+  await onLegitReaction(reaction(YES), mkUser('fan'), false);
+  assert(g.legitVotes.yes === 403, 'cofnięcie TAK zmniejsza licznik');
+  reactions.get(YES.id).count = 405;
+  await onLegitReaction(reaction(YES), mkUser('fan'), true);
+  const legitJson = JSON.stringify(legitPanel(null).toJSON());
+  assert(legitJson.includes('<a:TAK:1554504948211785778>') && legitJson.includes('<a:NIE:1554505001492021248>'), 'panel z emoji TAK / NIE');
+  assert(legitJson.includes('zieloną') && legitJson.includes('czerwoną'), 'panel: TAK zielone, NIE czerwone');
 
   // 11. Liczniki kanałów: nazwy z bazy.
   g.settings.reviewChannelId = null;
