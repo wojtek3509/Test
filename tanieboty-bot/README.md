@@ -53,6 +53,16 @@ Liczniki w nazwach kanałów (czy legit, legit check, opinie) są zapisywane w b
 
 Boosty: bot reaguje na systemowe wiadomości Discorda o boostach, więc w **Ustawienia serwera → Ogólne → Kanał wiadomości systemowych** zostaw włączone „Wysyłaj wiadomość, gdy ktoś wzmocni serwer”.
 
+## Banery (grafiki/)
+
+Bot sam dołącza niebieskie banery TanieBoty z folderu `grafiki/` (obok `index.js`): pod panelami (tickety, regulamin, cennik, opinie, czy legit, vouche), pod konkursami, powitaniami i zaproszeniami. Nie trzeba wklejać linków.
+
+- Własny obrazek zamiast wbudowanego: `/panel typ:… baner:<link>`.
+- Bez baneru: `/panel typ:… baner:brak`.
+- Powrót do banera TanieBoty: `/panel typ:… usun-baner:True`.
+
+Brak folderu `grafiki/` na serwerze bota oznacza wiadomości bez banerów. Po wgraniu folderu wyślij panele ponownie (`/panel`).
+
 ## Personalizacja
 
 Na początku `index.js`, w sekcji **KONFIGURACJA**:

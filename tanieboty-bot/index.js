@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ActivityType,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -569,6 +570,38 @@ function banner(container, url) {
   return container;
 }
 
+// ─── Banery wbudowane ───────────────────────────────────────────────────
+// Pliki z folderu grafiki/ (obok index.js) bot dołącza do wiadomości sam — bez linków, które mogą wygasnąć.
+// Własny link z /panel baner:<link> ma pierwszeństwo, a baner:brak wyłącza baner danego panelu.
+const bannerDir = join(dirname(fileURLToPath(import.meta.url)), 'grafiki');
+const bannerFiles = {
+  tickety: 'baner-tickety.png',
+  regulamin: 'baner-regulamin.png',
+  opinie: 'baner-opinie.png',
+  legit: 'baner-czy-legit.png',
+  cennik: 'baner-cennik.png',
+  vouch: 'baner-legit-check.png',
+  konkurs: 'baner-konkursy.png',
+  witamy: 'baner-witamy.png',
+  zaproszenia: 'baner-zaproszenia.png',
+};
+const builtinBanner = (key) => (bannerFiles[key] && existsSync(join(bannerDir, bannerFiles[key])) ? bannerFiles[key] : null);
+const customBanner = (g, key) => g?.settings?.banners?.[key];
+
+/** Adres baneru do komponentu: własny link, wbudowany plik (attachment://) albo brak. */
+function bannerUrl(g, key) {
+  const custom = customBanner(g, key);
+  if (custom === false) return null;
+  if (custom) return custom;
+  return builtinBanner(key) ? `attachment://${builtinBanner(key)}` : null;
+}
+
+/** Plik do dołączenia do wiadomości, jeśli panel używa wbudowanego baneru. */
+function bannerAttachments(g, key) {
+  if (customBanner(g, key) !== undefined || !builtinBanner(key)) return [];
+  return [new AttachmentBuilder(join(bannerDir, builtinBanner(key)), { name: builtinBanner(key) })];
+}
+
 const box = (color = colors.brand) => new ContainerBuilder().setAccentColor(color);
 const notice = (content, color = colors.brand) => text(box(color), content);
 const ok = (content) => notice(`### ✅ ${content}`, colors.success);
@@ -589,7 +622,7 @@ function ticketsPanel(g, logo) {
     logo,
   );
   text(b, '> -# Prosimy o zachowanie cierpliwości na ticketach — odpowiadamy najszybciej, jak to możliwe.');
-  banner(b, g.settings.banners.tickety);
+  banner(b, bannerUrl(g, 'tickety'));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(
@@ -608,7 +641,7 @@ function rulesPanel(g, logo) {
   const b = box();
   header(b, [title('Regulamin', '📜'), '>>> ' + rules.map((r, i) => `${r.emoji} **${rulesSectionWord} ${i + 1}.** ${r.title}`).join('\n')].join('\n'), logo);
   text(b, `> -# Korzystając z serwera, akceptujesz regulamin. Ostatnia aktualizacja: ${ts(Date.now(), 'D')}`);
-  banner(b, g.settings.banners.regulamin);
+  banner(b, bannerUrl(g, 'regulamin'));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(
@@ -704,7 +737,7 @@ function reviewsPanel(g, logo) {
       ...reviewCriteria.map((cr) => row(`${cr.emoji} ${cr.label}`, s.count ? `\`${s.per[cr.id].toFixed(1)}/5\`` : '`—`')),
     ].join('\n'),
   );
-  banner(b, g.settings.banners.opinie);
+  banner(b, bannerUrl(g, 'opinie'));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(new ButtonBuilder().setCustomId('rev:open').setLabel('Wystaw opinię').setEmoji('⭐').setStyle(ButtonStyle.Primary)),
@@ -741,7 +774,7 @@ function reviewCard(review, user) {
   return b;
 }
 
-function legitPanel(logo) {
+function legitPanel(g, logo) {
   const b = box();
   header(
     b,
@@ -756,6 +789,7 @@ function legitPanel(logo) {
   if (legitTimeoutDays > 0) {
     text(b, `> -# Zaznaczenie reakcji ${legitEmojis.no} bez dowodu skutkuje **automatyczną przerwą na ${legitTimeoutDays} dni!** Dowody zgłaszaj w tickecie.`);
   }
+  banner(b, bannerUrl(g, 'legit'));
   sep(b);
   footer(b);
   return b;
@@ -786,7 +820,7 @@ function pricingPanel(g, logo) {
       `-# ${hostingLimits.memory} MB RAM • ${hostingLimits.disk >= 1024 ? `${hostingLimits.disk / 1024} GB` : `${hostingLimits.disk} MB`} dysku • ${hostingLimits.cpu}% CPU • ${Object.values(hostingLanguages).filter((l) => !l.manualOnly).map((l) => l.label.split(' (')[0]).join(', ')}`,
     ].join('\n'),
   );
-  banner(b, g.settings.banners.cennik);
+  banner(b, bannerUrl(g, 'cennik'));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(new ButtonBuilder().setCustomId('tk:quick:hosting').setLabel('Kup hosting').setEmoji('🖥️').setStyle(ButtonStyle.Primary)),
@@ -812,7 +846,7 @@ function giveawayView(gw, memberCount) {
     `📋 ${x} **Wymagania:** ${gw.requirements || 'Bez wymagań!'}`,
   ];
   text(b, [title(gw.ended ? 'Konkurs zakończony' : 'Konkurs', '🎉'), '', '>>> ' + lines.join('\n')].join('\n'));
-  if (gw.image) banner(b, gw.image);
+  banner(b, gw.image || (gw.builtinBanner ? `attachment://${bannerFiles.konkurs}` : null));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(
@@ -1265,6 +1299,7 @@ function vouchPanel(g, logo) {
       .filter(Boolean)
       .join('\n'),
   );
+  banner(b, bannerUrl(g, 'vouch'));
   sep(b);
   footer(b);
   return b;
@@ -2802,7 +2837,7 @@ const panelBuilders = {
   tickety: (g, logo) => ticketsPanel(g, logo),
   regulamin: (g, logo) => rulesPanel(g, logo),
   opinie: (g, logo) => reviewsPanel(g, logo),
-  legit: (g, logo) => legitPanel(logo),
+  legit: (g, logo) => legitPanel(g, logo),
   cennik: (g, logo) => pricingPanel(g, logo),
   vouch: (g, logo) => vouchPanel(g, logo),
 };
@@ -2813,12 +2848,12 @@ async function postPanel(client, discordGuild, channel, type) {
   let message;
   let warning = '';
   try {
-    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], flags: V2 });
+    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], files: bannerAttachments(guild(discordGuild.id), type), flags: V2 });
   } catch (err) {
     // 50035 = Discord odrzucił treść — zwykle zły link do baneru. Próbujemy bez niego.
     if (err.code !== 50035 || !guild(discordGuild.id).settings.banners[type]) throw err;
     updateGuild(discordGuild.id, (gg) => delete gg.settings.banners[type]);
-    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], flags: V2 });
+    message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], files: bannerAttachments(guild(discordGuild.id), type), flags: V2 });
     warning = '\n⚠️ Link do baneru był nieprawidłowy — panel wysłano bez niego.';
   }
   updateGuild(discordGuild.id, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
@@ -2846,7 +2881,10 @@ async function refreshPanel(client, guildId, type) {
   const message = await channel?.messages.fetch(ref.messageId).catch(() => null);
   if (!message) return;
   const logo = logoOf(channel.guild, client);
-  await message.edit({ components: [panelBuilders[type](g, logo)], flags: V2 }).catch((err) => console.error(`Panel ${type}:`, err.message));
+  // Załączniki podajemy od nowa: stary panel mógł nie mieć pliku baneru, a zmiana baneru go podmienia.
+  await message
+    .edit({ components: [panelBuilders[type](g, logo)], files: bannerAttachments(g, type), attachments: [], flags: V2 })
+    .catch((err) => console.error(`Panel ${type}:`, err.message));
 }
 
 // ─── Liczniki w nazwach kanałów (np. ⭐┃opinie→9) ───────────────────────
@@ -3254,7 +3292,7 @@ async function onGenerateButton(i, action, ownerId) {
 const inviteTotal = (st) => (st ? st.regular - st.left + st.bonus : 0);
 const emptyInvites = () => ({ regular: 0, left: 0, fake: 0, bonus: 0 });
 
-function welcomeView(member) {
+function welcomeView(member, g) {
   const b = box();
   text(b, title('Nowa osoba', '👋'));
   sep(b);
@@ -3268,6 +3306,7 @@ function welcomeView(member) {
       ].join('\n'),
     member.user.displayAvatarURL({ size: 256 }),
   );
+  banner(b, bannerUrl(g, 'witamy'));
   sep(b);
   footer(b);
   return b;
@@ -3288,6 +3327,7 @@ function inviteLogView(member, g, found) {
   const lines = [point(`${member} właśnie **zawitał/a** do nas ${joinSource(member, g, found)}`)];
   if (g.joins[member.id]?.fake) lines.push(point(`⚠️ Nowe konto (młodsze niż ${fakeAccountDays} dni) — nie liczy się do zaproszeń.`));
   text(b, '>>> ' + lines.join('\n'));
+  banner(b, bannerUrl(g, 'zaproszenia'));
   sep(b);
   footer(b);
   return b;
@@ -3383,8 +3423,18 @@ async function onMemberAdd(member) {
       else st.regular++;
     }
   });
-  await sendTo(member.guild, g.settings.welcomeChannelId, { components: [welcomeView(member)], flags: V2, allowedMentions: { users: [member.id] } });
-  await sendTo(member.guild, g.settings.invitesChannelId, { components: [inviteLogView(member, g, found)], flags: V2, allowedMentions: { parse: [] } });
+  await sendTo(member.guild, g.settings.welcomeChannelId, {
+    components: [welcomeView(member, g)],
+    files: bannerAttachments(g, 'witamy'),
+    flags: V2,
+    allowedMentions: { users: [member.id] },
+  });
+  await sendTo(member.guild, g.settings.invitesChannelId, {
+    components: [inviteLogView(member, g, found)],
+    files: bannerAttachments(g, 'zaproszenia'),
+    flags: V2,
+    allowedMentions: { parse: [] },
+  });
 }
 
 function onMemberRemove(member) {
@@ -3671,22 +3721,23 @@ command(
         ),
     )
     .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
-    .addStringOption((o) => o.setName('baner').setDescription('Link do obrazka pod panelem (zapamiętywany)'))
-    .addBooleanOption((o) => o.setName('usun-baner').setDescription('Usuń zapamiętany baner tego panelu')),
+    .addStringOption((o) => o.setName('baner').setDescription('Własny link do obrazka pod panelem albo „brak” (domyślnie baner TanieBoty)'))
+    .addBooleanOption((o) => o.setName('usun-baner').setDescription('Wróć do wbudowanego baneru TanieBoty')),
   async (i) => {
     const type = i.options.getString('typ');
-    const bannerUrl = i.options.getString('baner');
+    const customUrl = i.options.getString('baner')?.trim();
+    const noBanner = customUrl?.toLowerCase() === 'brak';
     if (i.options.getBoolean('usun-baner')) updateGuild(i.guildId, (g) => delete g.settings.banners[type]);
-    if (bannerUrl && !isUrl(bannerUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https).');
+    if (customUrl && !noBanner && !isUrl(customUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https) albo słowem `brak`.');
     const st = guild(i.guildId).settings;
     if (type === 'tickety' && !Object.keys(ticketTypes).some((t) => ticketCategoryFor(st, t))) return replyFail(i, 'Najpierw użyj `/setup` albo `/generuj`.');
-    if (bannerUrl) updateGuild(i.guildId, (g) => (g.settings.banners[type] = bannerUrl));
+    if (customUrl) updateGuild(i.guildId, (g) => (g.settings.banners[type] = noBanner ? false : customUrl));
 
     const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
     const channel = await i.guild.channels.fetch(channelId).catch(() => null);
     if (!channel?.isTextBased()) return replyFail(i, 'Bot nie widzi tego kanału.');
     const perms = channel.permissionsFor(i.client.user);
-    const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', AddReactions: 'Dodawanie reakcji' };
+    const needed = { ViewChannel: 'Wyświetlanie kanału', SendMessages: 'Wysyłanie wiadomości', AddReactions: 'Dodawanie reakcji', AttachFiles: 'Załączanie plików (baner)' };
     const missing = Object.entries(needed).filter(([flag]) => !perms?.has(PermissionFlagsBits[flag]));
     if (missing.length) return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, n]) => `> • ${n}`).join('\n')}`);
 
@@ -3751,12 +3802,18 @@ command(
       winners: i.options.getInteger('zwyciezcy') ?? 1,
       requirements: i.options.getString('wymagania'),
       image,
+      builtinBanner: !image && Boolean(builtinBanner('konkurs')),
       hostId: i.user.id,
       endsAt: Date.now() + duration,
       entrants: [],
       ended: false,
     };
-    const message = await channel.send({ components: [giveawayView(gw, i.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } });
+    const message = await channel.send({
+      components: [giveawayView(gw, i.guild.memberCount)],
+      files: gw.builtinBanner ? bannerAttachments(null, 'konkurs') : [],
+      flags: V2,
+      allowedMentions: { parse: [] },
+    });
     updateGuild(i.guildId, (g) => (g.giveaways[message.id] = gw));
     if (i.options.getBoolean('ping')) await channel.send({ content: '@everyone', allowedMentions: { parse: ['everyone'] } }).catch(() => {});
     await replyOk(i, `Konkurs wystartował: ${message.url}\n-# ID: \`${message.id}\``);
@@ -4300,6 +4357,24 @@ function selfTest() {
   ];
   for (const item of built) item.toJSON();
   if (parseDuration('1d 2h 30m') !== 95_400_000) throw new Error('parseDuration');
+  // Banery wbudowane: plik z grafiki/, własny link ma pierwszeństwo, „brak” wyłącza.
+  const bg = guild('banner-test');
+  for (const key of Object.keys(bannerFiles)) {
+    if (!builtinBanner(key)) throw new Error(`Brak pliku grafiki/${bannerFiles[key]}`);
+    if (bannerUrl(bg, key) !== `attachment://${bannerFiles[key]}` || bannerAttachments(bg, key).length !== 1) throw new Error(`Baner wbudowany: ${key}`);
+  }
+  bg.settings.banners.tickety = img;
+  bg.settings.banners.cennik = false;
+  if (bannerUrl(bg, 'tickety') !== img || bannerAttachments(bg, 'tickety').length) throw new Error('Własny link banera');
+  if (bannerUrl(bg, 'cennik') !== null || bannerAttachments(bg, 'cennik').length) throw new Error('Baner: brak');
+  const panelJson = JSON.stringify(ticketsPanel(guild('banner-empty'), null).toJSON());
+  if (!panelJson.includes('attachment://baner-tickety.png')) throw new Error('Panel ticketów z wbudowanym banerem');
+  const welcomeMember = { id: '5', guild: { memberCount: 10 }, user: { displayAvatarURL: () => img }, toString: () => '<@5>' };
+  if (!JSON.stringify(welcomeView(welcomeMember, bg).toJSON()).includes('attachment://baner-witamy.png')) throw new Error('Powitanie z banerem');
+  if (!JSON.stringify(inviteLogView(welcomeMember, bg, {}).toJSON()).includes('attachment://baner-zaproszenia.png')) throw new Error('Zaproszenia z banerem');
+  if (!JSON.stringify(giveawayView({ ...gw, image: null, builtinBanner: true }, 10).toJSON()).includes('attachment://baner-konkursy.png')) throw new Error('Konkurs z banerem');
+  delete store.guilds['banner-test'];
+  delete store.guilds['banner-empty'];
   console.log(`✅ ${built.length} komponentów/komend przeszło walidację`);
 }
 
@@ -4576,7 +4651,7 @@ async function flowTest() {
   assert(g.legitVotes.yes === 403, 'cofnięcie TAK zmniejsza licznik');
   reactions.get(YES.id).count = 405;
   await onLegitReaction(reaction(YES), mkUser('fan'), true);
-  const legitJson = JSON.stringify(legitPanel(null).toJSON());
+  const legitJson = JSON.stringify(legitPanel(g, null).toJSON());
   assert(legitJson.includes('<a:TAK:1554504948211785778>') && legitJson.includes('<a:NIE:1554505001492021248>'), 'panel z emoji TAK / NIE');
   assert(legitJson.includes('zieloną') && legitJson.includes('czerwoną'), 'panel: TAK zielone, NIE czerwone');
 
