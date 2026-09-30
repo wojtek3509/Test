@@ -380,7 +380,7 @@ const counterNames = {
 };
 
 // Układ serwera tworzony przez /generuj.
-// mode: 'readonly' = tylko czytanie (piszą Administracja i Staff), 'reactions' = bez pisania, z reakcjami,
+// mode: 'readonly' = tylko czytanie (piszą Administracja i Admin), 'reactions' = bez pisania, z reakcjami,
 //       'open' = wszyscy piszą, 'voice' = kanał głosowy.
 // counter: nazwa z licznikiem z counterNames. panel: panel wysyłany na kanał. setting: pole w /setup.
 const serverLayout = {
@@ -388,7 +388,7 @@ const serverLayout = {
   channelName: (emoji, name) => `${emoji}┃${name}`,
   roles: {
     admin: { name: '👑 Administracja', color: 0xe74c3c, hoist: true, permissions: [PermissionFlagsBits.Administrator] },
-    staff: { name: '🛡️ Staff', color: 0x3498db, hoist: true, permissions: [] },
+    staff: { name: '🛡️ Admin', color: 0x3498db, hoist: true, permissions: [] },
     client: { name: '💎 Klient', color: 0x9b59b6, hoist: true, permissions: [] },
     verified: { name: '✅ Zweryfikowany', color: 0x2ecc71, hoist: false, permissions: [] },
   },
@@ -439,7 +439,7 @@ const serverLayout = {
         { emoji: '🎵', name: 'muzyka', mode: 'voice' },
       ],
     },
-    // Tu bot tworzy kanały ticketów — każdy rodzaj w swojej kategorii, widoczne tylko dla Administracji i Staffu (+ autora ticketu).
+    // Tu bot tworzy kanały ticketów — każdy rodzaj w swojej kategorii, widoczne tylko dla Administracji i Adminów (+ autora ticketu).
     { emoji: '💻', name: 'ZAMÓWIENIA BOTÓW', private: true, ticketType: 'bot', channels: [] },
     { emoji: '🖥️', name: 'ZAMÓWIENIA HOSTINGU', private: true, ticketType: 'hosting', channels: [] },
     { emoji: '❓', name: 'PYTANIA', private: true, ticketType: 'question', channels: [] },
@@ -454,7 +454,7 @@ const serverLayout = {
         { emoji: '🧾', name: 'logi-zakupy', mode: 'open', setting: 'purchaseLogChannelId' },
         { emoji: '❓', name: 'logi-pytania', mode: 'open', ticketLog: 'question' },
         { emoji: '🤝', name: 'logi-współpraca', mode: 'open', ticketLog: 'partner' },
-        { emoji: '💬', name: 'staff-czat', mode: 'open', report: true },
+        { emoji: '💬', name: 'admin-czat', mode: 'open', report: true },
       ],
     },
   ],
@@ -1201,7 +1201,7 @@ async function createTicket(client, discordGuild, user, type, form) {
 function staffTicket(i) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return { error: 'To nie jest aktywny kanał ticketu.' };
-  if (!isStaff(i.member, guild(i.guildId).settings)) return { error: 'Tylko staff może to zrobić.' };
+  if (!isStaff(i.member, guild(i.guildId).settings)) return { error: 'Tylko admin może to zrobić.' };
   return { ticket };
 }
 
@@ -1320,7 +1320,7 @@ function repRequestView(ticket, lcChannelId) {
   b.addActionRowComponents((r) =>
     r.setComponents(
       new ButtonBuilder().setCustomId('tk:copyrep').setLabel('Skopiuj wzór').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('tk:closenorep').setLabel('Zamknij bez repa (staff)').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tk:closenorep').setLabel('Zamknij bez repa (admin)').setEmoji('🔒').setStyle(ButtonStyle.Danger),
     ),
   );
   sep(b);
@@ -3222,7 +3222,7 @@ function generateConfirmView(userId) {
           point(`Utworzę role: ${Object.values(serverLayout.roles).map((r) => `**${r.name}**`).join(', ')}.`),
           point(`Utworzę **${serverLayout.categories.length}** kategorii i **${serverLayout.categories.reduce((a, cat) => a + cat.channels.length, 0)}** kanałów z uprawnieniami.`),
           point('Skonfiguruję bota i wyślę panele: tickety, regulamin, opinie, czy legit, cennik i „jak napisać voucha”.'),
-          point('Podsumowanie wyślę Ci w **DM** i na kanał staffu.'),
+          point('Podsumowanie wyślę Ci w **DM** i na kanał admin-czat.'),
         ].join('\n'),
     ].join('\n'),
   );
@@ -3360,7 +3360,7 @@ async function onGenerateButton(i, action, ownerId) {
   if (action === 'cancel') return i.update({ components: [notice(`### ❎ ${x} Anulowano — nic nie zostało zmienione.`, colors.neutral)], flags: V2 });
   if (!i.memberPermissions?.has(F.Administrator)) return replyFail(i, 'Potrzebujesz uprawnień administratora.');
   await i.update({
-    components: [notice(`### 🏗️ ${x} Generuję serwer…\nTen kanał za chwilę zniknie. Podsumowanie dostaniesz w **DM** i na kanale staffu.`, colors.brand)],
+    components: [notice(`### 🏗️ ${x} Generuję serwer…\nTen kanał za chwilę zniknie. Podsumowanie dostaniesz w **DM** i na kanale admin-czat.`, colors.brand)],
     flags: V2,
   });
   try {
@@ -3685,7 +3685,7 @@ command(
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria ticketów').addChannelTypes(ChannelType.GuildCategory).setRequired(true))
-    .addRoleOption((o) => o.setName('staff').setDescription('Rola obsługująca tickety').setRequired(true))
+    .addRoleOption((o) => o.setName('admin').setDescription('Rola adminów obsługujących tickety').setRequired(true))
     .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów i transcriptów').addChannelTypes(ChannelType.GuildText).setRequired(true))
     .addChannelOption((o) => o.setName('opinie').setDescription('Kanał, na który trafiają opinie').addChannelTypes(ChannelType.GuildText))
     .addChannelOption((o) => o.setName('boosty').setDescription('Kanał podziękowań za boosty').addChannelTypes(ChannelType.GuildText))
@@ -3699,7 +3699,7 @@ command(
     const s = updateGuild(i.guildId, (g) => {
       const st = g.settings;
       st.categoryId = i.options.getChannel('kategoria').id;
-      st.staffRoleId = i.options.getRole('staff').id;
+      st.staffRoleId = i.options.getRole('admin').id;
       st.logChannelId = i.options.getChannel('logi').id;
       st.reviewChannelId = i.options.getChannel('opinie')?.id ?? st.reviewChannelId ?? null;
       st.boostChannelId = i.options.getChannel('boosty')?.id ?? st.boostChannelId ?? null;
@@ -3719,7 +3719,7 @@ command(
             '>>> ' +
               [
                 row('📁 Kategoria ticketów', ch(s.categoryId)),
-                row('🛡️ Staff', `<@&${s.staffRoleId}>`),
+                row('🛡️ Admin', `<@&${s.staffRoleId}>`),
                 row('📜 Logi', ch(s.logChannelId)),
                 row('⭐ Opinie', ch(s.reviewChannelId)),
                 row('🚀 Boosty', ch(s.boostChannelId)),
@@ -3939,7 +3939,7 @@ command(
     if (!ticket || ticket.closedAt) return replyFail(i, 'Tej komendy używa się w kanale ticketu.');
     const sub = i.options.getSubcommand();
     if (sub === 'zamknij') return closeTicket(i, { reason: i.options.getString('powod') });
-    if (!isStaff(i.member, guild(i.guildId).settings)) return replyFail(i, 'Tylko staff może to zrobić.');
+    if (!isStaff(i.member, guild(i.guildId).settings)) return replyFail(i, 'Tylko admin może to zrobić.');
     if (sub === 'nazwa') {
       await i.channel.setName(i.options.getString('nazwa'));
       return replyOk(i, `Zmieniono nazwę na **${i.channel.name}**`, V2);
@@ -4916,7 +4916,7 @@ async function generatorTest() {
   assert(s.welcomeChannelId === byName('👋┃witamy').id && s.invitesChannelId === byName('📩┃zaproszenia').id, 'powitania i zaproszenia ustawione');
   assert(report.panels.length === 6 && ['📜┃regulamin', '💰┃cennik', '🎫┃tickety', '⭐┃opinie→0', '🤔┃czy-legit→0', '✅┃legit-check→0'].every((n) => byName(n).sent.length === 1), '6 paneli wysłanych');
   assert(JSON.stringify(byName('📜┃regulamin').sent[0].components[0].toJSON()).includes('rules:accept'), 'regulamin z przyciskiem akceptacji');
-  assert(byName('💬┃staff-czat').sent.length === 1 && dms.some(([t]) => t === 'dm'), 'podsumowanie na staff-czat i w DM');
+  assert(byName('💬┃admin-czat').sent.length === 1 && dms.some(([t]) => t === 'dm'), 'podsumowanie na admin-czat i w DM');
   assert(guild(GID).tickets.old.closedAt, 'stare tickety zamknięte w bazie');
   assert(openTicketsOf(GID, 'u').length === 0, 'klient może otworzyć nowy ticket');
 
@@ -5822,7 +5822,7 @@ async function hostingTest() {
     assert(J({ components: [manualPaymentView(g.tickets.hticket.form)] }).includes('Numer BLIK: 123 456 789'), 'dane BLIK z config.json');
     const byClient = interaction('c2', { customId: 'hs:confirm' });
     await routeHosting(byClient);
-    assert(J(byClient.replies[0]).includes('Tylko staff'), 'klient nie potwierdzi sam');
+    assert(J(byClient.replies[0]).includes('Tylko admin'), 'klient nie potwierdzi sam');
     const confirm = interaction('staff', { customId: 'hs:confirm' });
     await routeHosting(confirm);
     const t = g.tickets.hticket;
