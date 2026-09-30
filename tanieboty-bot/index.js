@@ -119,7 +119,7 @@ const cryptoCoins = {
 };
 
 // Metody płatności przy zakupie hostingu. Krypto działa automatycznie i ręcznie, reszta tylko ręcznie.
-// Dane do płatności ręcznej (numer BLIK, konto, Revolut) wpisujesz w config.json → hosting.manualPayments.
+// BLIK: numer telefonu podaje właściciel w tickecie (za każdym razem może być inny). Krypto: adres z config.json → hosting.wallets.
 const hostingPayments = {
   ltc: { label: 'LTC (Litecoin)', emoji: '💠' },
   eth: { label: 'ETH (Ethereum)', emoji: '💎' },
@@ -127,8 +127,6 @@ const hostingPayments = {
   sol: { label: 'SOL (Solana)', emoji: '🟣' },
   usdc_sol: { label: 'USDC (sieć Solana)', emoji: '💵' },
   blik: { label: 'BLIK', emoji: '📱', rep: 'blik' },
-  przelew: { label: 'Przelew', emoji: '🏦', rep: 'przelew' },
-  revolut: { label: 'Revolut', emoji: '💳', rep: 'revolut' },
 };
 
 const hostingTimes = {
@@ -337,8 +335,6 @@ const payments = {
   usdt: { label: 'USDT', emoji: '💵' },
   paypal: { label: 'PayPal', emoji: '🅿️' },
   psc: { label: 'PSC', emoji: '🎫' },
-  przelew: { label: 'Przelew', emoji: '🏦' },
-  revolut: { label: 'Revolut', emoji: '💳' },
   sol: { label: 'SOL', emoji: '🟣' },
   usdc: { label: 'USDC', emoji: '💵' },
 };
@@ -880,7 +876,7 @@ function pricingPanel(g, logo) {
           point('Twój bot działa **24/7** na naszym hostingu.'),
           point('Kliknij **Kup hosting**, wybierz język, okres i płatność.'),
           point('**⚡ Krypto** (LTC, ETH, USDC, SOL) — serwer tworzy się **automatycznie** zaraz po wpłacie.'),
-          point('**⏳ Ręcznie** (BLIK, przelew, Revolut, krypto) — otwiera się ticket i czekasz na właściciela.'),
+          point('**⏳ Ręcznie** (BLIK albo krypto) — otwiera się ticket i czekasz na właściciela.'),
         ].join('\n'),
     ].join('\n'),
     logo,
@@ -1967,7 +1963,9 @@ function manualPaymentView(form) {
   const wallet = coin ? walletFor(form.payment) : null;
   const info = coin
     ? wallet && `Wyślij równowartość **${plan[1]}** w **${coin.label}** (sieć **${coin.network}**) na adres:\n\`${wallet}\``
-    : hostingConfig.manualPayments?.[form.payment];
+    : null;
+  // BLIK: numer telefonu właściciel podaje w tickecie — klient nie płaci, zanim go dostanie.
+  const blik = form.payment === 'blik';
   const b = box(colors.gold);
   text(
     b,
@@ -1976,7 +1974,7 @@ function manualPaymentView(form) {
       '>>> ' + [row('📦 Pakiet', `${plan[0]} — **${plan[1]}**`), row('💳 Metoda', payLabel(form.payment))].join('\n'),
       '',
       `### 📬 ${x} Dane do płatności`,
-      info || 'Właściciel poda je w tym tickecie.',
+      info || (blik ? '📱 **Numer telefonu do BLIK poda właściciel w tym tickecie.**\n⚠️ Nie wysyłaj pieniędzy, zanim go nie dostaniesz od właściciela.' : 'Właściciel poda je w tym tickecie.'),
       '',
       hostingLanguages[form.lang]?.manualOnly ? '-# 🧩 Inny język: właściciel ustali z Tobą szczegóły w tym tickecie.' : null,
       '-# Po wpłacie wyślij tutaj potwierdzenie (zrzut ekranu albo ID transakcji). Właściciel sprawdzi płatność, kliknie „Potwierdź”, a serwer utworzy się automatycznie.',
@@ -5423,7 +5421,6 @@ async function hostingTest() {
     clientApiKey: 'ptlc_test',
     eggs: { nodejs: { nest: 5, egg: 15 }, python: { nest: 5, egg: 16 }, java: { nest: 5, egg: 17 } },
     wallets: { ltc: LTC, eth: ETH, sol: SOL },
-    manualPayments: { blik: 'Numer BLIK: 123 456 789' },
   };
   hostingDelay = async () => {};
   eggCache.clear();
@@ -5710,7 +5707,7 @@ async function hostingTest() {
     assert(hostingFormError(form({ email: null, renew: '5', lang: 'other' })) === null, 'przedłużenie bez e-maila i dla innego języka');
     const modalJson = JSON.stringify(ticketModal('hosting').toJSON());
     assert(
-      ['Język bota', 'Okres hostingu', 'Sposób zakupu', 'Automatyczny', 'Ręczny', 'USDC (sieć Solana)', 'Revolut', 'E-mail'].every((t) => modalJson.includes(t)) && !modalJson.includes('Nazwa serwera'),
+      ['Język bota', 'Okres hostingu', 'Sposób zakupu', 'Automatyczny', 'Ręczny', 'USDC (sieć Solana)', 'BLIK', 'E-mail'].every((t) => modalJson.includes(t)) && !modalJson.includes('Nazwa serwera'),
       'formularz zakupu: język, okres, sposób, płatność, e-mail (bez nazwy)',
     );
     assert(ticketModal('hosting').toJSON().components.length === 5, 'formularz ma 5 pól (limit Discorda)');
@@ -5924,7 +5921,9 @@ async function hostingTest() {
     };
     const cardJson = J({ components: [ticketMessage(g.tickets.hticket, users.c2)] });
     assert(cardJson.includes('hs:confirm') && cardJson.includes('Potwierdź płatność i utwórz serwer'), 'karta ticketu z przyciskiem potwierdzenia');
-    assert(J({ components: [manualPaymentView(g.tickets.hticket.form)] }).includes('Numer BLIK: 123 456 789'), 'dane BLIK z config.json');
+    const blikJson = J({ components: [manualPaymentView(g.tickets.hticket.form)] });
+    assert(blikJson.includes('Numer telefonu do BLIK poda właściciel') && !/\d{3} \d{3} \d{3}/.test(blikJson), 'BLIK: numer podaje właściciel w tickecie');
+    assert(!Object.keys(hostingPayments).some((k) => ['przelew', 'revolut'].includes(k)) && !payments.przelew && !payments.revolut, 'bez przelewu i Revoluta');
     const byClient = interaction('c2', { customId: 'hs:confirm' });
     await routeHosting(byClient);
     assert(J(byClient.replies[0]).includes('Tylko admin'), 'klient nie potwierdzi sam');

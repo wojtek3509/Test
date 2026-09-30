@@ -15,11 +15,6 @@
       "ltc": "",
       "eth": "",
       "sol": ""
-    },
-    "manualPayments": {
-      "blik": "Numer telefonu do BLIK: 000 000 000",
-      "przelew": "Odbiorca: Imię Nazwisko\nNumer konta: 00 0000 0000 0000 0000 0000 0000\nTytuł: nazwa konta Discord",
-      "revolut": "Revtag: @twojrevtag"
     }
   }
 }

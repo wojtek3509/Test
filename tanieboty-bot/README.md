@@ -113,7 +113,7 @@ Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język
 3. Po **2 potwierdzeniach** (LTC, ETH) albo statusie **finalized** (Solana) bot sam zakłada konto w panelu, tworzy serwer (256 MB RAM, 1 GB dysku, 25% CPU) i wysyła klientowi w DM link, login i hasło. Log trafia na `logi-hosting`.
 4. Zła kwota nie jest zaliczana. Takie wpłaty i wygasłe zamówienia sprawdzasz ręcznie w tickecie, a serwer tworzysz komendą `/hosting utworz`.
 
-**⏳ Ręczny (BLIK, przelew, Revolut albo krypto):** otwiera się ticket z danymi do płatności (`manualPayments` w config.json). Po sprawdzeniu wpłaty admin klika **✅ Potwierdź płatność i utwórz serwer**. Bot tworzy serwer, wysyła klientowi dane w DM i prosi o voucha, jak przy „Zrealizowane”. Inny język: tworzysz serwer sam w panelu i przypisujesz go komendą `/hosting dodaj`.
+**⏳ Ręczny (BLIK albo krypto):** otwiera się ticket. Przy BLIK-u numer telefonu podajesz klientowi w tickecie (bot przypomina, żeby nie płacił przed Twoją wiadomością), a przy krypto bot pokazuje adres portfela. Po sprawdzeniu wpłaty admin klika **✅ Potwierdź płatność i utwórz serwer**. Bot tworzy serwer, wysyła klientowi dane w DM i prosi o voucha, jak przy „Zrealizowane”. Inny język: tworzysz serwer sam w panelu i przypisujesz go komendą `/hosting dodaj`.
 
 **Terminy:** 3 dni i 1 dzień przed końcem klient dostaje DM z przyciskiem **Przedłuż**. Po terminie serwer jest **blokowany** (Suspend, pliki zostają). Przedłużenie (automatyczne albo ręczne) **odblokowuje i uruchamia** serwer. Po 7 dniach blokady bot pisze na logach, że serwer można usunąć, ale sam niczego nie usuwa.
 
@@ -140,8 +140,7 @@ Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język
 3. **Klucz Client API** (opcjonalny, do automatycznego startu po odblokowaniu): na koncie administratora Account → API Credentials. Klucz (`ptlc_…`) wpisz w `clientApiKey`.
 4. **Węzeł**: musi być publiczny (Node Visibility: Public) i mieć wolne porty (Allocation). Każdy klient zajmuje jeden port.
 5. **Portfele**: adresy w `wallets.ltc`, `wallets.eth` (ETH i USDC na Ethereum) i `wallets.sol` (SOL i USDC na Solanie). Pusty adres wyłącza daną sieć w zakupie automatycznym.
-6. **Płatności ręczne**: teksty w `manualPayments` (BLIK, przelew, Revolut).
-7. Zrestartuj bota i uruchom `/hosting test`. Wszystko powinno być na zielono.
+6. Zrestartuj bota i uruchom `/hosting test`. Wszystko powinno być na zielono.
 
 `panelUrl` to adres panelu. Jeśli bot działa na tym samym serwerze co panel i `/hosting test` nie łączy się z publicznym IP, wpisz `http://172.18.0.1` (adres hosta widziany z kontenera). Opcjonalnie: `etherscanApiKey` (darmowy klucz Etherscan zamiast Blockscout) i `api` (własne adresy API: `ltc`, `ltcBlockcypher`, `eth`, `ethRpc`, `sol`, `coinbase`, `prices`, `qr`).
 
