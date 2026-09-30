@@ -667,7 +667,7 @@ const box = (color = colors.brand) => new ContainerBuilder().setAccentColor(colo
  * Tytuły z oznaczeniami, linkami albo pogrubieniem zostają zwykłym nagłówkiem (w ramce by się nie wyświetliły).
  */
 function framedTitle(content) {
-  const m = new RegExp(`^### (\\S+) (?:${x} )?([^\\n]+)(\\n[\\s\\S]*)?$`, 'u').exec(content);
+  const m = new RegExp(`^#{2,3} (\\S+) (?:${x} )?([^\\n]+)(\\n[\\s\\S]*)?$`, 'u').exec(content);
   if (!m) return content;
   const [, emoji, head, rest = ''] = m;
   if (/[<`*_[\]]|https?:/.test(head)) return content;
@@ -1231,7 +1231,7 @@ async function onCloseRequest(i) {
     text(
       b,
       [
-        `## 🔒 ${x} Jak zakończyć ticket?`,
+        title('Jak zakończyć ticket?', '🔒'),
         point('**✅ Zrealizowane** — podajesz produkt, cenę i płatność, klient wystawia legit checka, a ticket zamknie się sam.'),
         point('**❌ Niezrealizowane** — ticket zamyka się od razu, transcript trafia do logów.'),
       ].join('\n'),
@@ -1243,7 +1243,7 @@ async function onCloseRequest(i) {
       ),
     );
   } else {
-    text(b, [`## 🔒 ${x} Zamknąć ticket?`, point('Kanał zostanie **usunięty**, a transcript trafi do Ciebie w DM.')].join('\n'));
+    text(b, [title('Zamknąć ticket?', '🔒'), point('Kanał zostanie **usunięty**, a transcript trafi do Ciebie w DM.')].join('\n'));
     b.addActionRowComponents((r) =>
       r.setComponents(new ButtonBuilder().setCustomId('tk:userclose').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger)),
     );
@@ -1325,7 +1325,7 @@ function repRequestView(ticket, lcChannelId) {
   text(
     b,
     [
-      `## ⭐ ${x} Wystaw legit checka`,
+      `### ⭐ ${x} Wystaw legit checka`,
       `<@${ticket.userId}>, dziękujemy za zakup! Wejdź na ${lcChannelId ? `<#${lcChannelId}>` : 'kanał legit checków'} i wyślij:`,
       codeBlock(repTemplate(ticket)),
       `-# 🔒 Ticket zamknie się automatycznie, gdy wyślesz repa. Transcript dostaniesz w DM.`,
@@ -1457,7 +1457,7 @@ async function closeTicket(i, { reason = null, result = 'notdone' } = {}) {
     components: [
       notice(
         [
-          `## 🔒 ${x} Ticket zamykany`,
+          title('Ticket zamykany', '🔒'),
           row('Wynik', resultLabel(result)),
           closerRow({ ...ticket, result, closedBy: i.user.id }),
           reason ? row('Powód', reason) : null,
@@ -2014,7 +2014,7 @@ function hostingListView(recs, heading) {
     .slice(0, 40)
     .map((rec) => `${status(rec)} \`#${rec.id}\` **${rec.name}** • <@${rec.userId}> • do ${ts(rec.expiresAt, 'd')} (${ts(rec.expiresAt)})`);
   const more = recs.length > 40 ? `\n-# …i ${recs.length - 40} więcej` : '';
-  return notice([`## 🖥️ ${x} ${heading} (${recs.length})`, lines.join('\n') || '*Brak serwerów.*'].join('\n') + more);
+  return notice([title(`${heading} (${recs.length})`, '🖥️'), lines.join('\n') || '*Brak serwerów.*'].join('\n') + more);
 }
 
 // ─── Formularze i przyciski hostingu ───────────────────────────────────
@@ -3232,7 +3232,7 @@ function generateConfirmView(userId) {
     b,
     [
       title('Generuj serwer', '🏗️'),
-      `## ⚠️ ${x} Uwaga — tego nie da się cofnąć!`,
+      title('Uwaga — tego nie da się cofnąć!', '⚠️'),
       '>>> ' +
         [
           point('**Usunę wszystkie** obecne kanały i kategorie (razem z wiadomościami).'),
@@ -4049,7 +4049,7 @@ command(
     const { done, failed } = await autoLegitCheck(i.client, i.guild, i.user.id);
     if (!done.length && !failed.length) return i.editReply({ components: [notice(`### ✅ ${x} Brak ticketów czekających na repa.`, colors.success)], flags: V2 });
     const lines = [
-      `## ✅ ${x} Auto LC: ${done.length}`,
+      title(`Auto LC: ${done.length}`, '✅'),
       ...done.map((d) => row(`Ticket ${pad(d.ticket.number)}`, `\`${d.username}\` → ${d.url}`)),
       ...failed.map((f) => row(`❌ Ticket ${pad(f.ticket.number)}`, f.error)),
     ];
@@ -4243,7 +4243,7 @@ command(
         .slice(-25)
         .map((o) => row(`\`${o.id}\` <@${o.userId}>`, `${o.amount} ${cryptoCoins[o.coin].label} • **${o.status}**${o.lastError ? ` • \`${o.lastError.slice(0, 80)}\`` : ''}`));
       return i.reply({
-        components: [notice([`## 🧾 ${x} Zamówienia krypto (${list.length})`, lines.join('\n') || '*Brak aktywnych zamówień.*'].join('\n'))],
+        components: [notice([title(`Zamówienia krypto (${list.length})`, '🧾'), lines.join('\n') || '*Brak aktywnych zamówień.*'].join('\n'))],
         flags: V2_EPHEMERAL,
         allowedMentions: { parse: [] },
       });
@@ -4256,7 +4256,7 @@ command(
     if (sub === 'test') {
       await i.deferReply({ flags: V2_EPHEMERAL });
       const results = await hostingDiagnostics();
-      return i.editReply({ components: [notice([`## 🩺 ${x} Test hostingu`, ...results].join('\n'), results.some((r) => r.startsWith('❌')) ? colors.warning : colors.success)], flags: V2 });
+      return i.editReply({ components: [notice([title('Test hostingu', '🩺'), ...results].join('\n'), results.some((r) => r.startsWith('❌')) ? colors.warning : colors.success)], flags: V2 });
     }
 
     if (!hostingReady()) return replyFail(i, 'Brak konfiguracji panelu: uzupełnij `hosting.panelUrl` i `hosting.apiKey` w config.json i zrestartuj bota.');
@@ -5978,7 +5978,7 @@ async function hostingTest() {
     assert(J(c.replies.at(-1)).includes('Utworzono serwer'), '/hosting utworz');
     c = cmd('lista');
     await commands.get('hosting').execute(c);
-    assert(J(c.replies[0]).includes('SERWERY KLIENTÓW') === false && J(c.replies[0]).includes('Serwery klientów'), '/hosting lista');
+    assert(J(c.replies[0]).includes('TanieBoty × SERWERY KLIENTÓW'), '/hosting lista');
     c = interaction('c1');
     await commands.get('moj-hosting').execute(c);
     assert(J(c.replies[0]).includes(`hs:renew:${GID}:${rec1.id}`) && J(c.replies[0]).includes(`hs:rename:${GID}:${rec1.id}`) && !J(c.replies[0]).includes(`#${s3.id}`), '/moj-hosting: tylko własne serwery, przedłuż i zmień nazwę');
