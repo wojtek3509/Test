@@ -4047,6 +4047,48 @@ command(
   },
 );
 
+// Liczniki, które admin może poprawić ręcznie (np. po testach). [etykieta, odczyt, zapis]
+const editableCounters = {
+  zrealizowane: ['✅ Zrealizowane zamówienia (legit-check→N, „Zrealizowaliśmy już N”)', (g) => g.stats.done, (g, v) => (g.stats.done = v)],
+  legitchecki: ['📝 Legit checki (vouche klientów)', (g) => g.stats.lc, (g, v) => (g.stats.lc = v)],
+  czylegit: ['🤔 Głosy TAK w „Czy legit?” (czy-legit→N)', (g) => g.legitVotes?.yes ?? 0, (g, v) => (g.legitVotes = { ...(g.legitVotes ?? { no: 0 }), yes: v })],
+  tickety: ['🎫 Numer ostatniego ticketu (następny będzie o 1 większy)', (g) => g.counter, (g, v) => (g.counter = v)],
+  otwarte: ['📂 Wszystkie tickety (statystyka)', (g) => g.stats.opened, (g, v) => (g.stats.opened = v)],
+  zamkniete: ['🔒 Zamknięte tickety (statystyka)', (g) => g.stats.closed, (g, v) => (g.stats.closed = v)],
+};
+
+command(
+  new SlashCommandBuilder()
+    .setName('ustaw-licznik')
+    .setDescription('Popraw licznik (np. wyzeruj po testach) — działa od razu, bez edycji plików')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o
+        .setName('licznik')
+        .setDescription('Który licznik')
+        .setRequired(true)
+        .addChoices(...Object.entries(editableCounters).map(([value, [name]]) => ({ name: name.slice(0, 100), value }))),
+    )
+    .addIntegerOption((o) => o.setName('wartosc').setDescription('Nowa wartość (np. 0)').setMinValue(0).setMaxValue(1_000_000).setRequired(true)),
+  async (i) => {
+    const key = i.options.getString('licznik');
+    const value = i.options.getInteger('wartosc');
+    const [label, read, write] = editableCounters[key];
+    const before = read(guild(i.guildId)) ?? 0;
+    updateGuild(i.guildId, (g) => write(g, value));
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    // Panel „Jak napisać voucha” pokazuje liczbę zrealizowanych — odświeżamy go od razu.
+    if (key === 'zrealizowane') await refreshPanel(i.client, i.guildId, 'vouch');
+    // Nazwy kanałów z licznikiem: Discord pozwala je zmienić 2 razy na 10 minut, więc może to chwilę potrwać.
+    updateCounters(i.client).catch(() => {});
+    return i.editReply({
+      components: [ok(`${label}\n\`${before}\` → **\`${value}\`**\n-# Nazwy kanałów z licznikiem zmienią się w ciągu kilku minut (limit Discorda).`)],
+      flags: V2,
+    });
+  },
+);
+
 command(
   new SlashCommandBuilder()
     .setName('statystyki')
@@ -4468,6 +4510,16 @@ function selfTest() {
   ];
   for (const item of built) item.toJSON();
   if (parseDuration('1d 2h 30m') !== 95_400_000) throw new Error('parseDuration');
+  // /ustaw-licznik: każdy licznik da się odczytać i zapisać.
+  const cg = guild('counter-test');
+  for (const [key, [, read, write]] of Object.entries(editableCounters)) {
+    write(cg, 42);
+    if (read(cg) !== 42) throw new Error(`Licznik ${key}`);
+  }
+  if (cg.stats.done !== 42 || cg.legitVotes.yes !== 42 || cg.legitVotes.no !== 0 || cg.counter !== 42) throw new Error('Liczniki w bazie');
+  if (!counterTargets({ ...cg, settings: { lcChannelId: 'lc' }, panels: {} }).some(([id, , n]) => id === 'lc' && n === 42)) throw new Error('legit-check→N = zrealizowane');
+  delete store.guilds['counter-test'];
+
   // Banery wbudowane: plik z grafiki/, własny link ma pierwszeństwo, „brak” wyłącza.
   const bg = guild('banner-test');
   for (const key of Object.keys(bannerFiles)) {
