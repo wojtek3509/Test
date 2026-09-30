@@ -29,7 +29,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 1. Admin klika **Zamknij** i wybiera **✅ Zrealizowane** albo **❌ Niezrealizowane**.
 2. **Zrealizowane** otwiera formularz: nazwa produktu (np. *Bot do exchange*), cena (np. *50 PLN*) i płatność (BLIK, LTC, BTC, PayPal…).
 3. W tickecie pojawia się karta „Zamówienie zrealizowane” z gotowym wzorem repa, np. `+rep @sprzedawca Bot do exchange [ 50 PLN ] [ LTC ]`. Przycisk **📋 Skopiuj wzór** podaje go jako zwykły tekst do skopiowania.
-4. Klient wysyła repa na kanale legit checków (`/setup legitcheck:#kanał`). Rep musi zaczynać się od `+rep`. Na inną wiadomość bot odpowie wzorem i ticket się nie zamknie. Gdy rep jest poprawny, bot:
+4. Klient wysyła repa na kanale legit checków (`/setup legitcheck:#kanał`). Na tym kanale przechodzi **tylko dokładny wzór z ticketu** (wielkość liter i spacje nie mają znaczenia). Każda inna wiadomość, także rep osoby bez ticketu, jest usuwana, a autor dostaje na 15 sekund informację (z poprawnym wzorem, jeśli ma ticket). Admini mogą pisać normalnie. Gdy rep jest poprawny, bot:
    - dodaje reakcję ✅,
    - przenosi panel „Jak napisać voucha?” (wzór i przykłady) na dół kanału,
    - podbija licznik w nazwie kanału,

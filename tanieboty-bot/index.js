@@ -1350,7 +1350,7 @@ function vouchPanel(g, logo) {
       title('Jak napisać voucha?', '✅'),
       '>>> ' +
         [
-          point('Po każdym zakupie napisz na tym kanale **voucha** według wzoru:'),
+          point('Po zrealizowanym zamówieniu dostaniesz w **tickecie** gotowy wzór voucha (przycisk **📋 Skopiuj wzór**). Wklej go tutaj **bez zmian**:'),
           codeBlock('+rep @sprzedawca Co zakupiłeś [ Kwota PLN ] [ Forma płatności ]'),
         ].join('\n'),
     ].join('\n'),
@@ -1362,7 +1362,8 @@ function vouchPanel(g, logo) {
   text(
     b,
     [
-      point('Gdy napiszesz voucha, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
+      point('Gdy wyślesz voucha z ticketu, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
+      point('⚠️ Na tym kanale można wysłać **tylko voucha z ticketu** — inne wiadomości są automatycznie usuwane.'),
       g.settings.reviewChannelId ? point(`Zostaw też opinię na <#${g.settings.reviewChannelId}> ⭐`) : null,
       point(`Zrealizowaliśmy już **${g.stats.done}** zamówień — dziękujemy za zaufanie! 💙`),
     ]
@@ -1398,50 +1399,65 @@ async function onDoneSubmit(i) {
   await i.reply({ components: [repRequestView(updated, g.settings.lcChannelId)], flags: V2, allowedMentions: { users: [updated.userId] } });
 }
 
-/**
- * Czy wiadomość jest vouchem: musi zaczynać się od „+rep”.
- * Bez „Message Content Intent” bot nie widzi treści — wtedy vouch musi kogoś oznaczać.
- */
-function isRep(message) {
-  if (!messageContentOn) return message.mentions.users.size > 0;
-  return /^\s*\+\s*rep\b/i.test(message.content);
+// Kanał legit checków przyjmuje tylko vouche z ticketów (dokładny wzór z karty „Zamówienie zrealizowane”).
+// Każda inna wiadomość jest usuwana. Admini, bot i webhook /autolc mogą pisać normalnie.
+const normalizeRep = (text) =>
+  String(text ?? '')
+    .replace(/<@!(\w+)>/g, '<@$1>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+/** Czy wiadomość to vouch z ticketu. Bez „Message Content Intent” bot nie widzi treści — wtedy wystarczy oznaczenie sprzedawcy. */
+function matchesTicketRep(message, ticket) {
+  if (!messageContentOn) return message.mentions.users.has(ticket.deal.sellerId);
+  return normalizeRep(message.content) === normalizeRep(repTemplate(ticket));
 }
 
-/** Wiadomość na kanale legit checków: vouch → ✅, licznik, zamknięcie ticketu klienta, panel na dół. */
+/** Usuwa wiadomość i na chwilę pokazuje autorowi, dlaczego. */
+async function rejectLcMessage(message, content) {
+  await message.delete().catch(() => {});
+  const warning = await message.channel
+    .send({ components: [notice(content, colors.warning)], flags: V2, allowedMentions: { users: [message.author.id] } })
+    .catch(() => null);
+  setTimeout(() => warning?.delete().catch(() => {}), 15_000);
+}
+
+/** Wiadomość na kanale legit checków: vouch z ticketu → ✅, licznik, zamknięcie ticketu, panel na dół. Reszta jest usuwana. */
 async function onLegitCheckMessage(message) {
   const g = guild(message.guild.id);
   // Wiadomości botów i webhooków (np. /autolc) pomijamy.
   if (message.channelId !== g.settings.lcChannelId || message.author.bot || message.webhookId) return false;
-  const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id);
+  // Admini mogą pisać na kanale (np. ogłoszenia) — ich wiadomości nie są liczone jako vouche.
+  if (isStaff(message.member, g.settings)) return true;
+  const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id && t.deal);
 
-  if (!isRep(message)) {
-    // Podpowiedź tylko dla klienta, który ma czekający ticket — reszta wiadomości zostaje bez odpowiedzi.
-    if (!ticket) return true;
-    const hint = await message
-      .reply({
-        components: [notice(`### ⚠️ ${x} To nie jest poprawny vouch\nVouch musi zaczynać się od **+rep**. Twój wzór:\n${codeBlock(repTemplate(ticket))}`, colors.warning)],
-        flags: V2,
-        allowedMentions: { parse: [] },
-      })
-      .catch(() => null);
-    setTimeout(() => hint?.delete().catch(() => {}), 20_000);
+  if (!ticket) {
+    await rejectLcMessage(
+      message,
+      `### 🚫 ${x} Tylko vouche z ticketów\n<@${message.author.id}>, na tym kanale można wysłać **wyłącznie voucha z ticketu** po zrealizowanym zamówieniu. Twoja wiadomość została usunięta.`,
+    );
+    return true;
+  }
+  if (!matchesTicketRep(message, ticket)) {
+    await rejectLcMessage(
+      message,
+      `### ⚠️ ${x} To nie jest poprawny vouch\n<@${message.author.id}>, wyślij **dokładnie** wzór z Twojego ticketu (przycisk „📋 Skopiuj wzór”):\n${codeBlock(repTemplate(ticket))}`,
+    );
     return true;
   }
 
   await message.react('✅').catch(() => {});
-
-  if (ticket) {
-    updateGuild(message.guild.id, (gg) => {
-      Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url, lcMessageId: message.id });
-      gg.stats.lc++;
-    });
-    const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
-    if (channel) {
-      await channel
-        .send({ components: [notice(`### ✅ ${x} Vouch otrzymany!\nDziękujemy <@${ticket.userId}>! ${message.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
-        .catch(() => {});
-      await finalizeTicket(message.client, message.guild, channel, { closedBy: null, result: 'done' });
-    }
+  updateGuild(message.guild.id, (gg) => {
+    Object.assign(gg.tickets[ticket.channelId], { awaitingRep: false, lcUrl: message.url, lcMessageId: message.id });
+    gg.stats.lc++;
+  });
+  const channel = await message.guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (channel) {
+    await channel
+      .send({ components: [notice(`### ✅ ${x} Vouch otrzymany!\nDziękujemy <@${ticket.userId}>! ${message.url}\n-# Ticket zamyka się…`, colors.success)], flags: V2 })
+      .catch(() => {});
+    await finalizeTicket(message.client, message.guild, channel, { closedBy: null, result: 'done' });
   }
   await movePanelToBottom(message.client, message.guild.id, 'vouch', message.channel);
   return true;
@@ -4854,9 +4870,13 @@ async function flowTest() {
     mentions: { users: { has: (id) => mentions.includes(id), size: mentions.length } },
     channel: channels[LC_CH],
     client: fakeClient,
+    member: member(authorId, authorId === STAFF),
     react: async (e) => log.push(['react', e]),
     reply: async (p) => (log.push(['lcreply', p]), { delete: async () => {} }),
+    delete: async () => log.push(['lc-delete', authorId, content]),
   });
+  const lcDeleted = () => log.filter(([type]) => type === 'lc-delete');
+  const lcWarnings = () => log.filter(([type, id, p]) => type === 'send' && id === LC_CH && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('TanieBoty ×') && !JSON.stringify(p.components[0].toJSON()).includes('JAK NAPISAĆ'));
 
   // 6. Wiadomość innej osoby na LC → nic.
   channels[LC_CH].guild = fakeGuild;
@@ -4864,6 +4884,8 @@ async function flowTest() {
   await onLegitCheckMessage(Object.assign(lcMessage('ktos', `+rep <@${STAFF}> Bot [ 10 PLN ] [ BLIK ]`, [STAFF]), { channel: channels[LC_CH] }));
   await panelQueues.get(GID);
   assert(!getTicket(GID, TICKET_CH).closedAt, 'vouch innej osoby nie zamyka ticketu');
+  assert(lcDeleted().some(([, id]) => id === 'ktos'), 'vouch bez ticketu usunięty');
+  assert(JSON.stringify(lcWarnings().at(-1)[2].components[0].toJSON()).includes('TYLKO VOUCHE Z TICKETÓW'), 'informacja: tylko vouche z ticketów');
   assert(g.stats.lc === 0 && g.stats.done === 0, 'vouch osoby bez ticketu nie zmienia licznika (liczą się zrealizowane zamówienia)');
 
   // 7. Klient pisze coś innego niż rep → podpowiedź, ticket otwarty.
@@ -4872,11 +4894,19 @@ async function flowTest() {
   assert(!getTicket(GID, TICKET_CH).closedAt, 'zwykła wiadomość nie zamyka ticketu');
   await onLegitCheckMessage(lcMessage(CLIENT, 'polecam', [STAFF]));
   assert(!getTicket(GID, TICKET_CH).closedAt, 'bez „+rep” ticket się nie zamyka');
-  assert(log.some(([type]) => type === 'lcreply'), 'bot podpowiada poprawny wzór');
+  await onLegitCheckMessage(lcMessage(CLIENT, `+rep <@${STAFF}> Bot do exchange [ 10 PLN ] [ LTC ]`, [STAFF]));
+  assert(!getTicket(GID, TICKET_CH).closedAt, 'rep z inną ceną nie zamyka ticketu');
+  assert(lcDeleted().filter(([, id]) => id === CLIENT).length === 3, 'wiadomości inne niż wzór z ticketu są usuwane');
+  const wrongWarn = JSON.stringify(lcWarnings().at(-1)[2].components[0].toJSON());
+  assert(wrongWarn.includes('TO NIE JEST POPRAWNY VOUCH') && wrongWarn.includes('Bot do exchange [ 50 PLN ] [ LTC ]'), 'bot pokazuje poprawny wzór z ticketu');
+  // Admin może pisać na kanale (np. ogłoszenie) — bez usuwania i bez liczenia.
+  const deletedBefore = lcDeleted().length;
+  await onLegitCheckMessage(lcMessage(STAFF, 'Ogłoszenie: vouche tylko z ticketów!', []));
+  assert(lcDeleted().length === deletedBefore && g.stats.lc === 0, 'wiadomość admina zostaje i nie jest liczona');
 
   // 8. Poprawny rep → reakcja, karta LC, zamknięcie, logi, DM.
   const before = log.length;
-  await onLegitCheckMessage(lcMessage(CLIENT, `+rep <@${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]`, [STAFF]));
+  await onLegitCheckMessage(lcMessage(CLIENT, `  +REP   <@!${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]  `, [STAFF]));
   await panelQueues.get(GID);
   t = getTicket(GID, TICKET_CH);
   assert(t.closedAt && t.result === 'done' && !t.awaitingRep && t.lcUrl, 'poprawny rep zamyka ticket jako zrealizowany');
@@ -4948,7 +4978,7 @@ async function flowTest() {
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;
-  assert(isRep({ content: '', mentions: { users: { size: 1 } } }), 'bez intentu: oznaczenie kogoś wystarcza');
+  assert(matchesTicketRep({ content: '', mentions: { users: { has: (id) => id === STAFF } } }, { deal: { sellerId: STAFF } }), 'bez intentu: oznaczenie sprzedawcy wystarcza');
   messageContentOn = true;
 
   // 10. „Czy legit?” — ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
