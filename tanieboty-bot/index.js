@@ -1,6 +1,7 @@
 // TanieBoty — bot Discord dla sklepu z botami, cały w jednym pliku (Components V2).
 // Uruchomienie: npm install && node index.js   (sprawdzenie offline: node index.js --check)
 import 'dotenv/config';
+import { spawnSync } from 'node:child_process';
 import { randomBytes, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -466,7 +467,7 @@ const serverLayout = {
 //   statystyki.json, panele.json, hosting.json.
 // Nie edytuj ich, gdy bot działa — przy następnym zapisie bot nadpisze zmiany (najpierw Stop, potem edycja, potem Start).
 
-let dataDir = join(dirname(fileURLToPath(import.meta.url)), 'data');
+let dataDir = process.env.TANIEBOTY_DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), 'data');
 const dataFiles = {
   'ustawienia.json': ['settings'],
   'tickety.json': ['tickets', 'counter'],
@@ -512,10 +513,16 @@ function loadStore() {
   return loaded;
 }
 
+// saveTimer musi istnieć przed loadStore() — przeniesienie starego db.json od razu zapisuje pliki (flush).
+let saveTimer = null;
 let store = { guilds: {} };
 store = loadStore();
+// Tylko do testu startu (node index.js --tylko-baza): wczytaj/przenieś bazę i zakończ.
+if (process.argv.includes('--tylko-baza')) {
+  console.log(`BAZA OK: ${Object.keys(store.guilds).length} serwer(ów)`);
+  process.exit(0);
+}
 
-let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 250);
@@ -5194,6 +5201,22 @@ function databaseTest() {
     assert(reloaded.guilds[GID].reviews.length === 2, 'nowa opinia zapisana');
     mkdirSync(join(tmp, 'kopie'), { recursive: true });
     assert(Object.keys(loadStore().guilds).length === 1, 'inne foldery w data/ są pomijane');
+
+    // 3. Prawdziwy start bota (osobny proces) ze starym db.json — przeniesienie przy starcie nie może się wysypać.
+    const startDir = join(tmp, 'start');
+    mkdirSync(startDir);
+    writeFileSync(join(startDir, 'db.json'), JSON.stringify(old));
+    const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--tylko-baza'], {
+      env: { ...process.env, TANIEBOTY_DATA_DIR: startDir },
+      encoding: 'utf8',
+    });
+    assert(run.status === 0 && run.stdout.includes('BAZA OK: 1'), `start z przeniesieniem bazy: ${run.stderr || run.stdout}`);
+    assert(existsSync(join(startDir, GID, 'opinie.json')) && existsSync(join(startDir, 'db.json.stary')), 'start: pliki utworzone, db.json.stary zachowany');
+    const again = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--tylko-baza'], {
+      env: { ...process.env, TANIEBOTY_DATA_DIR: startDir },
+      encoding: 'utf8',
+    });
+    assert(again.status === 0 && again.stdout.includes('BAZA OK: 1'), 'drugi start: odczyt z nowych plików');
   } finally {
     console.log = log;
     dataDir = savedDir;
