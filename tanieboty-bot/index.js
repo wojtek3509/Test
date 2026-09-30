@@ -1432,8 +1432,7 @@ async function onLegitCheckMessage(message) {
   const g = guild(message.guild.id);
   // Wiadomości botów i webhooków (np. /autolc) pomijamy.
   if (message.channelId !== g.settings.lcChannelId || message.author.bot || message.webhookId) return false;
-  // Admini mogą pisać na kanale (np. ogłoszenia) — ich wiadomości nie są liczone jako vouche.
-  if (isStaff(message.member, g.settings)) return true;
+  // Na kanale zostają tylko vouche z ticketów — wiadomości adminów też są usuwane.
   const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id && t.deal);
 
   if (!ticket) {
@@ -4957,10 +4956,10 @@ async function flowTest() {
   assert(lcDeleted().filter(([, id]) => id === CLIENT).length === 3, 'wiadomości inne niż wzór z ticketu są usuwane');
   const wrongWarn = JSON.stringify(lcWarnings().at(-1)[2].components[0].toJSON());
   assert(wrongWarn.includes('TO NIE JEST POPRAWNY VOUCH') && wrongWarn.includes('Bot do exchange [ 50 PLN ] [ LTC ]'), 'bot pokazuje poprawny wzór z ticketu');
-  // Admin może pisać na kanale (np. ogłoszenie) — bez usuwania i bez liczenia.
+  // Admin też nie może pisać niczego poza vouchem — wiadomość jest usuwana i nie jest liczona.
   const deletedBefore = lcDeleted().length;
-  await onLegitCheckMessage(lcMessage(STAFF, 'Ogłoszenie: vouche tylko z ticketów!', []));
-  assert(lcDeleted().length === deletedBefore && g.stats.lc === 0, 'wiadomość admina zostaje i nie jest liczona');
+  await onLegitCheckMessage(lcMessage(STAFF, '+', []));
+  assert(lcDeleted().length === deletedBefore + 1 && g.stats.lc === 0, 'wiadomość admina usunięta i nie liczona');
 
   // 8. Poprawny rep → reakcja, karta LC, zamknięcie, logi, DM.
   const before = log.length;
