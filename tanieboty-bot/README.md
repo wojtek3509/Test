@@ -145,6 +145,6 @@ Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język
 5. **Portfele**: adresy w `wallets.ltc`, `wallets.eth` (ETH i USDC na Ethereum) i `wallets.sol` (SOL i USDC na Solanie). Pusty adres wyłącza daną sieć w zakupie automatycznym.
 6. Zrestartuj bota i uruchom `/hosting test`. Wszystko powinno być na zielono.
 
-`panelUrl` to adres panelu. Jeśli bot działa na tym samym serwerze co panel i `/hosting test` nie łączy się z publicznym IP, wpisz `http://172.18.0.1` (adres hosta widziany z kontenera). Opcjonalnie: `etherscanApiKey` (darmowy klucz Etherscan zamiast Blockscout) i `api` (własne adresy API: `ltc`, `ltcBlockcypher`, `eth`, `ethRpc`, `sol`, `coinbase`, `prices`, `qr`).
+`panelUrl` to adres panelu. Jeśli bot działa na tym samym serwerze co panel i `/hosting test` nie łączy się z publicznym IP, wpisz `http://172.18.0.1` (adres hosta widziany z kontenera). Solana: bot sam przełącza się między `api.mainnet-beta.solana.com`, `solana-rpc.publicnode.com` i `solana.drpc.org`. Możesz podać własny serwer w `solRpc` (np. darmowy klucz z Helius). Opcjonalnie: `etherscanApiKey` (darmowy klucz Etherscan zamiast Blockscout) i `api` (własne adresy API: `ltc`, `ltcBlockcypher`, `eth`, `ethRpc`, `sol`, `coinbase`, `prices`, `qr`).
 
 Klucze API i config.json trzymaj tylko na swoim serwerze bota. Nie dawaj klientom dostępu do tego serwera.

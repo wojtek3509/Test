@@ -1517,6 +1517,8 @@ const hostingApi = () => ({
   eth: 'https://eth.blockscout.com/api',
   ethRpc: 'https://ethereum-rpc.publicnode.com',
   sol: 'https://api.mainnet-beta.solana.com',
+  // Zapasowe serwery Solany — publiczny serwer często ogranicza zapytania z serwerów w centrach danych.
+  solFallbacks: ['https://solana-rpc.publicnode.com', 'https://solana.drpc.org'],
   coinbase: 'https://api.coinbase.com/v2/exchange-rates',
   prices: 'https://api.coingecko.com/api/v3/simple/price',
   qr: 'https://api.qrserver.com/v1/create-qr-code/',
@@ -1548,7 +1550,14 @@ async function getJson(url, init = {}) {
   // Część serwisów (np. CloudFront) odrzuca zapytania bez nagłówka User-Agent.
   const headers = { 'User-Agent': `${brand.name}-bot/1.0`, Accept: 'application/json', ...init.headers };
   const { timeout = 20_000, ...rest } = init;
-  const res = await httpFetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeout) });
+  let res;
+  try {
+    res = await httpFetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeout) });
+  } catch (err) {
+    // „fetch failed” nic nie mówi — podajemy adres i przyczynę (np. ECONNREFUSED, ENOTFOUND, timeout).
+    const cause = err?.name === 'TimeoutError' || /timeout/i.test(err?.message) ? 'brak odpowiedzi (timeout)' : err?.cause?.code || err?.cause?.message || err?.message;
+    throw Object.assign(new Error(`${new URL(url).host}: ${cause}`), { network: true });
+  }
   const raw = await res.text();
   let data = null;
   try {
@@ -2516,14 +2525,28 @@ async function scanEth(wallet, coins, since) {
   return out;
 }
 
+// Serwer Solany, który ostatnio odpowiadał (bot zaczyna od niego).
+let solEndpoint = null;
+const solEndpoints = () => [...new Set([hostingConfig.solRpc, solEndpoint, hostingApi().sol, ...(hostingApi().solFallbacks ?? [])].filter(Boolean))];
+
 async function solRpc(method, params) {
-  const d = await getJson(hostingApi().sol, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  if (d?.error) throw new Error(`Solana RPC: ${d.error.message}`);
-  return d?.result;
+  const errors = [];
+  for (const url of solEndpoints()) {
+    try {
+      const d = await getJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        timeout: 12_000,
+      });
+      if (d?.error) throw new Error(`${new URL(url).host}: ${d.error.message}`);
+      solEndpoint = url;
+      return d?.result;
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  throw new Error(`Solana: ${errors.join(' | ')}`);
 }
 
 /** Ile SOL i USDC (w najmniejszych jednostkach) dostał portfel w transakcji. */
@@ -2807,7 +2830,7 @@ async function hostingDiagnostics() {
       if (!formats[chain].test(wallet)) throw new Error(`adres \`${wallet}\` nie wygląda na adres ${chain.toUpperCase()}`);
       const coins = new Set(Object.keys(cryptoCoins).filter((k) => cryptoCoins[k].chain === chain));
       const txs = await scanChain(chain, wallet, coins, Date.now() - 30 * DAY);
-      return `\`${wallet}\` • wpłat z 30 dni: ${txs.length}${chain === 'ltc' ? ` • źródło: ${ltcSources[ltcSource].name}` : ''}`;
+      return `\`${wallet}\` • wpłat z 30 dni: ${txs.length}${chain === 'ltc' ? ` • źródło: ${ltcSources[ltcSource].name}` : ''}${chain === 'sol' && solEndpoint ? ` • źródło: ${new URL(solEndpoint).host}` : ''}`;
     });
   }
   return out;
@@ -5647,6 +5670,7 @@ async function hostingTest() {
   priceCache = { at: 0, data: {} };
   solTxCache.clear();
   solTokenAccounts = { at: 0, wallet: '', list: [] };
+  solEndpoint = null;
 
   // ── Symulowany panel Pterodactyl ──
   const panel = { users: [], servers: [], calls: [], power: [] };
@@ -5735,7 +5759,7 @@ async function hostingTest() {
   }
 
   // ── Symulowane blockchainy ──
-  const chain = { coinbaseDown: false, geckoDown: true, ltcSpaceDown: false, ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
+  const chain = { coinbaseDown: false, geckoDown: true, ltcSpaceDown: false, solMainDown: false, ltcTip: 3_000_000, ltcTxs: [], ethTxs: [], ethInternal: [], ethTokens: [], ethBlock: 20_000_000, solSigs: {}, solTxs: {} };
   function chainRoute(url, init) {
     assert(init.headers?.['User-Agent'], 'nagłówek User-Agent');
     // Coinbase blokuje (jak CoinGecko na niektórych serwerach) → kursy z zapasowego źródła; potem Coinbase działa.
@@ -5774,7 +5798,8 @@ async function hostingTest() {
       return [200, list.length ? { status: '1', message: 'OK', result: list } : { status: '0', message: 'No transactions found', result: [] }];
     }
     if (url === 'https://ethereum-rpc.publicnode.com') return [200, { jsonrpc: '2.0', id: 1, result: `0x${chain.ethBlock.toString(16)}` }];
-    if (url === 'https://api.mainnet-beta.solana.com') {
+    if (url === 'https://api.mainnet-beta.solana.com' && chain.solMainDown) throw new TypeError('fetch failed');
+    if (url === 'https://api.mainnet-beta.solana.com' || url === 'https://solana-rpc.publicnode.com') {
       const { method, params } = JSON.parse(init.body);
       if (method === 'getTokenAccountsByOwner') return [200, { result: { value: [{ pubkey: SOL_ATA }] } }];
       if (method === 'getSignaturesForAddress') return [200, { result: chain.solSigs[params[0]] ?? [] }];
@@ -6022,9 +6047,14 @@ async function hostingTest() {
     };
     await tick();
     assert(order.status === 'seen' && order.confirmations === 1, 'SOL confirmed → czekamy na finalized');
+    // Publiczny serwer Solany przestaje odpowiadać (jak na serwerze Wojtka) → bot przełącza się na zapasowy.
+    chain.solMainDown = true;
+    const netErr = await getJson('https://api.mainnet-beta.solana.com').catch((err) => err.message);
+    assert(netErr.startsWith('api.mainnet-beta.solana.com:'), `błąd sieci z adresem serwera (${netErr})`);
     chain.solSigs[SOL][0].confirmationStatus = 'finalized';
     await tick();
     assert(order.status === 'done', 'SOL finalized → serwer (istniejące konto w panelu)');
+    assert(solEndpoint === 'https://solana-rpc.publicnode.com', `Solana: przełączenie na zapasowy serwer (${solEndpoint})`);
     assert(dms.filter(([id, p]) => id === 'c3' && J(p).includes('to samo, co do Twojego konta')).length === 1, 'istniejące konto: bez nowego hasła');
 
     await purchase('c2', form({ payment: 'usdc_sol', lang: 'nodejs' }));
