@@ -21,6 +21,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 🤖 Auto LC | `/autolc` | Za każdego klienta, który po „Zrealizowane” nie napisał repa, bot wysyła voucha przez webhook z nazwą konta klienta i dopiskiem `[AUTO LC]` (z jego avatarem), zamyka ticket i wysyła log. |
 | 🗄️ Spójność bazy | automatycznie | Usunięta opinia znika z bazy i ze średnich. Usunięty konkurs zostaje anulowany. Usunięty panel „czy legit” zeruje głosy. Ręcznie usunięty kanał ticketu zamyka ticket w bazie (z informacją w logach). Liczba vouchy (`legit-check→N`) = liczba zrealizowanych zamówień. |
 | 📈 Statystyki | `/statystyki`, `/ustaw-licznik` | Tickety, opinie i konkursy. `/ustaw-licznik` poprawia liczniki (zrealizowane, legit checki, czy legit, numer ticketu) bez edycji plików, np. zeruje je po testach. |
+| 🔒 Weryfikacja | `/weryfikacja tryb:Włącz` (albo `/generuj`) | Nowa osoba widzi tylko **witamy**, **zaproszenia** i **regulamin**. Reszta kanałów pojawia się po kliknięciu **Akceptuję regulamin** (rola ✅ Zweryfikowany). Kanały prywatne (tickety, administracja) zostają bez zmian. Opcja `nadaj-obecnym:True` daje rolę osobom, które już są na serwerze. |
 | 🖥️ Hosting | `/panel typ:cennik` + `config.json → hosting` | Sprzedaż hostingu botów na Twoim panelu Pterodactyl: zakup automatyczny za krypto (serwer tworzy się sam), zakup ręczny w tickecie, przypomnienia, blokada po terminie i przedłużanie. Szczegóły niżej. |
 
 ## Zamykanie ticketu i legit check

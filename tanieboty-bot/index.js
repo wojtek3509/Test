@@ -380,6 +380,7 @@ const counterNames = {
 // mode: 'readonly' = tylko czytanie (piszą Administracja i Admin), 'reactions' = bez pisania, z reakcjami,
 //       'open' = wszyscy piszą, 'voice' = kanał głosowy.
 // counter: nazwa z licznikiem z counterNames. panel: panel wysyłany na kanał. setting: pole w /setup.
+// gate: widoczne od razu po wejściu. Reszta publicznych kanałów jest widoczna dopiero po akceptacji regulaminu (rola ✅ Zweryfikowany).
 const serverLayout = {
   categoryName: (emoji, name) => `━━ ${emoji} ${name} ━━`,
   channelName: (emoji, name) => `${emoji}┃${name}`,
@@ -393,6 +394,7 @@ const serverLayout = {
     {
       emoji: '👋',
       name: 'WITAMY',
+      gate: true, // widoczne od razu (przed akceptacją regulaminu)
       channels: [
         { emoji: '👋', name: 'witamy', mode: 'readonly', setting: 'welcomeChannelId' },
         { emoji: '📩', name: 'zaproszenia', mode: 'readonly', setting: 'invitesChannelId' },
@@ -402,7 +404,7 @@ const serverLayout = {
       emoji: '📌',
       name: 'WAŻNE',
       channels: [
-        { emoji: '📜', name: 'regulamin', mode: 'readonly', panel: 'regulamin' },
+        { emoji: '📜', name: 'regulamin', mode: 'readonly', panel: 'regulamin', gate: true },
         { emoji: '📢', name: 'ogłoszenia', mode: 'readonly' },
         { emoji: '💰', name: 'cennik', mode: 'readonly', panel: 'cennik' },
         { emoji: '🎉', name: 'konkursy', mode: 'readonly' },
@@ -3204,17 +3206,25 @@ const F = PermissionFlagsBits;
 const botAllow = [F.ViewChannel, F.SendMessages, F.ReadMessageHistory, F.EmbedLinks, F.AttachFiles, F.AddReactions, F.ManageChannels, F.ManageMessages];
 const writeFlags = [F.SendMessages, F.SendMessagesInThreads, F.CreatePublicThreads, F.CreatePrivateThreads];
 
-/** Uprawnienia kanału: prywatna kategoria + tryb kanału. */
-function layoutOverwrites(discordGuild, roles, botId, { isPrivate, mode }) {
+/**
+ * Uprawnienia kanału: prywatna kategoria + tryb kanału.
+ * Publiczne kanały (poza „gate”: witamy, zaproszenia, regulamin) widzi tylko rola po akceptacji regulaminu.
+ */
+function layoutOverwrites(discordGuild, roles, botId, { isPrivate, mode, gate }) {
   const everyone = { id: discordGuild.roles.everyone.id, allow: [], deny: [] };
   const team = [roles.admin.id, roles.staff.id].map((id) => ({ id, allow: [F.ViewChannel, F.SendMessages, F.ReadMessageHistory, F.AddReactions] }));
+  const extra = [];
   if (isPrivate) everyone.deny.push(F.ViewChannel);
+  else if (!gate) {
+    everyone.deny.push(F.ViewChannel);
+    extra.push({ id: roles.verified.id, allow: [F.ViewChannel] });
+  }
   if (mode === 'readonly') everyone.deny.push(...writeFlags);
   if (mode === 'reactions') {
     everyone.deny.push(...writeFlags);
     everyone.allow.push(F.AddReactions);
   }
-  return [everyone, ...team, { id: botId, allow: botAllow }];
+  return [everyone, ...team, ...extra, { id: botId, allow: botAllow }];
 }
 
 function layoutChannelName(ch, g) {
@@ -3324,7 +3334,7 @@ async function generateServer(client, discordGuild, invokerId) {
     const category = await discordGuild.channels.create({
       name: serverLayout.categoryName(cat.emoji, cat.name),
       type: ChannelType.GuildCategory,
-      permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: 'open' }),
+      permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: 'open', gate: cat.gate || cat.channels.some((c) => c.gate) }),
       reason: '/generuj',
     });
     report.categories++;
@@ -3335,7 +3345,7 @@ async function generateServer(client, discordGuild, invokerId) {
         name: layoutChannelName(ch, guild(discordGuild.id)),
         type: ch.mode === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
         parent: category.id,
-        permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: ch.mode }),
+        permissionOverwrites: layoutOverwrites(discordGuild, roles, botId, { isPrivate: cat.private, mode: ch.mode, gate: cat.gate || ch.gate }),
         reason: '/generuj',
       });
       report.channels++;
@@ -4126,6 +4136,107 @@ command(
       logoOf(i.guild, i.client),
     );
     return i.reply({ components: [b], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+  },
+);
+
+/**
+ * Kanały widoczne dopiero po akceptacji regulaminu. Zawsze widać: powitania, zaproszenia i regulamin.
+ * Kanały prywatne (tickety, administracja) zostają bez zmian. Zwraca raport.
+ */
+async function applyVerificationGate(discordGuild, enable, { giveExisting = false } = {}) {
+  const g = guild(discordGuild.id);
+  const { settings } = g;
+  const roleId = settings.rulesRoleId;
+  const everyoneId = discordGuild.roles.everyone.id;
+  const gateIds = new Set([settings.welcomeChannelId, settings.invitesChannelId, g.panels.regulamin?.channelId].filter(Boolean));
+  const report = { hidden: 0, gate: 0, shown: 0, skipped: 0, members: 0, errors: [] };
+  const channels = [...(await discordGuild.channels.fetch()).values()].filter((ch) => ch && !ch.isThread?.());
+  // Kategoria z kanałem „gate” (np. WITAMY) zostaje widoczna.
+  const gateParents = new Set(channels.filter((ch) => gateIds.has(ch.id)).map((ch) => ch.parentId));
+  const team = [settings.staffRoleId, discordGuild.members.me?.id].filter(Boolean);
+
+  for (const ch of channels) {
+    const everyoneOw = ch.permissionOverwrites.cache.get(everyoneId);
+    const roleOw = ch.permissionOverwrites.cache.get(roleId);
+    const hiddenForAll = everyoneOw?.deny.has(F.ViewChannel);
+    const gatedByUs = hiddenForAll && roleOw?.allow.has(F.ViewChannel);
+    const isGate = gateIds.has(ch.id) || (ch.type === ChannelType.GuildCategory && gateParents.has(ch.id));
+    try {
+      if (!enable) {
+        if (!gatedByUs) continue;
+        await ch.permissionOverwrites.edit(everyoneId, { ViewChannel: null }, { reason: 'Weryfikacja wyłączona' });
+        report.shown++;
+        continue;
+      }
+      // Prywatne (tickety, administracja) — ukryte przed wszystkimi i bez roli po regulaminie.
+      if (hiddenForAll && !gatedByUs) {
+        report.skipped++;
+        continue;
+      }
+      if (isGate) {
+        await ch.permissionOverwrites.edit(everyoneId, { ViewChannel: true }, { reason: 'Weryfikacja: widoczne przed regulaminem' });
+        report.gate++;
+        continue;
+      }
+      await ch.permissionOverwrites.edit(roleId, { ViewChannel: true }, { reason: 'Weryfikacja: widoczne po regulaminie' });
+      for (const id of team) await ch.permissionOverwrites.edit(id, { ViewChannel: true }, { reason: 'Weryfikacja' });
+      await ch.permissionOverwrites.edit(everyoneId, { ViewChannel: false }, { reason: 'Weryfikacja: ukryte przed regulaminem' });
+      report.hidden++;
+    } catch (err) {
+      report.errors.push(`${ch.name}: ${err.message}`);
+    }
+  }
+
+  if (enable && giveExisting) {
+    const members = await discordGuild.members.fetch();
+    for (const member of members.values()) {
+      if (member.user.bot || member.roles.cache.has(roleId)) continue;
+      await member.roles
+        .add(roleId, 'Weryfikacja: obecni członkowie')
+        .then(() => report.members++)
+        .catch((err) => report.errors.push(`${member.user.tag}: ${err.message}`));
+    }
+  }
+  updateGuild(discordGuild.id, (gg) => (gg.settings.verificationGate = enable));
+  return report;
+}
+
+command(
+  new SlashCommandBuilder()
+    .setName('weryfikacja')
+    .setDescription('Kanały widoczne dopiero po akceptacji regulaminu (od razu widać: witamy, zaproszenia, regulamin)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o
+        .setName('tryb')
+        .setDescription('Włącz albo wyłącz')
+        .setRequired(true)
+        .addChoices({ name: '🔒 Włącz — reszta kanałów po akceptacji regulaminu', value: 'on' }, { name: '🔓 Wyłącz — wszystkie kanały widoczne od razu', value: 'off' }),
+    )
+    .addBooleanOption((o) => o.setName('nadaj-obecnym').setDescription('Daj rolę po regulaminie wszystkim obecnym członkom (żeby nic nie stracili)')),
+  async (i) => {
+    const { settings } = guild(i.guildId);
+    const enable = i.options.getString('tryb') === 'on';
+    if (!settings.rulesRoleId) return replyFail(i, 'Najpierw ustaw rolę za regulamin: `/setup … rola-regulamin:@✅ Zweryfikowany`.');
+    if (enable && !guild(i.guildId).panels.regulamin) return replyFail(i, 'Najpierw wyślij panel regulaminu: `/panel typ:regulamin` — bez niego nikt nie zaakceptuje regulaminu.');
+    if (!i.guild.members.me?.permissions.has(PermissionFlagsBits.Administrator)) return replyFail(i, 'Bot potrzebuje uprawnień **Administratora**, żeby zmieniać uprawnienia kanałów i nadawać role.');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const r = await applyVerificationGate(i.guild, enable, { giveExisting: i.options.getBoolean('nadaj-obecnym') ?? false });
+    const lines = enable
+      ? [
+          row('👀 Widoczne od razu', `\`${r.gate}\` (witamy, zaproszenia, regulamin)`),
+          row('🔒 Widoczne po regulaminie', `\`${r.hidden}\``),
+          row('🛡️ Prywatne (bez zmian)', `\`${r.skipped}\``),
+          i.options.getBoolean('nadaj-obecnym') ? row('✅ Rola dla obecnych członków', `\`${r.members}\``) : null,
+        ]
+      : [row('🔓 Znów widoczne dla wszystkich', `\`${r.shown}\``)];
+    if (r.errors.length) lines.push('', `⚠️ Błędy (${r.errors.length}):`, ...r.errors.slice(0, 8).map((e) => `- ${e}`));
+    return i.editReply({
+      components: [notice([title(enable ? 'Weryfikacja włączona' : 'Weryfikacja wyłączona', enable ? '🔒' : '🔓'), '>>> ' + lines.filter((l) => l !== null).join('\n')].join('\n'), r.errors.length ? colors.warning : colors.success)],
+      flags: V2,
+      allowedMentions: { parse: [] },
+    });
   },
 );
 
@@ -4995,7 +5106,16 @@ async function generatorTest() {
   const everyoneDeny = (ch) => ch.permissionOverwrites.find((o) => o.id === 'everyone').deny;
   assert(['💻┃logi-boty', '🖥️┃logi-hosting', '🧾┃logi-zakupy', '❓┃logi-pytania', '🤝┃logi-współpraca'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '5 kanałów logów ukrytych przed wszystkimi');
   assert(['━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━'].every((n) => everyoneDeny(byName(n)).includes(F.ViewChannel)), '4 kategorie ticketów prywatne');
-  assert(!everyoneDeny(byName('━━ 🎫 TICKETY ━━')).includes(F.ViewChannel), 'kategoria z panelem ticketów publiczna');
+  // Weryfikacja: przed akceptacją regulaminu widać tylko WITAMY (witamy, zaproszenia) i regulamin.
+  const verifiedId = [...roles.values()].find((r) => r.name === serverLayout.roles.verified.name).id;
+  const verifiedCanSee = (ch) => ch.permissionOverwrites.some((o) => o.id === verifiedId && o.allow.includes(F.ViewChannel));
+  for (const n of ['━━ 🎫 TICKETY ━━', '🎫┃tickety', '💰┃cennik', '📢┃ogłoszenia', '💬┃czat', '🔊┃rozmowy', '✅┃legit-check→0', '⭐┃opinie→0']) {
+    assert(everyoneDeny(byName(n)).includes(F.ViewChannel) && verifiedCanSee(byName(n)), `${n}: widoczne dopiero po regulaminie`);
+  }
+  for (const n of ['━━ 👋 WITAMY ━━', '👋┃witamy', '📩┃zaproszenia', '📜┃regulamin', '━━ 📌 WAŻNE ━━']) {
+    assert(!everyoneDeny(byName(n)).includes(F.ViewChannel), `${n}: widoczne od razu`);
+  }
+  assert(!verifiedCanSee(byName('💬┃admin-czat')), 'kanały administracji dalej prywatne');
   assert(everyoneDeny(byName('📜┃regulamin')).includes(F.SendMessages), 'regulamin tylko do czytania');
   assert(!everyoneDeny(byName('✅┃legit-check→0')).includes(F.SendMessages), 'na legit-check można pisać');
   assert(!everyoneDeny(byName('💬┃czat')).includes(F.SendMessages), 'na czacie można pisać');
@@ -5314,6 +5434,96 @@ function databaseTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
   console.log('✅ Test bazy: osobne pliki, przeniesienie db.json, zapis i odczyt OK');
+}
+
+// ─── Test /weryfikacja (symulacja istniejącego serwera) ────────────────
+
+async function verificationTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test weryfikacji nie przeszedł: ${msg}`);
+  };
+  const GID = 'verify-guild';
+  const EVERYONE = 'everyone-id';
+  const ROLE = 'verified-id';
+  // Uproszczone nadpisania uprawnień: { id → { allow:Set, deny:Set } } z metodą edit jak w discord.js.
+  const mkChannel = (id, name, { type = ChannelType.GuildText, parentId = null, privateCh = false } = {}) => {
+    const cache = new Map();
+    const view = (bits) => ({ has: (flag) => bits.has(flag) });
+    const set = (ow, flag, value) => {
+      ow.allowBits.delete(flag);
+      ow.denyBits.delete(flag);
+      if (value === true) ow.allowBits.add(flag);
+      if (value === false) ow.denyBits.add(flag);
+    };
+    const ensure = (oid) => {
+      if (!cache.has(oid)) {
+        const ow = { allowBits: new Set(), denyBits: new Set() };
+        ow.allow = view(ow.allowBits);
+        ow.deny = view(ow.denyBits);
+        cache.set(oid, ow);
+      }
+      return cache.get(oid);
+    };
+    if (privateCh) ensure(EVERYONE).denyBits.add(F.ViewChannel);
+    return {
+      id,
+      name,
+      type,
+      parentId,
+      isThread: () => false,
+      permissionOverwrites: { cache, edit: async (oid, perms) => set(ensure(oid), F.ViewChannel, perms.ViewChannel) },
+    };
+  };
+  const chans = [
+    mkChannel('cat-witamy', 'WITAMY', { type: ChannelType.GuildCategory }),
+    mkChannel('witamy', 'witamy', { parentId: 'cat-witamy' }),
+    mkChannel('zaproszenia', 'zaproszenia', { parentId: 'cat-witamy' }),
+    mkChannel('cat-wazne', 'WAŻNE', { type: ChannelType.GuildCategory }),
+    mkChannel('regulamin', 'regulamin', { parentId: 'cat-wazne' }),
+    mkChannel('cennik', 'cennik', { parentId: 'cat-wazne' }),
+    mkChannel('czat', 'czat'),
+    mkChannel('rozmowy', 'rozmowy', { type: ChannelType.GuildVoice }),
+    mkChannel('ticket', 'wojtek3509', { privateCh: true }),
+    mkChannel('admin-czat', 'admin-czat', { privateCh: true }),
+  ];
+  const byId = (id) => chans.find((c) => c.id === id);
+  const canSeeBefore = (c) => !c.permissionOverwrites.cache.get(EVERYONE)?.deny.has(F.ViewChannel);
+  const canSeeAfter = (c) => canSeeBefore(c) || Boolean(c.permissionOverwrites.cache.get(ROLE)?.allow.has(F.ViewChannel));
+  const added = [];
+  const fakeGuild = {
+    id: GID,
+    roles: { everyone: { id: EVERYONE } },
+    members: {
+      me: { id: 'bot' },
+      fetch: async () =>
+        new Map([
+          ['m1', { user: { bot: false, tag: 'm1' }, roles: { cache: { has: () => false }, add: async () => added.push('m1') } }],
+          ['m2', { user: { bot: false, tag: 'm2' }, roles: { cache: { has: (r) => r === ROLE }, add: async () => added.push('m2') } }],
+          ['b', { user: { bot: true, tag: 'b' }, roles: { cache: { has: () => false }, add: async () => added.push('b') } }],
+        ]),
+    },
+    channels: { fetch: async () => new Map(chans.map((c) => [c.id, c])) },
+  };
+  const g = guild(GID);
+  Object.assign(g.settings, { rulesRoleId: ROLE, staffRoleId: 'staff-id', welcomeChannelId: 'witamy', invitesChannelId: 'zaproszenia' });
+  g.panels.regulamin = { channelId: 'regulamin', messageId: 'r' };
+  try {
+    const r = await applyVerificationGate(fakeGuild, true, { giveExisting: true });
+    for (const id of ['witamy', 'zaproszenia', 'regulamin', 'cat-witamy', 'cat-wazne']) assert(canSeeBefore(byId(id)), `${id}: widoczne przed regulaminem`);
+    for (const id of ['cennik', 'czat', 'rozmowy']) assert(!canSeeBefore(byId(id)) && canSeeAfter(byId(id)), `${id}: widoczne dopiero po regulaminie`);
+    for (const id of ['ticket', 'admin-czat']) assert(!canSeeAfter(byId(id)), `${id}: prywatne bez zmian`);
+    assert(byId('czat').permissionOverwrites.cache.get('staff-id')?.allow.has(F.ViewChannel), 'admini widzą ukryte kanały');
+    assert(r.hidden === 3 && r.gate === 5 && r.skipped === 2 && !r.errors.length, `raport: ${JSON.stringify(r)}`);
+    assert(JSON.stringify(added) === '["m1"]' && r.members === 1, 'rola tylko dla obecnych bez roli, bez botów');
+    const again = await applyVerificationGate(fakeGuild, true);
+    assert(again.hidden === 3 && again.skipped === 2, 'ponowne włączenie nic nie psuje');
+    const off = await applyVerificationGate(fakeGuild, false);
+    assert(off.shown === 3 && canSeeBefore(byId('czat')) && !canSeeBefore(byId('ticket')), 'wyłączenie: znów widoczne, prywatne dalej ukryte');
+    assert(g.settings.verificationGate === false, 'zapisany stan');
+  } finally {
+    delete store.guilds[GID];
+  }
+  console.log('✅ Test weryfikacji: widoczne tylko witamy/zaproszenia/regulamin do akceptacji OK');
 }
 
 // ─── Test boostów (symulacja) ──────────────────────────────────────────
@@ -6033,6 +6243,7 @@ if (process.argv.includes('--check')) {
   await welcomeTest();
   await autoLcTest();
   databaseTest();
+  await verificationTest();
   await boostTest();
   await hostingTest();
   process.exit(0);
