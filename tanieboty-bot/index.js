@@ -589,7 +589,6 @@ const V2 = MessageFlags.IsComponentsV2;
 const V2_EPHEMERAL = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
 const ts = (ms, fmt = 'R') => `<t:${Math.floor(ms / 1000)}:${fmt}>`;
-const pad = (n) => `#${String(n).padStart(4, '0')}`;
 const upper = (s) => s.toLocaleUpperCase('pl-PL');
 const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
 const c = style.chevron;
@@ -1017,7 +1016,7 @@ function ticketMessage(ticket, user) {
   header(
     b,
     [
-      title(`Ticket ${pad(ticket.number)}`, t.emoji),
+      title(t.label, t.emoji),
       `👋 Witaj <@${ticket.userId}>! Dziękujemy za kontakt z **${brand.name}**.`,
       `-# Zespół odpowie najszybciej, jak to możliwe • otwarto ${ts(ticket.openedAt)}`,
     ].join('\n'),
@@ -1052,7 +1051,8 @@ function ticketMessage(ticket, user) {
   return b;
 }
 
-const transcriptName = (ticket) => `transcript-${String(ticket.number).padStart(4, '0')}.html`;
+// Nazwa pliku z datą otwarcia ticketu (bez numeru ticketu), np. transcript-2026-09-30-15-18.html.
+const transcriptName = (ticket) => `transcript-${new Date(ticket.openedAt ?? Date.now()).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.html`;
 // Podmieniane w teście offline.
 let makeTranscript = (channel, ticket) => createTranscript(channel, { filename: transcriptName(ticket), poweredBy: false, saveImages: true });
 
@@ -1077,7 +1077,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
   text(
     b,
     [
-      title(`Ticket ${pad(ticket.number)} zamknięty`, ticket.result === 'done' ? '✅' : '🔒'),
+      title('Ticket zamknięty', ticket.result === 'done' ? '✅' : '🔒'),
       subtitle ? `-# ${subtitle}` : null,
       '>>> ' +
         [
@@ -3651,7 +3651,7 @@ async function onChannelDeleted(channel) {
     const log = logId ? await channel.client.channels.fetch(logId).catch(() => null) : null;
     await log
       ?.send({
-        components: [notice(`### 🗑️ ${x} Ticket ${pad(ticket.number)} usunięty ręcznie\n${row('Autor', `<@${ticket.userId}>`)}\n-# Kanał usunięto bez zamknięcia — brak transcriptu.`, colors.warning)],
+        components: [notice(`### 🗑️ ${x} Ticket usunięty ręcznie\n${row('Autor', `<@${ticket.userId}>`)}\n-# Kanał usunięto bez zamknięcia — brak transcriptu.`, colors.warning)],
         flags: V2,
         allowedMentions: { parse: [] },
       })
@@ -4050,8 +4050,8 @@ command(
     if (!done.length && !failed.length) return i.editReply({ components: [notice(`### ✅ ${x} Brak ticketów czekających na repa.`, colors.success)], flags: V2 });
     const lines = [
       title(`Auto LC: ${done.length}`, '✅'),
-      ...done.map((d) => row(`Ticket ${pad(d.ticket.number)}`, `\`${d.username}\` → ${d.url}`)),
-      ...failed.map((f) => row(`❌ Ticket ${pad(f.ticket.number)}`, f.error)),
+      ...done.map((d) => row(`<@${d.ticket.userId}>`, `\`${d.username}\` → ${d.url}`)),
+      ...failed.map((f) => row(`❌ <@${f.ticket.userId}>`, f.error)),
     ];
     return i.editReply({ components: [notice(lines.join('\n'), failed.length ? colors.warning : colors.success)], flags: V2, allowedMentions: { parse: [] } });
   },
@@ -4529,6 +4529,12 @@ async function selfTest() {
   if (noticeText(notice(`### 🗑️ ${x} Ticket #0001 usunięty przez <@1>`)) !== `### 🗑️ ${x} Ticket #0001 usunięty przez <@1>`) throw new Error('Tytuł z oznaczeniem zostaje nagłówkiem');
   if (!noticeText(ok('Ticket utworzony: <#5>')).startsWith('## ```✅ TanieBoty × GOTOWE```\n>>> Ticket utworzony: <#5>')) throw new Error('ok() z tytułem');
   if (!noticeText(fail('Tylko admin może to zrobić.')).startsWith('## ```❌ TanieBoty × BŁĄD```\n>>> Tylko admin')) throw new Error('fail() z tytułem');
+
+  // Numer ticketu nigdzie się nie pokazuje (karta, zamknięcie, transcript).
+  const numbered = { channelId: '1', number: 3, type: 'hosting', userId: '2', openedAt: Date.UTC(2026, 8, 30, 15, 18), form: {}, closedAt: Date.now(), result: 'notdone' };
+  const ticketJson = JSON.stringify([ticketMessage(numbered, user).toJSON(), closedView(numbered, 'x', false).toJSON()]);
+  if (/#000|0003/.test(ticketJson) || transcriptName(numbered) !== 'transcript-2026-09-30-15-18.html') throw new Error('Numer ticketu widoczny');
+  if (!ticketJson.includes('HOSTING BOTA DISCORD') || !ticketJson.includes('TICKET ZAMKNIĘTY')) throw new Error('Tytuły ticketu');
 
   // Konkurs, który skończył się, gdy bot był wyłączony: losowanie po starcie z planowaną datą końca.
   const gwg = guild('gw-restart');
