@@ -666,9 +666,20 @@ function bannerAttachments(g, key) {
 }
 
 const box = (color = colors.brand) => new ContainerBuilder().setAccentColor(color);
-const notice = (content, color = colors.brand) => text(box(color), content);
-const ok = (content) => notice(`### ✅ ${content}`, colors.success);
-const fail = (content) => notice(`### ❌ ${x} ${content}`, colors.danger);
+/**
+ * Pierwsza linia „### 🔇 × Tytuł” zamienia się w tytuł w ramce: ## ```🔇 TanieBoty × TYTUŁ```.
+ * Tytuły z oznaczeniami, linkami albo pogrubieniem zostają zwykłym nagłówkiem (w ramce by się nie wyświetliły).
+ */
+function framedTitle(content) {
+  const m = new RegExp(`^### (\\S+) (?:${x} )?([^\\n]+)(\\n[\\s\\S]*)?$`, 'u').exec(content);
+  if (!m) return content;
+  const [, emoji, head, rest = ''] = m;
+  if (/[<`*_[\]]|https?:/.test(head)) return content;
+  return title(head, emoji) + rest;
+}
+const notice = (content, color = colors.brand) => text(box(color), framedTitle(content));
+const ok = (content) => text(box(colors.success), `${title('Gotowe', '✅')}\n>>> ${content}`);
+const fail = (content) => text(box(colors.danger), `${title('Błąd', '❌')}\n>>> ${content}`);
 
 /** Obrazek do nagłówków: ikona serwera, a gdy jej brak — avatar bota. */
 const logoOf = (g, client) => (panelThumbnails ? (g?.iconURL?.({ size: 256 }) ?? client?.user?.displayAvatarURL?.({ size: 256 }) ?? null) : null);
@@ -3096,7 +3107,8 @@ async function endGiveaway(client, guildId, messageId, reroll = false) {
   const gw = g.giveaways[messageId];
   if (!gw) return null;
   const winnerIds = pickWinners(gw.entrants, gw.winners, reroll ? (gw.winnerIds ?? []) : []);
-  updateGuild(guildId, () => Object.assign(gw, { ended: true, winnerIds, endsAt: reroll ? gw.endsAt : Date.now() }));
+  // Losowanie po restarcie bota: zostaje planowana data końca (nie godzina restartu). „Zakończ teraz” — obecna.
+  updateGuild(guildId, () => Object.assign(gw, { ended: true, winnerIds, endsAt: reroll ? gw.endsAt : Math.min(Date.now(), gw.endsAt) }));
   const channel = await client.channels.fetch(gw.channelId).catch(() => null);
   const message = await channel?.messages.fetch(messageId).catch(() => null);
   await message?.edit({ components: [giveawayView(gw, channel.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } }).catch(() => {});
@@ -4465,7 +4477,7 @@ async function onInteraction(i) {
 
 // ═══ SPRAWDZENIE OFFLINE (node index.js --check) ═══════════════════════
 
-function selfTest() {
+async function selfTest() {
   const img = 'https://cdn.discordapp.com/embed/avatars/0.png';
   const user = { id: '2', displayAvatarURL: () => img, toString: () => '<@2>' };
   const g = guild('selftest');
@@ -4510,6 +4522,24 @@ function selfTest() {
   ];
   for (const item of built) item.toJSON();
   if (parseDuration('1d 2h 30m') !== 95_400_000) throw new Error('parseDuration');
+  // Tytuły w ramce w krótkich wiadomościach.
+  const noticeText = (c) => c.toJSON().components[0].content;
+  if (noticeText(notice(`### 🔇 ${x} Otrzymałeś/aś przerwę na 7 dni\nReakcja wymaga dowodu.`)) !== `${title('Otrzymałeś/aś przerwę na 7 dni', '🔇')}\nReakcja wymaga dowodu.`) {
+    throw new Error('Tytuł w ramce (przerwa)');
+  }
+  if (!noticeText(notice(`### ✅ ${x} Vouch otrzymany!\nDziękujemy <@1>!`)).startsWith('## ```✅ TanieBoty × VOUCH OTRZYMANY!```')) throw new Error('Tytuł w ramce (vouch)');
+  if (noticeText(notice(`### 🗑️ ${x} Ticket #0001 usunięty przez <@1>`)) !== `### 🗑️ ${x} Ticket #0001 usunięty przez <@1>`) throw new Error('Tytuł z oznaczeniem zostaje nagłówkiem');
+  if (!noticeText(ok('Ticket utworzony: <#5>')).startsWith('## ```✅ TanieBoty × GOTOWE```\n>>> Ticket utworzony: <#5>')) throw new Error('ok() z tytułem');
+  if (!noticeText(fail('Tylko admin może to zrobić.')).startsWith('## ```❌ TanieBoty × BŁĄD```\n>>> Tylko admin')) throw new Error('fail() z tytułem');
+
+  // Konkurs, który skończył się, gdy bot był wyłączony: losowanie po starcie z planowaną datą końca.
+  const gwg = guild('gw-restart');
+  const plannedEnd = Date.now() - 3_600_000;
+  gwg.giveaways.m1 = { channelId: 'c', prize: 'P', winners: 1, entrants: ['a', 'b'], ended: false, endsAt: plannedEnd };
+  await endGiveaway({ channels: { fetch: async () => null } }, 'gw-restart', 'm1');
+  if (!gwg.giveaways.m1.ended || gwg.giveaways.m1.endsAt !== plannedEnd || gwg.giveaways.m1.winnerIds.length !== 1) throw new Error('Konkurs po restarcie');
+  delete store.guilds['gw-restart'];
+
   // /ustaw-licznik: każdy licznik da się odczytać i zapisać.
   const cg = guild('counter-test');
   for (const [key, [, read, write]] of Object.entries(editableCounters)) {
@@ -5187,7 +5217,7 @@ async function autoLcTest() {
   // 5. Ręcznie usunięty kanał ticketu → zamknięty w bazie, klient może otworzyć nowy.
   await onChannelDeleted({ id: 't3', guildId: GID, client: fakeClient });
   assert(g.tickets.t3.closedAt && openTicketsOf(GID, 'c1').length === 0, 'usunięty kanał zamyka ticket w bazie');
-  assert(sent.some(([id, p]) => id === 'log' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('usunięty ręcznie')), 'informacja w logach');
+  assert(sent.some(([id, p]) => id === 'log' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('USUNIĘTY RĘCZNIE')), 'informacja w logach');
 
   delete store.guilds[GID];
   console.log('✅ Test auto LC i spójności bazy: 5 scenariuszy OK');
@@ -5731,7 +5761,7 @@ async function hostingTest() {
     assert(u1 && u1.username === 'wojtek3509' && u1.email === 'jan@gmail.com', 'konto w panelu: nazwa z Discorda, e-mail z formularza');
     const credentials = dms.find(([id, p]) => id === 'c1' && J(p).includes('HOSTING GOTOWY'));
     assert(credentials && J(credentials[1]).includes('jan@gmail.com') && /\|\|`[\w-]{16}`\|\|/.test(J(credentials[1])), 'DM z loginem i hasłem (pod spoilerem)');
-    assert(logs.some((l) => l.includes('Nowy hosting') && l.includes('automatycznie') && l.includes('ltcgood')), 'log zakupu');
+    assert(logs.some((l) => l.includes('NOWY HOSTING') && l.includes('automatycznie') && l.includes('ltcgood')), 'log zakupu');
     assert(roleAdds.some(([id, r]) => id === 'c1' && r === 'role-client'), 'rola klienta');
     const rec1 = g.hosting.servers[order.serverId];
     assert(rec1 && Math.abs(rec1.expiresAt - (Date.now() + 31 * DAY)) < 60_000, 'ważny 31 dni');
@@ -5851,10 +5881,10 @@ async function hostingTest() {
     await checkExpirations(client, GID);
     assert(rec1.suspended && panel.servers.find((s) => s.id === rec1.id).suspended, 'po terminie serwer zablokowany w panelu');
     assert(J(dms.at(-1)[1]).includes('ZABLOKOWANY') && J(dms.at(-1)[1]).includes(`hs:renew:${GID}:${rec1.id}`), 'DM o blokadzie z przyciskiem przedłużenia');
-    assert(logs.some((l) => l.includes('Hosting zablokowany')), 'log blokady');
+    assert(logs.some((l) => l.includes('HOSTING ZABLOKOWANY')), 'log blokady');
     rec1.suspendedAt = Date.now() - 8 * DAY;
     await checkExpirations(client, GID);
-    assert(rec1.deleteNotified && logs.some((l) => l.includes('Serwer można usunąć')), 'po 7 dniach: powiadomienie, że można usunąć');
+    assert(rec1.deleteNotified && logs.some((l) => l.includes('SERWER MOŻNA USUNĄĆ')), 'po 7 dniach: powiadomienie, że można usunąć');
     assert(panel.servers.some((s) => s.id === rec1.id), 'bot sam nie usuwa serwera');
 
     // 9. Przedłużenie automatyczne z DM: odblokowanie + start.
@@ -5901,7 +5931,7 @@ async function hostingTest() {
     const confirm = interaction('staff', { customId: 'hs:confirm' });
     await routeHosting(confirm);
     const t = g.tickets.hticket;
-    assert(t.hostingServerId && J(confirm.replies.at(-1)).includes('Serwer utworzony'), `serwer z ticketu (${J(confirm.replies.at(-1)).slice(0, 300)})`);
+    assert(t.hostingServerId && J(confirm.replies.at(-1)).includes('SERWER UTWORZONY'), `serwer z ticketu (${J(confirm.replies.at(-1)).slice(0, 300)})`);
     const s3 = panel.servers.find((s) => s.id === t.hostingServerId);
     assert(s3.egg === 17 && s3.environment.JARFILE === 'bot.jar' && s3.external_id === 'tb-t-hticket', 'jajko Java, external_id ticketu');
     assert(Math.abs(g.hosting.servers[s3.id].expiresAt - (Date.now() + 365 * DAY)) < 60_000, '1 rok = 365 dni');
@@ -5967,7 +5997,7 @@ async function hostingTest() {
     order.status = 'paid';
     order.txid = 'ltcx';
     await tick();
-    assert(order.status === 'failed' && logs.at(-1).includes('nie zostało zrealizowane') && logs.at(-1).includes('/hosting utworz'), 'brak jajka → admin dostaje powiadomienie');
+    assert(order.status === 'failed' && logs.at(-1).includes('NIE ZOSTAŁO ZREALIZOWANE') && logs.at(-1).includes('/hosting utworz'), 'brak jajka → admin dostaje powiadomienie');
     hostingConfig.eggs = savedEggs;
 
     // 13. /hosting test.
@@ -5987,7 +6017,7 @@ async function hostingTest() {
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
-  selfTest();
+  await selfTest();
   await flowTest();
   await generatorTest();
   await registerTest();
