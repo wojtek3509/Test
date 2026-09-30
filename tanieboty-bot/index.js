@@ -3553,14 +3553,22 @@ async function findUsedInvite(discordGuild) {
   return { unknown: true };
 }
 
+/** Wysyła wiadomość na kanał. Zwraca null albo opis problemu (brak kanału, brak uprawnień…). */
 async function sendTo(discordGuild, channelId, payload) {
-  if (!channelId) return;
+  if (!channelId) return 'kanał nie jest ustawiony';
   const channel = await discordGuild.channels.fetch(channelId).catch(() => null);
-  await channel?.send(payload).catch((err) => console.error('Powitania/zaproszenia:', err.message));
+  if (!channel) return 'kanał nie istnieje albo bot go nie widzi';
+  const error = await channel
+    .send(payload)
+    .then(() => null)
+    .catch((err) => err.message);
+  if (error) console.error(`Powitania/zaproszenia (#${channel.name}):`, error);
+  return error;
 }
 
 async function onMemberAdd(member) {
-  const found = await findUsedInvite(member.guild);
+  // Błąd przy ustalaniu zaproszenia nie może zablokować powitania.
+  const found = await findUsedInvite(member.guild).catch((err) => (console.warn('Zaproszenia:', err.message), {}));
   const fake = Date.now() - member.user.createdTimestamp < fakeAccountDays * 86_400_000;
   const g = updateGuild(member.guild.id, (gg) => {
     gg.joins[member.id] = { inviterId: found.inviterId ?? null, fake, at: Date.now() };
@@ -3571,18 +3579,24 @@ async function onMemberAdd(member) {
       else st.regular++;
     }
   });
-  await sendTo(member.guild, g.settings.welcomeChannelId, {
+  return sendJoinMessages(member, g, found);
+}
+
+/** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } — null = wysłane, tekst = problem. */
+async function sendJoinMessages(member, g, found) {
+  const welcome = await sendTo(member.guild, g.settings.welcomeChannelId, {
     components: [welcomeView(member, g)],
     files: bannerAttachments(g, 'witamy'),
     flags: V2,
     allowedMentions: { users: [member.id] },
   });
-  await sendTo(member.guild, g.settings.invitesChannelId, {
+  const invites = await sendTo(member.guild, g.settings.invitesChannelId, {
     components: [inviteLogView(member, g, found)],
     files: bannerAttachments(g, 'zaproszenia'),
     flags: V2,
     allowedMentions: { parse: [] },
   });
+  return { welcome, invites };
 }
 
 function onMemberRemove(member) {
@@ -4273,6 +4287,33 @@ command(
     if (r.errors.length) lines.push('', `⚠️ Błędy (${r.errors.length}):`, ...r.errors.slice(0, 8).map((e) => `- ${e}`));
     return i.editReply({
       components: [notice([title(enable ? 'Weryfikacja włączona' : 'Weryfikacja wyłączona', enable ? '🔒' : '🔓'), '>>> ' + lines.filter((l) => l !== null).join('\n')].join('\n'), r.errors.length ? colors.warning : colors.success)],
+      flags: V2,
+      allowedMentions: { parse: [] },
+    });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('test-powitanie')
+    .setDescription('Wyślij próbne powitanie i informację o zaproszeniu (na Ciebie) i sprawdź, co nie działa')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false),
+  async (i) => {
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const g = guild(i.guildId);
+    const res = await sendJoinMessages(i.member, g, {});
+    const ch = (id) => (id ? `<#${id}>` : '`nie ustawiony`');
+    const line = (label, id, error) => row(label, `${ch(id)} — ${error ? `❌ ${error}` : '✅ wysłano'}`);
+    const lines = [
+      line('👋 Powitania', g.settings.welcomeChannelId, res.welcome),
+      line('📩 Zaproszenia', g.settings.invitesChannelId, res.invites),
+      row('👥 Server Members Intent', membersIntentOn ? '✅ włączony — bot dostaje informację o nowych osobach' : '❌ **wyłączony** — Discord nie informuje bota o wejściu nowej osoby. Włącz go: Developer Portal → Bot → Server Members Intent, potem Restart bota.'),
+    ];
+    const hint = !g.settings.welcomeChannelId || !g.settings.invitesChannelId ? '\n-# Ustaw kanały: `/setup … powitania:#👋┃witamy zaproszenia:#📩┃zaproszenia`' : '';
+    const allOk = !res.welcome && !res.invites && membersIntentOn;
+    return i.editReply({
+      components: [notice([title('Test powitań', '👋'), '>>> ' + lines.join('\n')].join('\n') + hint, allOk ? colors.success : colors.warning)],
       flags: V2,
       allowedMentions: { parse: [] },
     });
@@ -6335,6 +6376,8 @@ async function onReady(ready) {
     if (!(await cacheInvites(g))) console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
     // Pełna lista członków w pamięci — dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
     if (membersIntentOn) await g.members.fetch().catch((err) => console.warn(`⚠️ ${g.name}: nie pobrano listy członków (${err.message}).`));
+    if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup powitania:#kanał`);
+    if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup zaproszenia:#kanał`);
     if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup boosty:#kanał).`);
   }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
