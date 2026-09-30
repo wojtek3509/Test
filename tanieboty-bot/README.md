@@ -63,6 +63,23 @@ Bot sam dołącza niebieskie banery TanieBoty z folderu `grafiki/` (obok `index.
 
 Brak folderu `grafiki/` na serwerze bota oznacza wiadomości bez banerów. Po wgraniu folderu wyślij panele ponownie (`/panel`).
 
+## Baza danych (folder data/)
+
+Każdy serwer Discord ma folder `data/<ID serwera>/` z osobnymi plikami:
+
+| Plik | Co zawiera |
+| --- | --- |
+| `ustawienia.json` | ustawienia z `/setup` i `/generuj`, banery, kanały |
+| `tickety.json` | tickety (otwarte i zamknięte) i numer ostatniego ticketu |
+| `opinie.json` | opinie i oceny |
+| `konkursy.json` | konkursy, uczestnicy, zwycięzcy |
+| `zaproszenia.json` | kto kogo zaprosił, fałszywe, wyjścia, bonusy |
+| `statystyki.json` | liczniki (zrealizowane, legit checki) i głosy „Czy legit?” |
+| `panele.json` | gdzie wiszą panele bota |
+| `hosting.json` | serwery klientów, terminy, zamówienia krypto |
+
+Przy pierwszym starcie nowej wersji stary `data/db.json` jest przenoszony do tych plików sam i zostaje jako `data/db.json.stary`. Plików nie edytuj, gdy bot działa (Stop → edycja → Start). Kopia zapasowa: pobierz cały folder `data`.
+
 ## Personalizacja
 
 Na początku `index.js`, w sekcji **KONFIGURACJA**:

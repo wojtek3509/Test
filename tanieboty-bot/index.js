@@ -2,7 +2,8 @@
 // Uruchomienie: npm install && node index.js   (sprawdzenie offline: node index.js --check)
 import 'dotenv/config';
 import { randomBytes, randomInt } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -459,11 +460,60 @@ const serverLayout = {
   ],
 };
 
-// ═══ BAZA DANYCH (data/db.json) ════════════════════════════════════════
+// ═══ BAZA DANYCH (folder data/) ════════════════════════════════════════
+// Każdy serwer Discord ma swój folder data/<ID serwera>/, a w nim osobne pliki według tematu:
+//   ustawienia.json, tickety.json, opinie.json, konkursy.json, zaproszenia.json,
+//   statystyki.json, panele.json, hosting.json.
+// Nie edytuj ich, gdy bot działa — przy następnym zapisie bot nadpisze zmiany (najpierw Stop, potem edycja, potem Start).
 
-const dbFile = join(dirname(fileURLToPath(import.meta.url)), 'data', 'db.json');
+let dataDir = join(dirname(fileURLToPath(import.meta.url)), 'data');
+const dataFiles = {
+  'ustawienia.json': ['settings'],
+  'tickety.json': ['tickets', 'counter'],
+  'opinie.json': ['reviews'],
+  'konkursy.json': ['giveaways'],
+  'zaproszenia.json': ['invites', 'joins'],
+  'statystyki.json': ['stats', 'legitVotes'],
+  'panele.json': ['panels'],
+  'hosting.json': ['hosting'],
+};
+const OTHER_FILE = 'inne.json';
+const fileOfKey = (key) => Object.keys(dataFiles).find((f) => dataFiles[f].includes(key)) ?? OTHER_FILE;
+// ID serwera Discord to same cyfry — inne foldery (np. kopie zapasowe) pomijamy.
+const isGuildFolder = (name) => /^\d{5,}$/.test(name);
+
+function writeJson(file, data) {
+  writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2));
+  renameSync(`${file}.tmp`, file);
+}
+
+/** Wczytuje bazę. Stary plik data/db.json (sprzed podziału) jest przenoszony do nowych plików i zostaje jako db.json.stary. */
+function loadStore() {
+  const loaded = { guilds: {} };
+  if (existsSync(dataDir)) {
+    for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !isGuildFolder(entry.name)) continue;
+      const g = {};
+      for (const file of readdirSync(join(dataDir, entry.name))) {
+        if (file.endsWith('.json')) Object.assign(g, JSON.parse(readFileSync(join(dataDir, entry.name, file), 'utf8')));
+      }
+      loaded.guilds[entry.name] = g;
+    }
+  }
+  const legacy = join(dataDir, 'db.json');
+  if (!Object.keys(loaded.guilds).length && existsSync(legacy)) {
+    const old = JSON.parse(readFileSync(legacy, 'utf8'));
+    store = { guilds: old.guilds ?? {} };
+    flush();
+    renameSync(legacy, `${legacy}.stary`);
+    console.log('🗄️ Baza przeniesiona z data/db.json do osobnych plików w data/<ID serwera>/ (stary plik: data/db.json.stary)');
+    return store;
+  }
+  return loaded;
+}
+
 let store = { guilds: {} };
-if (existsSync(dbFile)) store = JSON.parse(readFileSync(dbFile, 'utf8'));
+store = loadStore();
 
 let saveTimer = null;
 function save() {
@@ -472,9 +522,14 @@ function save() {
 }
 function flush() {
   clearTimeout(saveTimer);
-  mkdirSync(dirname(dbFile), { recursive: true });
-  writeFileSync(`${dbFile}.tmp`, JSON.stringify(store, null, 2));
-  renameSync(`${dbFile}.tmp`, dbFile);
+  for (const [guildId, g] of Object.entries(store.guilds)) {
+    if (!isGuildFolder(guildId)) continue;
+    const dir = join(dataDir, guildId);
+    mkdirSync(dir, { recursive: true });
+    const files = {};
+    for (const [key, value] of Object.entries(g)) (files[fileOfKey(key)] ??= {})[key] = value;
+    for (const [file, content] of Object.entries(files)) writeJson(join(dir, file), content);
+  }
 }
 
 function guild(id) {
@@ -5079,6 +5134,75 @@ async function autoLcTest() {
   console.log('✅ Test auto LC i spójności bazy: 5 scenariuszy OK');
 }
 
+// ─── Test bazy danych: podział na pliki i przeniesienie starego db.json ─
+
+function databaseTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test bazy nie przeszedł: ${msg}`);
+  };
+  const savedDir = dataDir;
+  const savedStore = store;
+  const tmp = mkdtempSync(join(tmpdir(), 'tanieboty-db-'));
+  const log = console.log;
+  console.log = () => {};
+  try {
+    dataDir = tmp;
+    const GID = '155312766976629564';
+    const old = {
+      guilds: {
+        [GID]: {
+          settings: { lcChannelId: '1', banners: {} },
+          counter: 7,
+          tickets: { t1: { number: 7 } },
+          reviews: [{ number: 1, content: 'Super' }],
+          giveaways: {},
+          invites: { u: { regular: 2 } },
+          joins: {},
+          stats: { done: 3 },
+          legitVotes: { yes: 5, no: 0 },
+          panels: { cennik: { channelId: '2', messageId: '3' } },
+          hosting: { orders: {}, servers: { 101: { name: 'Bot' } }, usedTx: [] },
+          nowaSekcja: { x: 1 },
+        },
+      },
+    };
+    writeFileSync(join(tmp, 'db.json'), JSON.stringify(old));
+
+    // 1. Pierwsze uruchomienie po aktualizacji: db.json → osobne pliki.
+    store = loadStore();
+    assert(existsSync(join(tmp, 'db.json.stary')) && !existsSync(join(tmp, 'db.json')), 'stary db.json zachowany jako db.json.stary');
+    const files = readdirSync(join(tmp, GID)).sort();
+    assert(
+      JSON.stringify(files) === JSON.stringify(['hosting.json', 'inne.json', 'konkursy.json', 'opinie.json', 'panele.json', 'statystyki.json', 'tickety.json', 'ustawienia.json', 'zaproszenia.json']),
+      `pliki: ${files.join(', ')}`,
+    );
+    const read = (f) => JSON.parse(readFileSync(join(tmp, GID, f), 'utf8'));
+    assert(read('opinie.json').reviews[0].content === 'Super' && !read('opinie.json').tickets, 'opinie tylko w opinie.json');
+    assert(read('tickety.json').counter === 7 && read('tickety.json').tickets.t1, 'tickety i licznik w tickety.json');
+    assert(read('hosting.json').hosting.servers[101].name === 'Bot', 'hosting w hosting.json');
+    assert(read('zaproszenia.json').invites.u.regular === 2 && read('statystyki.json').legitVotes.yes === 5, 'zaproszenia i statystyki');
+    assert(read('inne.json').nowaSekcja.x === 1, 'nieznane sekcje w inne.json');
+
+    // 2. Zapis zmian i ponowne wczytanie (restart bota) — nic nie ginie.
+    store.guilds[GID].reviews.push({ number: 2, content: 'Polecam' });
+    store.guilds['test-guild'] = { settings: {} }; // testowe ID bez cyfr nie trafia na dysk
+    flush();
+    assert(!existsSync(join(tmp, 'test-guild')), 'testowe serwery nie są zapisywane');
+    const reloaded = loadStore();
+    const sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))));
+    assert(sorted(reloaded.guilds[GID]) === sorted(store.guilds[GID]), 'po restarcie dane identyczne');
+    assert(reloaded.guilds[GID].reviews.length === 2, 'nowa opinia zapisana');
+    mkdirSync(join(tmp, 'kopie'), { recursive: true });
+    assert(Object.keys(loadStore().guilds).length === 1, 'inne foldery w data/ są pomijane');
+  } finally {
+    console.log = log;
+    dataDir = savedDir;
+    store = savedStore;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  console.log('✅ Test bazy: osobne pliki, przeniesienie db.json, zapis i odczyt OK');
+}
+
 // ─── Test boostów (symulacja) ──────────────────────────────────────────
 
 async function boostTest() {
@@ -5794,6 +5918,7 @@ if (process.argv.includes('--check')) {
   await registerTest();
   await welcomeTest();
   await autoLcTest();
+  databaseTest();
   await boostTest();
   await hostingTest();
   process.exit(0);
