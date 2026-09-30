@@ -3084,22 +3084,49 @@ async function onGiveawayJoin(i) {
 
 const boostTypes = [MessageType.GuildBoost, MessageType.GuildBoostTier1, MessageType.GuildBoostTier2, MessageType.GuildBoostTier3];
 
+// Boost wykrywamy na dwa sposoby: systemowa wiadomość Discorda („X wzmocnił serwer”) oraz zmiana statusu
+// członka (premiumSince). Drugi sposób działa też bez kanału wiadomości systemowych. Ten sam boost ogłaszamy raz.
+const recentBoosts = new Map(); // `${guildId}:${userId}` → czas ogłoszenia
+const BOOST_DEDUPE_MS = 2 * 60_000;
+
+async function announceBoost(discordGuild, user) {
+  const { settings } = guild(discordGuild.id);
+  if (!settings.boostChannelId) {
+    console.warn(`Boost od ${user.tag ?? user.id}: brak kanału boostów — ustaw go: /setup boosty:#kanał`);
+    return false;
+  }
+  const key = `${discordGuild.id}:${user.id}`;
+  if (Date.now() - (recentBoosts.get(key) ?? 0) < BOOST_DEDUPE_MS) return false;
+  recentBoosts.set(key, Date.now());
+  const channel = await discordGuild.channels.fetch(settings.boostChannelId).catch(() => null);
+  if (!channel) {
+    console.warn('Boost: kanał boostów nie istnieje albo bot go nie widzi — ustaw go ponownie: /setup boosty:#kanał');
+    return false;
+  }
+  const fresh = await discordGuild.fetch().catch(() => discordGuild);
+  const sent = await channel
+    .send({
+      components: [boostView(user, fresh.premiumSubscriptionCount ?? 0, fresh.premiumTier ?? 0, guild(discordGuild.id))],
+      files: bannerAttachments(guild(discordGuild.id), 'boost'),
+      flags: V2,
+      allowedMentions: { users: [user.id] },
+    })
+    .catch((err) => console.error('Boost:', err.message));
+  return Boolean(sent);
+}
+
 async function onMessage(message) {
   if (!message.guild) return;
   if (await onLegitCheckMessage(message)) return;
   if (!boostTypes.includes(message.type)) return;
-  const { settings } = guild(message.guild.id);
-  if (!settings.boostChannelId) return;
-  const channel = await message.guild.channels.fetch(settings.boostChannelId).catch(() => null);
-  const fresh = await message.guild.fetch().catch(() => message.guild);
-  await channel
-    ?.send({
-      components: [boostView(message.author, fresh.premiumSubscriptionCount ?? 0, fresh.premiumTier ?? 0, guild(message.guild.id))],
-      files: bannerAttachments(guild(message.guild.id), 'boost'),
-      flags: V2,
-      allowedMentions: { users: [message.author.id] },
-    })
-    .catch((err) => console.error('Boost:', err.message));
+  await announceBoost(message.guild, message.author);
+}
+
+/** Członek właśnie zaczął boostować (premiumSince: brak → data). Wymaga „Server Members Intent”. */
+async function onMemberUpdate(oldMember, newMember) {
+  if (oldMember.partial || newMember.user?.bot) return;
+  if (oldMember.premiumSinceTimestamp || !newMember.premiumSinceTimestamp) return;
+  await announceBoost(newMember.guild, newMember.user);
 }
 
 // ═══ GENERATOR SERWERA (/generuj) ══════════════════════════════════════
@@ -3988,6 +4015,25 @@ command(
       logoOf(i.guild, i.client),
     );
     return i.reply({ components: [b], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('test-boost')
+    .setDescription('Wyślij próbne podziękowanie za boosta (na Ciebie) na kanał boostów')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false),
+  async (i) => {
+    const { settings } = guild(i.guildId);
+    if (!settings.boostChannelId) return replyFail(i, 'Najpierw ustaw kanał boostów: `/setup … boosty:#kanał` (albo użyj `/generuj`).');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    recentBoosts.delete(`${i.guildId}:${i.user.id}`);
+    const sent = await announceBoost(i.guild, i.user);
+    return i.editReply({
+      components: [sent ? ok(`Wysłano próbne podziękowanie na <#${settings.boostChannelId}>.`) : fail('Nie udało się wysłać — sprawdź, czy bot widzi kanał boostów i może na nim pisać oraz wysyłać pliki.')],
+      flags: V2,
+    });
   },
 );
 
@@ -5033,6 +5079,62 @@ async function autoLcTest() {
   console.log('✅ Test auto LC i spójności bazy: 5 scenariuszy OK');
 }
 
+// ─── Test boostów (symulacja) ──────────────────────────────────────────
+
+async function boostTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test boostów nie przeszedł: ${msg}`);
+  };
+  const GID = 'boost-guild';
+  const sent = [];
+  const fakeGuild = {
+    id: GID,
+    premiumSubscriptionCount: 3,
+    premiumTier: 1,
+    fetch: async () => fakeGuild,
+    channels: { fetch: async (id) => (id === 'boost-ch' ? { send: async (p) => (sent.push(p), { id: 'm' }) } : null) },
+  };
+  const user = { id: 'u1', tag: 'u1', bot: false, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png', toString: () => '<@u1>' };
+  const member = (since, partial = false) => ({ partial, premiumSinceTimestamp: since, user, guild: fakeGuild });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    // Bez kanału boostów nic nie jest wysyłane.
+    await onMemberUpdate(member(null), member(Date.now()));
+    assert(sent.length === 0, 'bez kanału boostów brak wiadomości');
+    guild(GID).settings.boostChannelId = 'boost-ch';
+    recentBoosts.clear();
+
+    // 1. Zmiana statusu członka (działa bez wiadomości systemowych Discorda).
+    await onMemberUpdate(member(null), member(Date.now()));
+    assert(sent.length === 1, 'boost wykryty ze zmiany statusu członka');
+    const json = JSON.stringify(sent[0].components[0].toJSON());
+    assert(json.includes('NOWY BOOST') && json.includes('<@u1>') && json.includes('`3`'), 'treść podziękowania');
+    assert(json.includes('attachment://baner-boosty.png') && sent[0].files.length === 1, 'baner BOOSTY w załączniku');
+
+    // 2. Ta sama osoba — systemowa wiadomość chwilę później nie dubluje podziękowania.
+    await onMessage({ guild: fakeGuild, type: MessageType.GuildBoost, author: user, channelId: 'x' });
+    assert(sent.length === 1, 'bez duplikatu (status + wiadomość systemowa)');
+
+    // 3. Kolejny boost po czasie (np. drugi boost tej osoby) — z wiadomości systemowej.
+    recentBoosts.set(`${GID}:u1`, Date.now() - BOOST_DEDUPE_MS - 1);
+    await onMessage({ guild: fakeGuild, type: MessageType.GuildBoostTier1, author: user, channelId: 'x' });
+    assert(sent.length === 2, 'kolejny boost z wiadomości systemowej');
+
+    // 4. Brak zmian: już boostował, nieznany stary stan, zwykła wiadomość.
+    recentBoosts.clear();
+    await onMemberUpdate(member(123), member(123));
+    await onMemberUpdate(member(null, true), member(Date.now()));
+    await onMessage({ guild: fakeGuild, type: MessageType.Default, author: user, channelId: 'x' });
+    assert(sent.length === 2, 'brak fałszywych podziękowań');
+  } finally {
+    console.warn = warn;
+    delete store.guilds[GID];
+    recentBoosts.clear();
+  }
+  console.log('✅ Test boostów: wykrywanie, baner, bez duplikatów OK');
+}
+
 // ─── Test hostingu (symulacja panelu, blockchainów i Discorda) ─────────
 
 function hostingViewsForTest() {
@@ -5692,6 +5794,7 @@ if (process.argv.includes('--check')) {
   await registerTest();
   await welcomeTest();
   await autoLcTest();
+  await boostTest();
   await hostingTest();
   process.exit(0);
 }
@@ -5720,6 +5823,9 @@ async function onReady(ready) {
   }
   for (const g of ready.guilds.cache.values()) {
     if (!(await cacheInvites(g))) console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
+    // Pełna lista członków w pamięci — dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
+    if (membersIntentOn) await g.members.fetch().catch((err) => console.warn(`⚠️ ${g.name}: nie pobrano listy członków (${err.message}).`));
+    if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup boosty:#kanał).`);
   }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
   if (!loopsStarted) {
@@ -5783,6 +5889,7 @@ function start(attempt = 0) {
   if (members) {
     botClient.on(Events.GuildMemberAdd, (m) => onMemberAdd(m).catch(console.error));
     botClient.on(Events.GuildMemberRemove, (m) => onMemberRemove(m));
+    botClient.on(Events.GuildMemberUpdate, (a, b) => onMemberUpdate(a, b).catch(console.error));
   }
 
   let switched = false;

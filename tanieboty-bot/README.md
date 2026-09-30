@@ -51,7 +51,7 @@ W Developer Portal → **Bot** włącz **Message Content Intent** i **Server Mem
 
 Liczniki w nazwach kanałów (czy legit, legit check, opinie) są zapisywane w bazie od razu, a nazwy kanałów aktualizują się co 10 minut. To limit Discorda: nazwę kanału można zmienić tylko 2 razy na 10 minut.
 
-Boosty: bot reaguje na systemowe wiadomości Discorda o boostach, więc w **Ustawienia serwera → Ogólne → Kanał wiadomości systemowych** zostaw włączone „Wysyłaj wiadomość, gdy ktoś wzmocni serwer”.
+Boosty: bot wykrywa boost na dwa sposoby: gdy członek zaczyna boostować (wymaga **Server Members Intent**) oraz z systemowej wiadomości Discorda „X wzmocnił serwer” (kolejne boosty tej samej osoby). Ten sam boost jest ogłaszany raz. Podgląd podziękowania: `/test-boost`.
 
 ## Banery (grafiki/)
 
