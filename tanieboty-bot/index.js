@@ -634,18 +634,22 @@ function banner(container, url) {
 // Własny link z /panel baner:<link> ma pierwszeństwo, a baner:brak wyłącza baner danego panelu.
 const bannerDir = join(dirname(fileURLToPath(import.meta.url)), 'grafiki');
 const bannerFiles = {
-  tickety: 'baner-tickety.png',
-  regulamin: 'baner-regulamin.png',
-  opinie: 'baner-opinie.png',
-  legit: 'baner-czy-legit.png',
-  cennik: 'baner-cennik.png',
-  vouch: 'baner-legit-check.png',
-  konkurs: 'baner-konkursy.png',
-  witamy: 'baner-witamy.png',
-  zaproszenia: 'baner-zaproszenia.png',
-  boost: 'baner-boosty.png',
+  tickety: 'baner-tickety.jpg',
+  regulamin: 'baner-regulamin.jpg',
+  opinie: 'baner-opinie.jpg',
+  legit: 'baner-czy-legit.jpg',
+  cennik: 'baner-cennik.jpg',
+  vouch: 'baner-legit-check.jpg',
+  konkurs: 'baner-konkursy.jpg',
+  witamy: 'baner-witamy.jpg',
+  zaproszenia: 'baner-zaproszenia.jpg',
+  boost: 'baner-boosty.jpg',
 };
-const builtinBanner = (key) => (bannerFiles[key] && existsSync(join(bannerDir, bannerFiles[key])) ? bannerFiles[key] : null);
+// JPG są kilka razy mniejsze od PNG, więc wiadomości z banerem wychodzą szybciej. Stare PNG działają jako zapas.
+const builtinBanner = (key) => {
+  if (!bannerFiles[key]) return null;
+  return [bannerFiles[key], bannerFiles[key].replace(/\.jpg$/, '.png')].find((f) => existsSync(join(bannerDir, f))) ?? null;
+};
 const customBanner = (g, key) => g?.settings?.banners?.[key];
 
 /** Adres baneru do komponentu: własny link, wbudowany plik (attachment://) albo brak. */
@@ -3567,6 +3571,8 @@ async function sendTo(discordGuild, channelId, payload) {
 }
 
 async function onMemberAdd(member) {
+  // Powitanie wychodzi od razu — ustalanie zaproszenia (pobieranie linków z Discorda) idzie równolegle i go nie wstrzymuje.
+  const welcome = sendWelcome(member, guild(member.guild.id));
   // Błąd przy ustalaniu zaproszenia nie może zablokować powitania.
   const found = await findUsedInvite(member.guild).catch((err) => (console.warn('Zaproszenia:', err.message), {}));
   const fake = Date.now() - member.user.createdTimestamp < fakeAccountDays * 86_400_000;
@@ -3579,23 +3585,34 @@ async function onMemberAdd(member) {
       else st.regular++;
     }
   });
-  return sendJoinMessages(member, g, found);
+  const invites = sendInviteLog(member, g, found);
+  const res = { welcome: await welcome, invites: await invites };
+  const secs = ((Date.now() - (member.joinedTimestamp ?? Date.now())) / 1000).toFixed(1);
+  console.log(`👋 ${member.user.tag ?? member.id}: powitanie i zaproszenie wysłane ${secs} s po wejściu`);
+  return res;
 }
 
-/** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } — null = wysłane, tekst = problem. */
-async function sendJoinMessages(member, g, found) {
-  const welcome = await sendTo(member.guild, g.settings.welcomeChannelId, {
+function sendWelcome(member, g) {
+  return sendTo(member.guild, g.settings.welcomeChannelId, {
     components: [welcomeView(member, g)],
     files: bannerAttachments(g, 'witamy'),
     flags: V2,
     allowedMentions: { users: [member.id] },
   });
-  const invites = await sendTo(member.guild, g.settings.invitesChannelId, {
+}
+
+function sendInviteLog(member, g, found) {
+  return sendTo(member.guild, g.settings.invitesChannelId, {
     components: [inviteLogView(member, g, found)],
     files: bannerAttachments(g, 'zaproszenia'),
     flags: V2,
     allowedMentions: { parse: [] },
   });
+}
+
+/** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } — null = wysłane, tekst = problem. */
+async function sendJoinMessages(member, g, found) {
+  const [welcome, invites] = await Promise.all([sendWelcome(member, g), sendInviteLog(member, g, found)]);
   return { welcome, invites };
 }
 
@@ -4754,12 +4771,12 @@ async function selfTest() {
   if (bannerUrl(bg, 'tickety') !== img || bannerAttachments(bg, 'tickety').length) throw new Error('Własny link banera');
   if (bannerUrl(bg, 'cennik') !== null || bannerAttachments(bg, 'cennik').length) throw new Error('Baner: brak');
   const panelJson = JSON.stringify(ticketsPanel(guild('banner-empty'), null).toJSON());
-  if (!panelJson.includes('attachment://baner-tickety.png')) throw new Error('Panel ticketów z wbudowanym banerem');
+  if (!panelJson.includes('attachment://baner-tickety.jpg')) throw new Error('Panel ticketów z wbudowanym banerem');
   const welcomeMember = { id: '5', guild: { memberCount: 10 }, user: { displayAvatarURL: () => img }, toString: () => '<@5>' };
-  if (!JSON.stringify(welcomeView(welcomeMember, bg).toJSON()).includes('attachment://baner-witamy.png')) throw new Error('Powitanie z banerem');
-  if (!JSON.stringify(inviteLogView(welcomeMember, bg, {}).toJSON()).includes('attachment://baner-zaproszenia.png')) throw new Error('Zaproszenia z banerem');
-  if (!JSON.stringify(boostView({ id: '5', displayAvatarURL: () => img, toString: () => '<@5>' }, 3, 1, bg).toJSON()).includes('attachment://baner-boosty.png')) throw new Error('Boost z banerem');
-  if (!JSON.stringify(giveawayView({ ...gw, image: null, builtinBanner: true }, 10).toJSON()).includes('attachment://baner-konkursy.png')) throw new Error('Konkurs z banerem');
+  if (!JSON.stringify(welcomeView(welcomeMember, bg).toJSON()).includes('attachment://baner-witamy.jpg')) throw new Error('Powitanie z banerem');
+  if (!JSON.stringify(inviteLogView(welcomeMember, bg, {}).toJSON()).includes('attachment://baner-zaproszenia.jpg')) throw new Error('Zaproszenia z banerem');
+  if (!JSON.stringify(boostView({ id: '5', displayAvatarURL: () => img, toString: () => '<@5>' }, 3, 1, bg).toJSON()).includes('attachment://baner-boosty.jpg')) throw new Error('Boost z banerem');
+  if (!JSON.stringify(giveawayView({ ...gw, image: null, builtinBanner: true }, 10).toJSON()).includes('attachment://baner-konkursy.jpg')) throw new Error('Konkurs z banerem');
   delete store.guilds['banner-test'];
   delete store.guilds['banner-empty'];
   console.log(`✅ ${built.length} komponentów/komend przeszło walidację`);
@@ -5352,12 +5369,25 @@ async function welcomeTest() {
   await onMemberAdd(mkMember('new3', 365));
   assert(sent.invites[2].includes('.gg/tanieboty'), 'wejście przez link własny serwera');
 
+  // 6. Wolne pobieranie zaproszeń nie wstrzymuje powitania.
+  let release;
+  const slowFetch = fakeGuild.invites.fetch;
+  fakeGuild.invites.fetch = () => new Promise((r) => (release = () => r(slowFetch())));
+  const welcomesBefore = sent.welcome.length;
+  const pending = onMemberAdd(mkMember('new4', 365));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(sent.welcome.length === welcomesBefore + 1 && sent.invites.length === 3, 'powitanie wysłane przed ustaleniem zaproszenia');
+  release();
+  await pending;
+  assert(sent.invites.length === 4, 'zaproszenie wysłane po ustaleniu');
+  fakeGuild.invites.fetch = slowFetch;
+
   // 5. Widoki komendy /zaproszenia.
   invitesView({ displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png', toString: () => '<@inviter1>' }, g.invites.inviter1).toJSON();
   invitesRanking(g).toJSON();
 
   delete store.guilds[GID];
-  console.log('✅ Test powitań i zaproszeń: 5 scenariuszy OK');
+  console.log('✅ Test powitań i zaproszeń: 6 scenariuszy OK');
 }
 
 // ─── Test auto LC i spójności bazy (symulacja) ─────────────────────────
@@ -5651,7 +5681,7 @@ async function boostTest() {
     assert(sent.length === 1, 'boost wykryty ze zmiany statusu członka');
     const json = JSON.stringify(sent[0].components[0].toJSON());
     assert(json.includes('NOWY BOOST') && json.includes('<@u1>') && json.includes('`3`'), 'treść podziękowania');
-    assert(json.includes('attachment://baner-boosty.png') && sent[0].files.length === 1, 'baner BOOSTY w załączniku');
+    assert(json.includes('attachment://baner-boosty.jpg') && sent[0].files.length === 1, 'baner BOOSTY w załączniku');
 
     // 2. Ta sama osoba — systemowa wiadomość chwilę później nie dubluje podziękowania.
     await onMessage({ guild: fakeGuild, type: MessageType.GuildBoost, author: user, channelId: 'x' });
