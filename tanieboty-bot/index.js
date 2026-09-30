@@ -584,6 +584,7 @@ const bannerFiles = {
   konkurs: 'baner-konkursy.png',
   witamy: 'baner-witamy.png',
   zaproszenia: 'baner-zaproszenia.png',
+  boost: 'baner-boosty.png',
 };
 const builtinBanner = (key) => (bannerFiles[key] && existsSync(join(bannerDir, bannerFiles[key])) ? bannerFiles[key] : null);
 const customBanner = (g, key) => g?.settings?.banners?.[key];
@@ -877,7 +878,7 @@ function entrantsView(gw) {
 
 // ─── Boosty ────────────────────────────────────────────────────────────
 
-function boostView(member, count, tier) {
+function boostView(member, count, tier, g) {
   const now = Date.now();
   const b = box(colors.boost);
   header(
@@ -900,6 +901,7 @@ function boostView(member, count, tier) {
         row('💎 Poziom serwera', `\`${tier}\``),
       ].join('\n'),
   );
+  banner(b, bannerUrl(g, 'boost'));
   sep(b);
   footer(b);
   return b;
@@ -3092,7 +3094,8 @@ async function onMessage(message) {
   const fresh = await message.guild.fetch().catch(() => message.guild);
   await channel
     ?.send({
-      components: [boostView(message.author, fresh.premiumSubscriptionCount ?? 0, fresh.premiumTier ?? 0)],
+      components: [boostView(message.author, fresh.premiumSubscriptionCount ?? 0, fresh.premiumTier ?? 0, guild(message.guild.id))],
+      files: bannerAttachments(guild(message.guild.id), 'boost'),
       flags: V2,
       allowedMentions: { users: [message.author.id] },
     })
@@ -4372,6 +4375,7 @@ function selfTest() {
   const welcomeMember = { id: '5', guild: { memberCount: 10 }, user: { displayAvatarURL: () => img }, toString: () => '<@5>' };
   if (!JSON.stringify(welcomeView(welcomeMember, bg).toJSON()).includes('attachment://baner-witamy.png')) throw new Error('Powitanie z banerem');
   if (!JSON.stringify(inviteLogView(welcomeMember, bg, {}).toJSON()).includes('attachment://baner-zaproszenia.png')) throw new Error('Zaproszenia z banerem');
+  if (!JSON.stringify(boostView({ id: '5', displayAvatarURL: () => img, toString: () => '<@5>' }, 3, 1, bg).toJSON()).includes('attachment://baner-boosty.png')) throw new Error('Boost z banerem');
   if (!JSON.stringify(giveawayView({ ...gw, image: null, builtinBanner: true }, 10).toJSON()).includes('attachment://baner-konkursy.png')) throw new Error('Konkurs z banerem');
   delete store.guilds['banner-test'];
   delete store.guilds['banner-empty'];

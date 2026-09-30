@@ -55,7 +55,7 @@ Boosty: bot reaguje na systemowe wiadomości Discorda o boostach, więc w **Usta
 
 ## Banery (grafiki/)
 
-Bot sam dołącza niebieskie banery TanieBoty z folderu `grafiki/` (obok `index.js`): pod panelami (tickety, regulamin, cennik, opinie, czy legit, vouche), pod konkursami, powitaniami i zaproszeniami. Nie trzeba wklejać linków.
+Bot sam dołącza niebieskie banery TanieBoty z folderu `grafiki/` (obok `index.js`): pod panelami (tickety, regulamin, cennik, opinie, czy legit, vouche), pod konkursami, powitaniami, zaproszeniami i podziękowaniami za boosty. Nie trzeba wklejać linków.
 
 - Własny obrazek zamiast wbudowanego: `/panel typ:… baner:<link>`.
 - Bez baneru: `/panel typ:… baner:brak`.
