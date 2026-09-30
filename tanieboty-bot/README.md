@@ -36,6 +36,8 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 5. Tickety **Pytanie** i **Współpraca** nie mają wyboru zrealizowane/niezrealizowane: „Zamknij” od razu otwiera formularz z powodem, a w logach wynik to „🔒 Zamknięte”.
 6. **Niezrealizowane** zamyka ticket od razu (z opcjonalnym powodem). Admin może też użyć przycisku **Zamknij bez repa**.
 
+Ticket zamyka tylko administracja (przycisk **Zamknij (admin)**). Klient nie może zamknąć swojego ticketu — po kliknięciu dostaje informację, żeby napisał, że sprawa jest załatwiona.
+
 „Zrealizowane” działa dopiero po ustawieniu kanału legit checków. Kliknięcie „Skopiuj wzór” nigdy nie zamyka ticketu.
 
 ## Instalacja

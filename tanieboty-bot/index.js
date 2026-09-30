@@ -1034,7 +1034,7 @@ function ticketMessage(ticket, user) {
   if (ticket.hostingServerId) answers.push(row('✅ Hosting', `serwer ID \`${ticket.hostingServerId}\` ${ticket.form.renew ? 'przedłużony' : 'utworzony'}`));
   text(b, [`### ${t.emoji} ${x} ${t.label}`, ...answers].join('\n'));
   sep(b);
-  const buttons = [new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger)];
+  const buttons = [new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij (admin)').setEmoji('🔒').setStyle(ButtonStyle.Danger)];
   // Zakup ręczny hostingu: staff potwierdza płatność, a bot sam tworzy (albo przedłuża) serwer.
   if (ticket.type === 'hosting' && ticket.form.lang && !ticket.hostingServerId && !hostingLanguages[ticket.form.lang]?.manualOnly) {
     buttons.unshift(
@@ -1219,15 +1219,17 @@ function staffTicket(i) {
   return { ticket };
 }
 
+const clientCloseMessage = 'Ticket może zamknąć tylko **administracja**. Jeśli sprawa jest załatwiona, napisz o tym w tickecie — admin go zamknie.';
+
 async function onCloseRequest(i) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return replyV2(i, fail('To nie jest aktywny kanał ticketu.'));
-  const staff = isStaff(i.member, guild(i.guildId).settings);
-  if (ticket.userId !== i.user.id && !staff) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+  // Ticket zamyka tylko administracja — klient nie może zamknąć swojego ticketu.
+  if (!isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail(clientCloseMessage));
   // Pytania i współpraca: bez „Zrealizowane / Niezrealizowane” — od razu formularz z powodem.
   if (!ticketTypes[ticket.type].order) return i.showModal(closeReasonModal());
   const b = box(colors.danger);
-  if (staff) {
+  {
     text(
       b,
       [
@@ -1241,11 +1243,6 @@ async function onCloseRequest(i) {
         new ButtonBuilder().setCustomId('tk:done').setLabel('Zrealizowane').setEmoji('✅').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('tk:notdone').setLabel('Niezrealizowane').setEmoji('❌').setStyle(ButtonStyle.Danger),
       ),
-    );
-  } else {
-    text(b, [title('Zamknąć ticket?', '🔒'), point('Kanał zostanie **usunięty**, a transcript trafi do Ciebie w DM.')].join('\n'));
-    b.addActionRowComponents((r) =>
-      r.setComponents(new ButtonBuilder().setCustomId('tk:userclose').setLabel('Zamknij').setEmoji('🔒').setStyle(ButtonStyle.Danger)),
     );
   }
   await replyV2(i, b);
@@ -1452,7 +1449,7 @@ async function onLegitCheckMessage(message) {
 async function closeTicket(i, { reason = null, result = 'notdone' } = {}) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return replyV2(i, fail('Ten ticket jest już zamykany.'));
-  if (ticket.userId !== i.user.id && !isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail('Nie możesz zamknąć tego ticketu.'));
+  if (!isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail(clientCloseMessage));
   await i.reply({
     components: [
       notice(
@@ -4403,7 +4400,8 @@ async function route(i) {
     if (i.isButton()) {
       if (action === 'quick') return onTicketSelect(i, arg);
       if (action === 'close') return onCloseRequest(i);
-      if (action === 'userclose') return closeTicket(i, { reason: 'Zamknięte przez klienta' });
+      // Stary przycisk „Zamknij” klienta (sprzed zmiany) — zamknięcie i tak sprawdza, czy to admin.
+      if (action === 'userclose') return closeTicket(i, { reason: 'Zamknięte' });
       if (action === 'done' || action === 'notdone') {
         const { error } = staffTicket(i);
         if (error) return replyV2(i, fail(error));
@@ -4806,7 +4804,13 @@ async function flowTest() {
   g.tickets['ticket-4'] = { channelId: 'ticket-4', number: 4, type: 'partner', userId: CLIENT, openedAt: Date.now(), form: { offer: 'x' }, messageId: 'card4' };
   const iP = interaction(CLIENT, { channelId: 'ticket-4', channel: channels['ticket-4'] });
   await onCloseRequest(iP);
-  assert(iP.modal?.toJSON().custom_id === 'tk:closesubmit', 'współpraca: klient też dostaje formularz z powodem');
+  assert(!iP.modal && JSON.stringify(iP.replies.at(-1)?.components?.[0]?.toJSON()).includes('tylko **administracja**'), 'klient nie może zamknąć ticketu');
+  const iPStaff = interaction(STAFF, { channelId: 'ticket-4', channel: channels['ticket-4'] });
+  await onCloseRequest(iPStaff);
+  assert(iPStaff.modal?.toJSON().custom_id === 'tk:closesubmit', 'współpraca: admin dostaje formularz z powodem');
+  const iOld = interaction(CLIENT, { channelId: 'ticket-4', channel: channels['ticket-4'] });
+  await closeTicket(iOld, { reason: 'Zamknięte' });
+  assert(!g.tickets['ticket-4'].closedAt, 'stary przycisk klienta nie zamyka ticketu');
 
   // 9. Bez Message Content: wystarczy oznaczenie sprzedawcy.
   messageContentOn = false;
