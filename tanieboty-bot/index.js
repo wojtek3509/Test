@@ -3667,7 +3667,12 @@ async function cacheInvites(discordGuild) {
 }
 
 async function findUsedInvite(discordGuild) {
-  const before = inviteCache.get(discordGuild.id) ?? new Map();
+  // Zaproszenia jeszcze się wczytują po starcie — bez stanu „przed” nie da się uczciwie ustalić, kto zaprosił.
+  if (!inviteCache.has(discordGuild.id)) {
+    await cacheInvites(discordGuild);
+    return { unknown: true };
+  }
+  const before = inviteCache.get(discordGuild.id);
   const vanityBefore = vanityCache.get(discordGuild.id);
   const invites = await cacheInvites(discordGuild);
   if (!invites) return { unknown: true };
@@ -5487,6 +5492,10 @@ async function welcomeTest() {
   });
   const g = guild(GID);
   Object.assign(g.settings, { welcomeChannelId: 'welcome', invitesChannelId: 'invites' });
+  // 0. Wejście, zanim zaproszenia się wczytały po starcie: nikomu nie dopisujemy zaproszenia.
+  inviteCache.delete(GID);
+  const early = await findUsedInvite(fakeGuild);
+  assert(early.unknown && inviteCache.has(GID), 'przed wczytaniem zaproszeń: nieznane, potem stan zapisany');
   await cacheInvites(fakeGuild);
 
   // 1. Wejście z zaproszenia.
@@ -6666,14 +6675,6 @@ async function onReady(ready) {
   if (!membersIntentOn) {
     console.warn('⚠️ „Server Members Intent” jest wyłączony — powitania i zaproszenia nie działają. Włącz go w Developer Portal → Bot i zrestartuj bota.');
   }
-  for (const g of ready.guilds.cache.values()) {
-    if (!(await cacheInvites(g))) console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
-    // Pełna lista członków w pamięci — dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
-    if (membersIntentOn) await g.members.fetch().catch((err) => console.warn(`⚠️ ${g.name}: nie pobrano listy członków (${err.message}).`));
-    if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup powitania:#kanał`);
-    if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup zaproszenia:#kanał`);
-    if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup boosty:#kanał).`);
-  }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
   if (!loopsStarted) {
     loopsStarted = true;
@@ -6688,6 +6689,7 @@ async function onReady(ready) {
     console.warn('⚠️ Hosting: brak konfiguracji panelu (config.json → hosting) — działa tylko zakup ręczny bez tworzenia serwerów.');
   }
 
+  // Komendy rejestrujemy od razu — nie mogą czekać na pobieranie członków i zaproszeń (na dużym serwerze to trwa).
   let guildId = GUILD_ID;
   if (guildId === ready.user.id) {
     console.warn('⚠️ guildId to ID bota, a nie serwera. Kliknij PPM na ikonę serwera → „Kopiuj ID serwera”.');
@@ -6697,6 +6699,26 @@ async function onReady(ready) {
   await registerCommands(new REST().setToken(DISCORD_TOKEN), ready.user.id, guildId, [...ready.guilds.cache.keys()], body).catch((err) =>
     console.error('Rejestracja komend nie powiodła się:', err.message),
   );
+
+  // Zaproszenia i lista członków ładują się w tle — bot w tym czasie normalnie działa.
+  for (const g of ready.guilds.cache.values()) prepareGuild(g).catch((err) => console.warn(`⚠️ ${g.name}: ${err.message}`));
+}
+
+/** Zaproszenia (kto kogo zaprosił) i lista członków (wykrywanie boostów). Z logiem czasu. */
+async function prepareGuild(g) {
+  const t0 = Date.now();
+  const secs = () => ((Date.now() - t0) / 1000).toFixed(1);
+  if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup powitania:#kanał`);
+  if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup zaproszenia:#kanał`);
+  if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup boosty:#kanał).`);
+  const invites = await cacheInvites(g);
+  if (invites) console.log(`📩 ${g.name}: zaproszenia wczytane (${invites.size}) w ${secs()} s`);
+  else console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
+  // Pełna lista członków w pamięci — dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
+  if (membersIntentOn) {
+    const members = await g.members.fetch({ time: 60_000 }).catch((err) => (console.warn(`⚠️ ${g.name}: nie pobrano listy członków (${err.message}).`), null));
+    if (members) console.log(`👥 ${g.name}: lista członków wczytana (${members.size}) w ${secs()} s`);
+  }
 }
 
 const isDisallowedIntents = (err) => err?.code === 4014 || /disallowed|privileged intent/i.test(String(err?.message));
