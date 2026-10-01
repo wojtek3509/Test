@@ -1632,17 +1632,41 @@ async function findPanelUser(discordId) {
   }
 }
 
-async function emailFree(email) {
-  const res = await ptero('GET', `/users?filter[email]=${encodeURIComponent(email)}`);
-  return !res?.data?.length;
+/** Konto w panelu o dokładnie tym e-mailu (filtr panelu dopasowuje też fragmenty, więc porównujemy sami). */
+async function panelUserByEmail(email) {
+  const wanted = String(email).trim().toLowerCase();
+  const res = await ptero('GET', `/users?filter[email]=${encodeURIComponent(wanted)}`);
+  return (res?.data ?? []).map((d) => d.attributes).find((u) => String(u.email).toLowerCase() === wanted) ?? null;
 }
 
-/** Zwraca konto klienta w panelu — istniejące albo nowe (z hasłem do wysłania w DM). */
+/** Łączy konto w panelu z kontem Discord (jeśli nie jest jeszcze z niczym połączone) — kolejne zakupy trafią na nie same. */
+async function linkPanelUser(account, discordId) {
+  // Konta admina nie łączymy z klientem — jego zakupy trafiałyby wtedy na konto admina.
+  if (account.external_id || account.root_admin) return false;
+  await ptero('PATCH', `/users/${account.id}`, {
+    email: account.email,
+    username: account.username,
+    first_name: account.first_name,
+    last_name: account.last_name,
+    external_id: `discord-${discordId}`,
+  });
+  account.external_id = `discord-${discordId}`;
+  return true;
+}
+
+/**
+ * Zwraca konto klienta w panelu: połączone z jego Discordem, istniejące konto z podanym e-mailem
+ * (serwer dopisuje się do niego, klient loguje się swoim hasłem) albo nowe (z hasłem do wysłania w DM).
+ */
 async function ensurePanelUser(user, email) {
   const existing = await findPanelUser(user.id);
   if (existing) return { user: existing, password: null };
   if (!validEmail(email)) throw userError('Brak poprawnego adresu e-mail do założenia konta w panelu.');
-  if (!(await emailFree(email))) throw userError(`E-mail \`${email}\` ma już konto w panelu (innej osoby). Potrzebny jest inny adres.`);
+  const byEmail = await panelUserByEmail(email);
+  if (byEmail) {
+    await linkPanelUser(byEmail, user.id).catch((err) => console.warn(`Hosting: nie połączono konta ${byEmail.email} z Discordem:`, err.message));
+    return { user: byEmail, password: null };
+  }
   const password = randomPassword();
   const base = panelUsername(user);
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -2166,9 +2190,6 @@ async function onAutoPurchase(i, guildId, form) {
         console.error(`Hosting: jajko ${form.lang}:`, err.message);
         throw userError('Ten język jest chwilowo niedostępny w zakupie automatycznym. Wybierz zakup ręczny.');
       });
-      if (!(await findPanelUser(i.user.id)) && !(await emailFree(form.email))) {
-        throw userError(`E-mail \`${form.email}\` ma już konto w panelu. Podaj inny adres.`);
-      }
     }
     const order = await createCryptoOrder(guildId, i.user.id, form);
     const dm = await sendHostingDm(i.client, i.user.id, orderView(order, guildId));
@@ -4622,7 +4643,7 @@ command(
       if (sub === 'utworz') {
         const user = i.options.getUser('uzytkownik');
         const res = await activateHosting(i.client, i.guildId, {
-          key: `m-${Date.now().toString(36)}`,
+          key: `m-${Date.now().toString(36)}${randomBytes(3).toString('hex')}`,
           userId: user.id,
           lang: i.options.getString('jezyk'),
           plan: i.options.getString('okres'),
@@ -4653,6 +4674,9 @@ command(
           reminded: [],
         };
         updateGuild(i.guildId, (gg) => (gg.hosting.servers[a.id] = added));
+        // Konto właściciela serwera łączymy z Discordem klienta — kolejne zakupy trafią na to samo konto.
+        const owner = (await ptero('GET', `/users/${a.user}`).catch(() => null))?.attributes;
+        if (owner) await linkPanelUser(owner, user.id).catch((err) => console.warn('Hosting: łączenie konta:', err.message));
         return done(`Serwer **${a.name}** (ID \`${a.id}\`) przypisany do ${user}, ważny do ${ts(added.expiresAt, 'f')}.${added.suspended ? '\n⚠️ Serwer jest zablokowany — odblokuj go `/hosting odblokuj` albo przedłuż.' : ''}`);
       }
       if (!rec || rec.deleted) return failed(`Nie znam serwera o ID \`${serverId}\`. Sprawdź \`/hosting lista\` albo dodaj go: \`/hosting dodaj\`.`);
@@ -6063,7 +6087,13 @@ async function hostingTest() {
     }
     if ((m = /^\/api\/application\/users\?filter\[email\]=(.+)$/.exec(path))) {
       const email = decodeURIComponent(m[1]);
-      return [200, { data: panel.users.filter((u) => u.email === email).map((u) => ({ attributes: u })) }];
+      return [200, { data: panel.users.filter((u) => u.email.toLowerCase().includes(email.toLowerCase())).map((u) => ({ attributes: u })) }];
+    }
+    if ((m = /^\/api\/application\/users\/(\d+)$/.exec(path))) {
+      const u = panel.users.find((x) => x.id === Number(m[1]));
+      if (!u) return [404, { errors: [{ detail: 'not found' }] }];
+      if (method === 'PATCH') Object.assign(u, body);
+      return [200, { attributes: u }];
     }
     if (method === 'POST' && path === '/api/application/users') {
       if (panel.users.some((u) => u.username === body.username)) return [422, { errors: [{ detail: 'The username has already been taken.' }] }];
@@ -6206,7 +6236,7 @@ async function hostingTest() {
       return { id: `dm${dms.length}`, channelId: `dmch-${id}` };
     },
   });
-  const users = { c1: mkUser('c1', 'Wojtek3509'), c2: mkUser('c2', 'klient2'), c3: mkUser('c3', 'x'), closed: mkUser('closed', 'zamkniete', false), c4: mkUser('c4', 'nowy4'), staff: mkUser('staff', 'staff') };
+  const users = { c1: mkUser('c1', 'Wojtek3509'), c2: mkUser('c2', 'klient2'), c3: mkUser('c3', 'x'), closed: mkUser('closed', 'zamkniete', false), c4: mkUser('c4', 'nowy4'), c5: mkUser('c5', 'klient5'), c6: mkUser('c6', 'klient6'), c7: mkUser('c7', 'klient7'), staff: mkUser('staff', 'staff') };
   const roleAdds = [];
   const fakeGuild = {
     id: GID,
@@ -6464,8 +6494,10 @@ async function hostingTest() {
     assert(J(other.replies[0]).includes('Nie znaleziono'), 'cudzego zamówienia nie można anulować');
     i = await purchase('closed', form({ email: 'z@z.pl' }));
     assert(J(i.replies.at(-1)).includes('wiadomości prywatnej') && lastOrder('closed').status === 'cancelled', 'zamknięte DM → zamówienie anulowane');
+    // E-mail z kontem w panelu (połączonym z innym Discordem) → zakup przechodzi, serwer trafi na to konto.
     i = await purchase('c4', form({ email: 'jan@gmail.com' }));
-    assert(J(i.replies.at(-1)).includes('ma już konto'), 'e-mail innej osoby → błąd przed płatnością');
+    assert(lastOrder('c4')?.status === 'waiting' && !J(i.replies.at(-1)).includes('ma już konto'), 'e-mail z kontem w panelu → zakup dozwolony');
+    lastOrder('c4').status = 'cancelled';
 
     // 7b. Zmiana nazwy serwera (przycisk w DM i w /moj-hosting).
     assert(J(credentials[1]).includes(`hs:rename:${GID}:${order.serverId ?? ''}`.split(':').slice(0, 3).join(':')), 'DM z danymi ma przycisk „Zmień nazwę”');
@@ -6599,6 +6631,25 @@ async function hostingTest() {
     c = cmd('utworz', { uzytkownik: 'c2', jezyk: 'nodejs', okres: '1m', email: 'k2@wp.pl' });
     await commands.get('hosting').execute(c);
     assert(J(c.replies.at(-1)).includes('Utworzono serwer'), '/hosting utworz');
+    // Kolejny hosting na ten sam e-mail dla osoby z innym Discordem → serwer na istniejącym koncie (bez zmiany połączenia).
+    const janAccount = panel.users.find((u) => u.email === 'jan@gmail.com');
+    const usersBefore = panel.users.length;
+    c = cmd('utworz', { uzytkownik: 'c5', jezyk: 'nodejs', okres: '1m', email: 'JAN@gmail.com' });
+    await commands.get('hosting').execute(c);
+    assert(J(c.replies.at(-1)).includes('Utworzono serwer') && panel.users.length === usersBefore, 'ten sam e-mail → bez nowego konta');
+    assert(panel.servers.at(-1).user === janAccount.id && janAccount.external_id === 'discord-c1', 'serwer na koncie z tym e-mailem, połączenie bez zmian');
+    // Konto założone ręcznie (bez połączenia z Discordem) → serwer na nim i konto łączy się z klientem.
+    panel.users.push({ id: 900, email: 'reczne@wp.pl', username: 'reczne', first_name: 'R', last_name: 'K', external_id: null });
+    panel.users.push({ id: 901, email: 'xreczne@wp.pl', username: 'xreczne', first_name: 'X', last_name: 'K', external_id: null });
+    c = cmd('utworz', { uzytkownik: 'c6', jezyk: 'python', okres: '1m', email: 'reczne@wp.pl' });
+    await commands.get('hosting').execute(c);
+    assert(panel.servers.at(-1).user === 900 && panel.users.find((u) => u.id === 900).external_id === 'discord-c6', 'ręczne konto połączone z klientem');
+    assert(!panel.users.find((u) => u.id === 901).external_id, 'podobny e-mail (fragment) nie jest mylony');
+    // Konto admina nigdy nie jest łączone z klientem.
+    panel.users.push({ id: 902, email: 'admin@tanieboty.xyz', username: 'admin', first_name: 'A', last_name: 'A', external_id: null, root_admin: true });
+    c = cmd('utworz', { uzytkownik: 'c7', jezyk: 'nodejs', okres: '1m', email: 'admin@tanieboty.xyz' });
+    await commands.get('hosting').execute(c);
+    assert(panel.servers.at(-1).user === 902 && !panel.users.find((u) => u.id === 902).external_id, 'konto admina bez połączenia');
     c = cmd('lista');
     await commands.get('hosting').execute(c);
     assert(J(c.replies[0]).includes('TanieBoty × SERWERY KLIENTÓW'), '/hosting lista');

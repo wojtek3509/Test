@@ -112,6 +112,8 @@ Własne emoji wgrywasz w Developer Portal → Emojis. Kod w formacie `<:nazwa:id
 
 Klient klika **Kup hosting** (cennik albo tickety) i w formularzu wybiera język (Node.js, Python, Java albo inny), okres, sposób zakupu (⚡ automatyczny / ⏳ ręczny), płatność i e-mail (login do panelu). Serwer dostaje nazwę „Język • nazwa klienta”, którą klient zmienia przyciskiem **✏️ Zmień nazwę** (w DM z danymi serwera i w `/moj-hosting`).
 
+Konto w panelu: jeśli klient ma już konto połączone ze swoim Discordem, każdy kolejny serwer trafia na nie. Jeśli podany e-mail ma już konto w panelu (np. założone ręcznie albo dla innego Discorda), serwer dopisuje się do tego konta, a klient loguje się swoim dotychczasowym hasłem. Konto bez połączenia łączy się wtedy z Discordem klienta. To samo robi `/hosting dodaj`. Konta administratora nigdy nie są łączone z klientem.
+
 **⚡ Automatyczny (tylko krypto: LTC, ETH, USDC na Ethereum, SOL, USDC na Solanie):**
 1. Bot przelicza cenę na krypto po aktualnym kursie i dodaje **unikalną końcówkę kwoty** (np. `0.01250417 LTC`). Po niej rozpoznaje wpłatę na Twój jeden adres. W DM wysyła adres, kwotę, kod QR i przyciski „Skopiuj adres” i „Skopiuj kwotę”.
 2. Klient ma 30 minut na wpłatę. Bot co 30 sekund sprawdza blockchain przez darmowe publiczne API (Litecoin: litecoinspace.org, zapasowo BlockCypher; Ethereum: Blockscout; Solana RPC). Kursy PLN pobiera z Coinbase, a gdy nie odpowiada, z CoinGecko (opcjonalnie `coingeckoApiKey`, darmowy klucz „Demo”).
