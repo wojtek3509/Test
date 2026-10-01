@@ -13,6 +13,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  ComponentType,
   Client,
   ContainerBuilder,
   Events,
@@ -3228,8 +3229,131 @@ async function announceBoost(discordGuild, user) {
   return Boolean(sent);
 }
 
+// ═══ ANTYSPAM ══════════════════════════════════════════════════════════
+// 7 wiadomości w 15 s (razem ze wszystkich kanałów) = przerwa na 7 dni i usunięcie tych wiadomości.
+// Admini i kanały ticketów są pomijani. Informacja trafia na kanał logów z przyciskiem „Zdejmij mute”.
+const spamRule = { messages: 7, windowMs: 15_000, muteDays: 7 };
+/** `${guildId}:${userId}` → ostatnie wiadomości { id, channel, at }. */
+const spamTracker = new Map();
+/** `${guildId}:${userId}` → kiedy ukarany (wiadomości wysłane tuż po karze też znikają). */
+const spamPunished = new Map();
+const SPAM_AFTERMATH_MS = 60_000;
+const countedTypes = [MessageType.Default, MessageType.Reply];
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, list] of spamTracker) if (!list.some((m) => now - m.at < spamRule.windowMs)) spamTracker.delete(key);
+  for (const [key, at] of spamPunished) if (now - at > SPAM_AFTERMATH_MS) spamPunished.delete(key);
+}, 60_000).unref();
+
+/** Usuwa wiadomości z listy — kanał po kanale, hurtem (Discord pozwala do 100 naraz). */
+async function deleteTracked(list) {
+  const byChannel = new Map();
+  for (const m of list) {
+    if (!byChannel.has(m.channel.id)) byChannel.set(m.channel.id, { channel: m.channel, ids: [] });
+    byChannel.get(m.channel.id).ids.push(m.id);
+  }
+  let deleted = 0;
+  for (const { channel, ids } of byChannel.values()) {
+    if (ids.length === 1) {
+      deleted += await channel.messages
+        .delete(ids[0])
+        .then(() => 1)
+        .catch(() => 0);
+    } else {
+      deleted += await channel
+        .bulkDelete(ids, true)
+        .then((res) => res?.size ?? ids.length)
+        .catch((err) => (console.warn(`Antyspam: usuwanie w #${channel.name}:`, err.message), 0));
+    }
+  }
+  return deleted;
+}
+
+function spamLogView(user, info, unmutedBy = null) {
+  const b = box(unmutedBy ? colors.success : colors.danger);
+  text(
+    b,
+    [
+      title('Antyspam', '🛡️'),
+      row('Osoba', `${user} (\`${user.id}\`)`),
+      row('Wiadomości', `**${info.count}** w ${spamRule.windowMs / 1000} s, usunięto **${info.deleted}**`),
+      row('Kanały', info.channelIds.map((id) => `<#${id}>`).join(', ')),
+      info.muted ? row('Mute', `${spamRule.muteDays} dni, do <t:${Math.floor(info.until / 1000)}:f>`) : row('Mute', `❌ nie udało się — ${info.muteError}`),
+      unmutedBy ? row('Zdjęty przez', `${unmutedBy}`) : null,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+  if (info.muted && !unmutedBy) {
+    b.addActionRowComponents((r) =>
+      r.addComponents(new ButtonBuilder().setCustomId(`as:unmute:${user.id}`).setLabel('Zdejmij mute (admin)').setEmoji('🔊').setStyle(ButtonStyle.Secondary)),
+    );
+  }
+  return b;
+}
+
+/** Zwraca true, jeśli wiadomość była spamem (i została obsłużona). */
+async function onSpamCheck(message) {
+  if (message.author?.bot || message.webhookId || !countedTypes.includes(message.type)) return false;
+  const g = guild(message.guild.id);
+  if (g.tickets[message.channelId]) return false;
+  if (isStaff(message.member, g.settings) || message.author.id === message.guild.ownerId) return false;
+
+  const key = `${message.guild.id}:${message.author.id}`;
+  const entry = { id: message.id, channel: message.channel, at: message.createdTimestamp ?? Date.now() };
+  // Wiadomości wysłane, zanim mute zadziałał, też znikają.
+  if (spamPunished.has(key)) {
+    await deleteTracked([entry]);
+    return true;
+  }
+  const list = (spamTracker.get(key) ?? []).filter((m) => entry.at - m.at < spamRule.windowMs);
+  list.push(entry);
+  spamTracker.set(key, list);
+  if (list.length < spamRule.messages) return false;
+
+  spamPunished.set(key, Date.now());
+  spamTracker.delete(key);
+  const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
+  const until = Date.now() + spamRule.muteDays * 86_400_000;
+  let muteError = null;
+  if (!member) muteError = 'osoby nie ma już na serwerze';
+  else if (!member.moderatable) muteError = 'bot ma niższą rolę niż ta osoba albo brak uprawnienia „Wycisz członków”';
+  else {
+    muteError = await member
+      .timeout(spamRule.muteDays * 86_400_000, `Antyspam: ${list.length} wiadomości w ${spamRule.windowMs / 1000} s`)
+      .then(() => null)
+      .catch((err) => err.message);
+  }
+  const deleted = await deleteTracked(list);
+  const info = { count: list.length, deleted, channelIds: [...new Set(list.map((m) => m.channel.id))], muted: !muteError, muteError, until };
+  console.log(`🛡️ Antyspam: ${message.author.tag ?? message.author.id} — ${list.length} wiadomości, usunięto ${deleted}, mute: ${muteError ? `nie (${muteError})` : `${spamRule.muteDays} dni`}`);
+  const logError = await sendTo(message.guild, g.settings.logChannelId, { components: [spamLogView(message.author, info)], flags: V2, allowedMentions: { parse: [] } });
+  if (logError) console.warn('Antyspam: brak logu —', logError);
+  return true;
+}
+
+async function onSpamUnmute(i, userId) {
+  const g = guild(i.guildId);
+  if (!isStaff(i.member, g.settings)) return replyFail(i, 'Tylko admin może to zrobić.');
+  const member = await i.guild.members.fetch(userId).catch(() => null);
+  if (!member) return replyFail(i, 'Tej osoby nie ma już na serwerze.');
+  const error = await member
+    .timeout(null, `Antyspam: mute zdjęty przez ${i.user.tag}`)
+    .then(() => null)
+    .catch((err) => err.message);
+  if (error) return replyFail(i, `Nie udało się zdjąć mute: ${error}`);
+  spamPunished.delete(`${i.guildId}:${userId}`);
+  // Karta w logach: zielona, z informacją kto zdjął, bez przycisku.
+  const card = i.message.components[0];
+  const lines = card?.components?.find((c) => c.type === ComponentType.TextDisplay)?.content ?? '';
+  const b = text(box(colors.success), `${lines}\n${row('Zdjęty przez', `${i.user}`)}`);
+  return i.update({ components: [b], flags: V2, allowedMentions: { parse: [] } });
+}
+
 async function onMessage(message) {
   if (!message.guild) return;
+  if (await onSpamCheck(message)) return;
   if (await onLegitCheckMessage(message)) return;
   if (!boostTypes.includes(message.type)) return;
   await announceBoost(message.guild, message.author);
@@ -4355,6 +4479,25 @@ command(
   },
 );
 
+command(
+  new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Usuń ostatnie wiadomości na tym kanale')
+    .addIntegerOption((o) => o.setName('ilosc').setDescription('Ile wiadomości usunąć (1–100)').setMinValue(1).setMaxValue(100).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .setDMPermission(false),
+  async (i) => {
+    const amount = i.options.getInteger('ilosc');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    // true = pomija wiadomości starsze niż 14 dni (Discord nie pozwala usuwać ich hurtem).
+    const deleted = await i.channel.bulkDelete(amount, true).catch((err) => err);
+    if (deleted instanceof Error) return i.editReply({ components: [fail(describeError(deleted))], flags: V2 });
+    const old = deleted.size < amount ? `\nPozostałe są starsze niż 14 dni albo kanał ma mniej wiadomości — Discord nie pozwala usuwać starszych hurtem.` : '';
+    console.log(`🧹 /clear: ${i.user.tag} usunął ${deleted.size} wiadomości w #${i.channel.name}`);
+    return i.editReply({ components: [ok(`Usunięto **${deleted.size}** wiadomości na <#${i.channelId}>.${old}`)], flags: V2 });
+  },
+);
+
 const serverOption = (o) => o.setName('serwer').setDescription('ID serwera w panelu (z /hosting lista)').setMinValue(1).setRequired(true);
 const langChoices = (withOther) =>
   Object.entries(hostingLanguages)
@@ -4645,6 +4788,7 @@ async function route(i) {
   }
 
   if (scope === 'gen' && i.isButton()) return onGenerateButton(i, action, arg);
+  if (scope === 'as' && action === 'unmute' && i.isButton()) return onSpamUnmute(i, arg);
 
   if (scope === 'gw' && i.isButton()) {
     if (action === 'join') return onGiveawayJoin(i);
@@ -5743,6 +5887,126 @@ function hostingViewsForTest() {
   ];
 }
 
+// ─── Test antyspamu i /clear (symulacja) ───────────────────────────────
+
+async function antispamTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test antyspamu nie przeszedł: ${msg}`);
+  };
+  const GID = 'spam-guild';
+  const deleted = [];
+  const logs = [];
+  const timeouts = [];
+  const mkChannel = (id) => ({
+    id,
+    name: id,
+    bulkDelete: async (ids) => (deleted.push(...ids.map((m) => `${id}/${m}`)), new Map(ids.map((m) => [m, m]))),
+    messages: { delete: async (m) => deleted.push(`${id}/${m}`) },
+  });
+  const ch = { a: mkChannel('a'), b: mkChannel('b'), c: mkChannel('c'), ticket: mkChannel('ticket') };
+  const fakeGuild = {
+    id: GID,
+    ownerId: 'owner',
+    channels: { fetch: async (id) => (id === 'log' ? { name: 'log', send: async (p) => logs.push(p) } : null) },
+    members: { fetch: async () => null },
+  };
+  const mkMember = (id, staff = false) => ({
+    id,
+    moderatable: true,
+    permissions: { has: () => staff },
+    roles: { cache: new Map() },
+    timeout: async (ms) => timeouts.push({ id, ms }),
+  });
+  let n = 0;
+  let clock = Date.now();
+  const send = (member, channel, at = (clock += 1000)) =>
+    onMessage({
+      id: `m${++n}`,
+      guild: fakeGuild,
+      channel: ch[channel],
+      channelId: channel,
+      type: MessageType.Default,
+      author: { id: member.id, tag: member.id, bot: false, toString: () => `<@${member.id}>` },
+      member,
+      createdTimestamp: at,
+    });
+  const g = guild(GID);
+  Object.assign(g.settings, { logChannelId: 'log' });
+  g.tickets.ticket = { channelId: 'ticket', userId: 'spammer' };
+  spamTracker.clear();
+  spamPunished.clear();
+  const log = console.log;
+  console.log = () => {};
+  try {
+    // 1. Normalne pisanie: 6 wiadomości w 15 s nie wystarcza.
+    const normal = mkMember('normal');
+    for (let k = 0; k < 6; k++) await send(normal, 'a');
+    assert(!timeouts.length && !deleted.length, '6 wiadomości to nie spam');
+
+    // 2. Wolne pisanie: 7 wiadomości, ale co 3 s (ponad 15 s) — bez kary.
+    const slow = mkMember('slow');
+    for (let k = 0; k < 7; k++) await send(slow, 'a', (clock += 3000));
+    assert(!timeouts.length, 'wolne pisanie bez kary');
+
+    // 3. Spam na kilku kanałach: 7 w kilka sekund → mute 7 dni, wszystkie usunięte, log z przyciskiem.
+    const spammer = mkMember('spammer');
+    for (const c of ['a', 'b', 'c', 'a', 'b', 'c', 'a']) await send(spammer, c);
+    assert(timeouts.length === 1 && timeouts[0].id === 'spammer' && timeouts[0].ms === 7 * 86_400_000, 'mute na 7 dni');
+    assert(deleted.length === 7 && deleted.filter((d) => d.startsWith('a/')).length === 3, 'usunięte wszystkie 7 wiadomości z 3 kanałów');
+    const card = JSON.stringify(logs[0].components[0].toJSON());
+    assert(card.includes('ANTYSPAM') && card.includes('<@spammer>') && card.includes('<#b>') && card.includes('as:unmute:spammer'), 'log z kanałami i przyciskiem');
+
+    // 4. Wiadomość wysłana tuż po karze też znika, bez drugiego mute.
+    await send(spammer, 'b');
+    assert(deleted.length === 8 && timeouts.length === 1 && logs.length === 1, 'wiadomość po karze usunięta, bez dubla');
+
+    // 5. Admin i ticket są pomijani.
+    const admin = mkMember('admin', true);
+    for (let k = 0; k < 10; k++) await send(admin, 'a');
+    spamPunished.clear();
+    for (let k = 0; k < 10; k++) await send(spammer, 'ticket');
+    assert(timeouts.length === 1 && deleted.length === 8, 'admin i ticket bez kary');
+
+    // 6. „Zdejmij mute”: tylko admin, potem karta bez przycisku.
+    const reply = [];
+    const btn = (member) => ({
+      guildId: GID,
+      member,
+      user: { tag: member.id, toString: () => `<@${member.id}>` },
+      guild: { members: { fetch: async () => spammer } },
+      message: logs[0],
+      reply: async (p) => reply.push(p),
+      update: async (p) => reply.push(p),
+    });
+    await onSpamUnmute(btn(normal), 'spammer');
+    assert(timeouts.length === 1 && JSON.stringify(reply[0].components[0].toJSON()).includes('Tylko admin'), 'zwykła osoba nie zdejmie mute');
+    const fromApi = { components: [{ components: logs[0].components[0].toJSON().components.map((c) => ({ ...c })) }] };
+    await onSpamUnmute({ ...btn(admin), message: fromApi }, 'spammer');
+    const updated = JSON.stringify(reply[1].components[0].toJSON());
+    assert(timeouts[1].ms === null && updated.includes('Zdjęty przez') && !updated.includes('as:unmute'), 'admin zdejmuje mute');
+
+    // 7. /clear: usuwa podaną liczbę i mówi, ile się udało.
+    let asked = 0;
+    const edits = [];
+    await commands.get('clear').execute({
+      options: { getInteger: () => 5 },
+      user: { tag: 'admin' },
+      channelId: 'a',
+      channel: { name: 'a', bulkDelete: async (amount) => ((asked = amount), new Map([['1', 1], ['2', 2], ['3', 3]])) },
+      deferReply: async () => {},
+      editReply: async (p) => edits.push(p),
+    });
+    const clearMsg = JSON.stringify(edits[0].components[0].toJSON());
+    assert(asked === 5 && clearMsg.includes('**3**') && clearMsg.includes('14 dni'), '/clear z informacją o starszych wiadomościach');
+  } finally {
+    console.log = log;
+    spamTracker.clear();
+    spamPunished.clear();
+    delete store.guilds[GID];
+  }
+  console.log('✅ Test antyspamu i /clear: 7 scenariuszy OK');
+}
+
 async function hostingTest() {
   const assert = (cond, msg) => {
     if (!cond) throw new Error(`Test hostingu nie przeszedł: ${msg}`);
@@ -6376,6 +6640,7 @@ if (process.argv.includes('--check')) {
   await verificationTest();
   await boostTest();
   await hostingTest();
+  await antispamTest();
   process.exit(0);
 }
 
