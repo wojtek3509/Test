@@ -149,6 +149,8 @@ const ticketTypes = {
       { id: 'desc', label: 'Opisz bota', style: 'long', placeholder: 'Tickety, weryfikacja, konkursy, ekonomia…' },
       { id: 'budget', label: 'Budżet (PLN)', placeholder: 'np. 50' },
       { id: 'deadline', label: 'Na kiedy?', placeholder: 'np. do piątku / bez pośpiechu', required: false },
+      // „Inna” → przed utworzeniem ticketu klient wpisuje swoją metodę w osobnym okienku.
+      { id: 'payment', label: 'Płatność', select: 'orderPayments' },
     ],
   },
   hosting: {
@@ -341,6 +343,13 @@ const payments = {
   usdc: { label: 'USDC', emoji: '💵' },
 };
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
+/** Płatność w zamówieniu bota: wszystkie z listy + „Inna” (klient wpisuje ją sam). */
+const OTHER_PAYMENT = 'inne';
+const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]), ['✏️ Inna — wpiszesz ją za chwilę', OTHER_PAYMENT]];
+/** Opcje pola wyboru (lista albo nazwa listy liczonej później, np. 'orderPayments'). */
+const selectOptions = (f) => (f.select === 'orderPayments' ? orderPaymentOptions() : f.select);
+/** Płatność z formularza do pokazania: wybrana z listy albo wpisana przez klienta. */
+const formPaymentLabel = (form) => (form.payment === OTHER_PAYMENT ? `✏️ ${form.paymentOther ?? 'inna'}` : paymentName(form.payment));
 
 // Przykładowe vouche pokazywane na kanale legit checków (panel „Jak napisać voucha?”).
 const vouchExamples = ['+rep @sprzedawca Bot discord [ 30 PLN ] [ BLIK ]', '+rep @sprzedawca Hosting 3 miesiące [ 14 PLN ] [ PAYPAL ]'];
@@ -1019,7 +1028,7 @@ function ticketModal(type) {
             new StringSelectMenuBuilder()
               .setCustomId(f.id)
               .setPlaceholder('Wybierz…')
-              .addOptions(f.select.map(([name, value]) => ({ label: name, value }))),
+              .addOptions(selectOptions(f).map(([name, value]) => ({ label: name, value }))),
           );
         }
         const input = new TextInputBuilder()
@@ -1049,7 +1058,12 @@ function ticketMessage(ticket, user) {
   const answers = t.fields
     .filter((f) => ticket.form[f.id])
     .map((f) => {
-      const value = f.select ? (f.select.find(([, v]) => v === ticket.form[f.id])?.[0] ?? ticket.form[f.id]) : ticket.form[f.id];
+      const value =
+        f.select === 'orderPayments'
+          ? formPaymentLabel(ticket.form)
+          : f.select
+            ? (f.select.find(([, v]) => v === ticket.form[f.id])?.[0] ?? ticket.form[f.id])
+            : ticket.form[f.id];
       return f.style === 'long' ? `${point(`**${f.label}:**`)}\n${codeBlock(value)}` : row(f.label, `\`${value}\``);
     });
   const renew = ticket.form.renew && ticket.guildId ? guild(ticket.guildId).hosting.servers[ticket.form.renew] : null;
@@ -1175,7 +1189,50 @@ async function onTicketForm(i, type) {
     if (form.mode === 'auto') return onAutoPurchase(i, i.guildId, form);
   }
   if (openTicketsOf(i.guildId, i.user.id).length >= guild(i.guildId).settings.maxOpen) return replyV2(i, fail('Osiągnięto limit otwartych ticketów.'));
+  // „Inna” płatność: ticket powstaje dopiero, gdy klient wpisze swoją metodę (formularza nie da się otworzyć z formularza, więc przycisk).
+  if (form.payment === OTHER_PAYMENT) {
+    pendingTicketForms.set(`${i.guildId}:${i.user.id}`, { type, form, at: Date.now() });
+    return i.reply({ components: [otherPaymentPrompt(type)], flags: V2_EPHEMERAL });
+  }
+  return openTicketFromForm(i, type, form);
+}
 
+/** Formularze czekające na wpisanie „innej” płatności (`serwer:osoba`). Ważne 15 minut. */
+const pendingTicketForms = new Map();
+const PENDING_FORM_MS = 15 * 60_000;
+
+function otherPaymentPrompt(type) {
+  const b = box(colors.brand);
+  text(b, [title('Inna płatność', '✏️'), '>>> Wybrałeś/aś **inną** metodę płatności. Kliknij przycisk poniżej i wpisz, jak chcesz zapłacić — potem utworzy się ticket.'].join('\n'));
+  b.addActionRowComponents((r) =>
+    r.setComponents(new ButtonBuilder().setCustomId(`tk:otherpay:${type}`).setLabel('Wpisz płatność').setEmoji('✏️').setStyle(ButtonStyle.Primary)),
+  );
+  return b;
+}
+
+const otherPaymentModal = (type) =>
+  new ModalBuilder()
+    .setCustomId(`tk:otherpaysubmit:${type}`)
+    .setTitle('✏️ Inna płatność')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Jak chcesz zapłacić?')
+        .setTextInputComponent(new TextInputBuilder().setCustomId('payment').setStyle(TextInputStyle.Short).setPlaceholder('np. Revolut, przelew, Skrill, karta podarunkowa').setMinLength(2).setMaxLength(40)),
+    );
+
+async function onOtherPayment(i, type) {
+  const pending = pendingTicketForms.get(`${i.guildId}:${i.user.id}`);
+  if (!pending || pending.type !== type || Date.now() - pending.at > PENDING_FORM_MS) {
+    return replyV2(i, fail('Formularz wygasł. Wybierz kategorię ticketu jeszcze raz.'));
+  }
+  if (i.isButton()) return i.showModal(otherPaymentModal(type));
+  pendingTicketForms.delete(`${i.guildId}:${i.user.id}`);
+  const form = { ...pending.form, paymentOther: i.fields.getTextInputValue('payment').replace(/[`\n]/g, ' ').trim() };
+  if (openTicketsOf(i.guildId, i.user.id).length >= guild(i.guildId).settings.maxOpen) return replyV2(i, fail('Osiągnięto limit otwartych ticketów.'));
+  return openTicketFromForm(i, type, form);
+}
+
+async function openTicketFromForm(i, type, form) {
   await i.deferReply({ flags: V2_EPHEMERAL });
   const { channel, error } = await createTicket(i.client, i.guild, i.user, type, form);
   if (error) return i.editReply({ components: [fail(error)], flags: V2 });
@@ -1284,7 +1341,12 @@ function closeReasonModal() {
     );
 }
 
-function doneModal() {
+/** „Zrealizowane”: płatność z zamówienia jest od razu zaznaczona (a wpisana „inna” jest na liście). */
+function doneModal(ticket = null) {
+  const chosen = ticket?.form?.payment;
+  const other = chosen === OTHER_PAYMENT && ticket.form.paymentOther ? ticket.form.paymentOther : null;
+  const options = Object.entries(payments).map(([value, m]) => ({ label: m.label, value, emoji: m.emoji, default: value === chosen }));
+  if (other) options.push({ label: other.slice(0, 100), value: OTHER_PAYMENT, emoji: '✏️', default: true });
   return new ModalBuilder()
     .setCustomId('tk:donesubmit')
     .setTitle('✅ Zamówienie zrealizowane')
@@ -1303,7 +1365,7 @@ function doneModal() {
           new StringSelectMenuBuilder()
             .setCustomId('payment')
             .setPlaceholder('Wybierz metodę płatności…')
-            .addOptions(Object.entries(payments).map(([value, m]) => ({ label: m.label, value, emoji: m.emoji }))),
+            .addOptions(options),
         ),
     );
 }
@@ -1407,6 +1469,8 @@ async function onDoneSubmit(i) {
     payment: i.fields.getStringSelectValues('payment')[0],
     sellerId: i.user.id,
   };
+  // Wpisana przez klienta „inna” płatność trafia do voucha jako tekst (np. [ REVOLUT ]).
+  if (deal.payment === OTHER_PAYMENT) deal.payment = getTicket(i.guildId, i.channelId)?.form?.paymentOther ?? 'inna';
   if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup kanaly legitcheck:#kanał`.'));
   updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, decidedBy: i.user.id }));
   const updated = getTicket(i.guildId, i.channelId);
@@ -5371,6 +5435,7 @@ async function route(i) {
       return i.message.edit({ components: [ticketsPanel(guild(i.guildId), logoOf(i.guild, i.client))], flags: V2 }).catch(() => {});
     }
     if (i.isModalSubmit() && action === 'form') return onTicketForm(i, arg);
+    if ((i.isButton() && action === 'otherpay') || (i.isModalSubmit() && action === 'otherpaysubmit')) return onOtherPayment(i, arg);
     if (i.isModalSubmit() && action === 'donesubmit') return onDoneSubmit(i);
     if (i.isModalSubmit() && action === 'closesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason'), result: 'closed' });
     if (i.isModalSubmit() && action === 'notdonesubmit') return closeTicket(i, { reason: i.fields.getTextInputValue('reason') || null });
@@ -5382,7 +5447,7 @@ async function route(i) {
       if (action === 'done' || action === 'notdone') {
         const { error } = staffTicket(i);
         if (error) return replyV2(i, fail(error));
-        return i.showModal(action === 'done' ? doneModal() : notDoneModal());
+        return i.showModal(action === 'done' ? doneModal(getTicket(i.guildId, i.channelId)) : notDoneModal());
       }
       if (action === 'copyrep') {
         const ticket = getTicket(i.guildId, i.channelId);
@@ -6840,6 +6905,83 @@ async function uploadGuardTest() {
   console.log('✅ Test blokady plików: ponowienie bez banerów i transcriptów OK');
 }
 
+// ─── Test płatności w zamówieniu bota (symulacja) ──────────────────────
+
+async function botPaymentTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test płatności bota nie przeszedł: ${msg}`);
+  };
+  const GID = 'pay-guild';
+  const g = guild(GID);
+  Object.assign(g.settings, { categoryId: 'cat', staffRoleId: 'staff', maxOpen: 2 });
+  const sent = [];
+  const fakeChannel = { id: 'tch', toString: () => '<#tch>', send: async (p) => (sent.push(p), { id: `m${sent.length}`, pin: async () => {}, delete: async () => {} }) };
+  const fakeGuild = { id: GID, roles: { everyone: { id: GID } }, channels: { create: async () => fakeChannel } };
+  const user = { id: 'k1', username: 'klient', tag: 'klient', displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' };
+  const J = (p) => JSON.stringify(p?.components?.map((c) => c.toJSON?.() ?? c) ?? p?.toJSON?.() ?? p);
+  const mk = (extra) => {
+    const out = { replies: [], modal: null };
+    return Object.assign(out, {
+      guildId: GID,
+      guild: fakeGuild,
+      user,
+      client: { user: { id: 'bot' } },
+      isButton: () => false,
+      isModalSubmit: () => true,
+      reply: async (p) => out.replies.push(p),
+      deferReply: async () => {},
+      editReply: async (p) => out.replies.push(p),
+      showModal: async (m) => (out.modal = m),
+      ...extra,
+    });
+  };
+  const values = { payment: 'inne' };
+  const texts = { desc: 'Bot do ticketów', budget: '50', deadline: '' };
+  const fields = { getStringSelectValues: (id) => (values[id] ? [values[id]] : []), getTextInputValue: (id) => texts[id] ?? '' };
+
+  // 1. Formularz ma pole „Płatność” z całą listą i „Inna”.
+  const modal = JSON.stringify(ticketModal('bot').toJSON());
+  assert(modal.includes('Płatność') && modal.includes('BLIK') && modal.includes('PayPal') && modal.includes('"value":"inne"'), 'pole płatności z „Inna”');
+  assert(ticketTypes.bot.fields.length <= 5, 'maks. 5 pól w formularzu');
+
+  // 2. Zwykła płatność → ticket od razu, płatność na karcie.
+  values.payment = 'blik';
+  let i = mk({ fields });
+  await onTicketForm(i, 'bot');
+  const card = J(sent.find((p) => p.components)).toString();
+  assert(J(i.replies.at(-1)).includes('Ticket utworzony') && card.includes('BLIK'), 'zwykła płatność → ticket od razu');
+
+  // 3. „Inna” → najpierw prośba o wpisanie (bez ticketu), przycisk otwiera okienko, potem ticket.
+  values.payment = 'inne';
+  const before = sent.length;
+  i = mk({ fields });
+  await onTicketForm(i, 'bot');
+  assert(sent.length === before && J(i.replies.at(-1)).includes('tk:otherpay:bot'), '„Inna” → przycisk, ticket jeszcze nie powstał');
+  const btn = mk({ isButton: () => true, isModalSubmit: () => false });
+  await onOtherPayment(btn, 'bot');
+  assert(JSON.stringify(btn.modal.toJSON()).includes('Jak chcesz zapłacić'), 'przycisk otwiera okienko płatności');
+  i = mk({ fields: { getTextInputValue: () => 'Revolut' } });
+  await onOtherPayment(i, 'bot');
+  const t = Object.values(g.tickets).at(-1);
+  assert(t.form.payment === 'inne' && t.form.paymentOther === 'Revolut' && J(i.replies.at(-1)).includes('Ticket utworzony'), 'ticket z wpisaną płatnością');
+  assert(J({ components: [ticketMessage(t, user)] }).includes('✏️ Revolut'), 'karta ticketu pokazuje wpisaną płatność');
+  // Drugie wysłanie tego samego okienka nie tworzy drugiego ticketu.
+  i = mk({ fields: { getTextInputValue: () => 'Revolut' } });
+  await onOtherPayment(i, 'bot');
+  assert(J(i.replies.at(-1)).includes('wygasł'), 'formularz użyty raz');
+
+  // 4. „Zrealizowane”: płatność z ticketu zaznaczona, a vouch ma wpisaną płatność.
+  const done = JSON.stringify(doneModal(t).toJSON());
+  assert(done.includes('"label":"Revolut"') && /"value":"inne","emoji":\{[^}]*\},"default":true|"default":true[^}]*"value":"inne"|"value":"inne"[^}]*"default":true/.test(done), '„Zrealizowane” z zaznaczoną płatnością klienta');
+  const blikTicket = { form: { payment: 'blik' } };
+  assert(/"value":"blik"[^}]*"default":true|"default":true[^}]*"value":"blik"/.test(JSON.stringify(doneModal(blikTicket).toJSON())), 'BLIK zaznaczony');
+  t.deal = { sellerId: 'staff', product: 'Bot', price: '50 PLN', payment: 'Revolut' };
+  assert(repTemplate(t).endsWith('[ REVOLUT ]'), 'vouch z wpisaną płatnością');
+
+  delete store.guilds[GID];
+  console.log('✅ Test płatności w zamówieniu bota: lista, „Inna” z okienkiem, Zrealizowane OK');
+}
+
 async function hostingTest() {
   const assert = (cond, msg) => {
     if (!cond) throw new Error(`Test hostingu nie przeszedł: ${msg}`);
@@ -7503,6 +7645,7 @@ if (process.argv.includes('--check')) {
   await antispamTest();
   await serverLogsTest();
   await uploadGuardTest();
+  await botPaymentTest();
   process.exit(0);
 }
 
