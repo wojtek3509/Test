@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ActivityType,
   AttachmentBuilder,
+  AuditLogEvent,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -457,6 +458,20 @@ const serverLayout = {
         { emoji: '💬', name: 'admin-czat', mode: 'open', report: true },
       ],
     },
+    // Logi serwera — każdy rodzaj na swoim kanale (te same, co /setup logi-utworz).
+    {
+      emoji: '📜',
+      name: 'LOGI',
+      private: true,
+      channels: [
+        { emoji: '💬', name: 'logi-wiadomości', mode: 'open', serverLog: 'wiadomosci' },
+        { emoji: '🚪', name: 'logi-wejścia', mode: 'open', serverLog: 'wejscia' },
+        { emoji: '👤', name: 'logi-członkowie', mode: 'open', serverLog: 'czlonkowie' },
+        { emoji: '🔨', name: 'logi-moderacja', mode: 'open', serverLog: 'moderacja' },
+        { emoji: '⚙️', name: 'logi-serwer', mode: 'open', serverLog: 'serwer' },
+        { emoji: '🔊', name: 'logi-głosowe', mode: 'open', serverLog: 'glosowe' },
+      ],
+    },
   ],
 };
 
@@ -554,6 +569,7 @@ function guild(id) {
   g.invites ??= {};
   g.settings.ticketCategories ??= {};
   g.settings.ticketLogs ??= {};
+  g.settings.serverLogs ??= {};
   g.joins ??= {};
   g.hosting ??= {};
   g.hosting.orders ??= {};
@@ -1137,7 +1153,7 @@ function ticketChannelName(user) {
 
 async function onTicketSelect(i, type) {
   const { settings } = guild(i.guildId);
-  if (!ticketCategoryFor(settings, type)) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup` albo `/generuj`.'));
+  if (!ticketCategoryFor(settings, type)) return replyV2(i, fail('Bot nie jest skonfigurowany. Administrator musi użyć `/setup podstawowe` albo `/generuj`.'));
   const open = openTicketsOf(i.guildId, i.user.id);
   // Hosting: zakup automatyczny nie otwiera ticketu, więc limit sprawdzamy dopiero przy zakupie ręcznym.
   if (type !== 'hosting' && open.length >= settings.maxOpen) {
@@ -1196,7 +1212,7 @@ async function createTicket(client, discordGuild, user, type, form) {
     });
   } catch (err) {
     console.error(err);
-    return { error: 'Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup`.' };
+    return { error: 'Nie udało się utworzyć kanału. Sprawdź uprawnienia bota i kategorię w `/setup pokaz`.' };
   }
 
   const ticket = { channelId: channel.id, guildId: discordGuild.id, number, type, userId: user.id, openedAt: Date.now(), form };
@@ -1391,7 +1407,7 @@ async function onDoneSubmit(i) {
     payment: i.fields.getStringSelectValues('payment')[0],
     sellerId: i.user.id,
   };
-  if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.'));
+  if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup kanaly legitcheck:#kanał`.'));
   updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, decidedBy: i.user.id }));
   const updated = getTicket(i.guildId, i.channelId);
 
@@ -1421,6 +1437,7 @@ function matchesTicketRep(message, ticket) {
 
 /** Usuwa wiadomość i na chwilę pokazuje autorowi, dlaczego. */
 async function rejectLcMessage(message, content) {
+  markBotDeleted(message.id);
   await message.delete().catch(() => {});
   const warning = await message.channel
     .send({ components: [notice(content, colors.warning)], flags: V2, allowedMentions: { users: [message.author.id] } })
@@ -2915,7 +2932,7 @@ function reviewModal(guildId) {
 
 async function onReviewOpen(i, guildId) {
   const g = guild(guildId);
-  if (!g.settings.reviewChannelId) return replyV2(i, fail('Kanał opinii nie jest ustawiony. Administrator musi użyć `/setup`.'));
+  if (!g.settings.reviewChannelId) return replyV2(i, fail('Kanał opinii nie jest ustawiony. Administrator musi użyć `/setup kanaly opinie:#kanał`.'));
   const last = [...g.reviews].reverse().find((r) => r.userId === i.user.id);
   if (last && Date.now() - last.at < reviewCooldownMinutes * 60_000) {
     return replyV2(i, fail(`Możesz dodać kolejną opinię ${ts(last.at + reviewCooldownMinutes * 60_000)}.`));
@@ -3227,7 +3244,7 @@ const BOOST_DEDUPE_MS = 2 * 60_000;
 async function announceBoost(discordGuild, user) {
   const { settings } = guild(discordGuild.id);
   if (!settings.boostChannelId) {
-    console.warn(`Boost od ${user.tag ?? user.id}: brak kanału boostów — ustaw go: /setup boosty:#kanał`);
+    console.warn(`Boost od ${user.tag ?? user.id}: brak kanału boostów — ustaw go: /setup kanaly boosty:#kanał`);
     return false;
   }
   const key = `${discordGuild.id}:${user.id}`;
@@ -3235,7 +3252,7 @@ async function announceBoost(discordGuild, user) {
   recentBoosts.set(key, Date.now());
   const channel = await discordGuild.channels.fetch(settings.boostChannelId).catch(() => null);
   if (!channel) {
-    console.warn('Boost: kanał boostów nie istnieje albo bot go nie widzi — ustaw go ponownie: /setup boosty:#kanał');
+    console.warn('Boost: kanał boostów nie istnieje albo bot go nie widzi — ustaw go ponownie: /setup kanaly boosty:#kanał');
     return false;
   }
   const fresh = await discordGuild.fetch().catch(() => discordGuild);
@@ -3269,6 +3286,7 @@ setInterval(() => {
 
 /** Usuwa wiadomości z listy — kanał po kanale, hurtem (Discord pozwala do 100 naraz). */
 async function deleteTracked(list) {
+  for (const m of list) markBotDeleted(m.id);
   const byChannel = new Map();
   for (const m of list) {
     if (!byChannel.has(m.channel.id)) byChannel.set(m.channel.id, { channel: m.channel, ids: [] });
@@ -3385,6 +3403,467 @@ async function onMemberUpdate(oldMember, newMember) {
   if (oldMember.partial || newMember.user?.bot) return;
   if (oldMember.premiumSinceTimestamp || !newMember.premiumSinceTimestamp) return;
   await announceBoost(newMember.guild, newMember.user);
+}
+
+// ═══ LOGI SERWERA ══════════════════════════════════════════════════════
+// Każdy rodzaj zdarzeń trafia na swój kanał (/setup logi albo /setup logi-utworz, /setup pokaz).
+// Kto coś zrobił i z jakim powodem — z dziennika zdarzeń serwera (bot potrzebuje uprawnienia „Wyświetlanie dziennika zdarzeń”).
+const serverLogTypes = {
+  wiadomosci: { emoji: '💬', label: 'Wiadomości', channel: 'logi-wiadomości', about: 'usunięte, edytowane i masowo usunięte wiadomości' },
+  wejscia: { emoji: '🚪', label: 'Wejścia i wyjścia', channel: 'logi-wejścia', about: 'kto wszedł (wiek konta, zaproszenie) i kto wyszedł (role, czas na serwerze)' },
+  czlonkowie: { emoji: '👤', label: 'Członkowie', channel: 'logi-członkowie', about: 'zmiany nicków, ról i avatarów' },
+  moderacja: { emoji: '🔨', label: 'Moderacja', channel: 'logi-moderacja', about: 'bany, odbany, wyrzucenia, mute, wyciszenia i rozłączenia na głosowych' },
+  serwer: { emoji: '⚙️', label: 'Serwer', channel: 'logi-serwer', about: 'kanały, role, uprawnienia, ustawienia serwera, emoji, zaproszenia, webhooki, boty' },
+  glosowe: { emoji: '🔊', label: 'Kanały głosowe', channel: 'logi-głosowe', about: 'wejścia, wyjścia i przejścia między kanałami głosowymi' },
+};
+const logColors = { add: colors.success, remove: colors.danger, change: colors.warning, info: colors.brand };
+/** Wiadomości usunięte przez samego bota (antyspam, legit check) — nie zaśmiecają logów. */
+const botDeletedMessages = new Set();
+const markBotDeleted = (id) => {
+  botDeletedMessages.add(id);
+  setTimeout(() => botDeletedMessages.delete(id), 60_000).unref?.();
+};
+/** Kanał → kto ostatnio użył /clear (do opisu masowego usunięcia). */
+const clearedBy = new Map();
+const logWarned = new Set();
+
+const serverLogChannelId = (g, type) => g.settings.serverLogs?.[type] ?? null;
+const isLogChannel = (g, channelId) => Object.values(g.settings.serverLogs ?? {}).includes(channelId);
+const shortText = (value, max = 900) => {
+  const s = String(value ?? '');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+};
+const duration = (ms) => {
+  const d = Math.floor(ms / 86_400_000);
+  const h = Math.floor((ms % 86_400_000) / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${Math.max(1, m)} min`;
+};
+
+/** Karta logu: tytuł w ramce, linie „» × Etykieta: wartość”, avatar po prawej i stopka z czasem. */
+function logCard({ emoji, heading, color = logColors.info, lines, thumb, quote = null, id = null }) {
+  const b = box(color);
+  header(b, [title(heading, emoji), ...lines.filter(Boolean)].join('\n'), thumb);
+  if (quote) text(b, quote);
+  text(b, `-# 🕒 ${ts(Date.now(), 'f')}${id ? ` • ID: ${id}` : ''}`);
+  return b;
+}
+
+async function sendServerLog(discordGuild, type, card, files = []) {
+  const channelId = serverLogChannelId(guild(discordGuild.id), type);
+  if (!channelId) return false;
+  const channel = await discordGuild.channels.fetch(channelId).catch(() => null);
+  const payload = { components: [card], flags: V2, allowedMentions: { parse: [] } };
+  let error = channel ? null : 'kanał nie istnieje albo bot go nie widzi';
+  if (channel) {
+    error = await channel
+      .send({ ...payload, files })
+      .then(() => null)
+      .catch((err) => err.message);
+    // Gdy Discord blokuje pliki (np. ograniczenie serwera), wysyłamy log bez załącznika.
+    if (error && files.length) error = await channel.send(payload).then(() => null, (err) => err.message);
+  }
+  if (error && !logWarned.has(`${discordGuild.id}:${type}`)) {
+    logWarned.add(`${discordGuild.id}:${type}`);
+    console.warn(`⚠️ Logi (${serverLogTypes[type].label}): ${error} — sprawdź /setup pokaz`);
+  }
+  return !error;
+}
+
+const userLine = (user, label = 'Osoba') => (user ? row(label, `<@${user.id}> (\`${user.tag ?? user.username ?? user.id}\`)`) : null);
+const avatarOf = (user) => user?.displayAvatarURL?.({ size: 128 }) ?? null;
+const attachmentLine = (message) => {
+  const files = [...(message.attachments?.values?.() ?? [])].map((a) => `\`${a.name}\``);
+  return files.length ? row('Załączniki', files.join(', ').slice(0, 900)) : null;
+};
+
+// ─── Wiadomości ────────────────────────────────────────────────────────
+
+async function logMessageDelete(message) {
+  if (!message.guild || message.author?.bot || message.webhookId || botDeletedMessages.has(message.id)) return;
+  const g = guild(message.guild.id);
+  if (isLogChannel(g, message.channelId)) return;
+  const known = !message.partial && (message.content || message.attachments?.size);
+  await sendServerLog(
+    message.guild,
+    'wiadomosci',
+    logCard({
+      emoji: '🗑️',
+      heading: 'Usunięta wiadomość',
+      color: logColors.remove,
+      thumb: avatarOf(message.author),
+      lines: [
+        message.author ? userLine(message.author, 'Autor') : row('Autor', '`nieznany` (wiadomość sprzed startu bota)'),
+        row('Kanał', `<#${message.channelId}>`),
+        message.createdTimestamp ? row('Wysłana', ts(message.createdTimestamp, 'f')) : null,
+        known ? attachmentLine(message) : null,
+      ],
+      quote: known ? (message.content ? `**Treść:**\n${codeBlock(shortText(message.content))}` : null) : '-# Treść nieznana — wiadomość wysłana, zanim bot się uruchomił.',
+      id: message.id,
+    }),
+  );
+}
+
+async function logMessageUpdate(oldMessage, newMessage) {
+  if (!newMessage.guild || newMessage.author?.bot || newMessage.webhookId) return;
+  if (newMessage.partial) await newMessage.fetch().catch(() => null);
+  if (!oldMessage.partial && oldMessage.content === newMessage.content) return; // np. podgląd linku
+  const g = guild(newMessage.guild.id);
+  if (isLogChannel(g, newMessage.channelId)) return;
+  await sendServerLog(
+    newMessage.guild,
+    'wiadomosci',
+    logCard({
+      emoji: '✏️',
+      heading: 'Edytowana wiadomość',
+      color: logColors.change,
+      thumb: avatarOf(newMessage.author),
+      lines: [userLine(newMessage.author, 'Autor'), row('Kanał', `<#${newMessage.channelId}>`), row('Wiadomość', `[przejdź](${newMessage.url})`)],
+      quote: [
+        `**Przed:**\n${oldMessage.partial || oldMessage.content == null ? '-# nieznana — wiadomość sprzed startu bota' : codeBlock(shortText(oldMessage.content || '(pusta)', 700))}`,
+        `**Po:**\n${codeBlock(shortText(newMessage.content || '(pusta)', 700))}`,
+      ].join('\n'),
+      id: newMessage.id,
+    }),
+  );
+}
+
+async function logBulkDelete(messages, channel) {
+  const list = [...messages.values()].filter((m) => !botDeletedMessages.has(m.id));
+  if (!list.length || !channel?.guild) return;
+  const g = guild(channel.guild.id);
+  if (isLogChannel(g, channel.id)) return;
+  const by = clearedBy.get(channel.id);
+  clearedBy.delete(channel.id);
+  list.sort((a, b) => (a.createdTimestamp ?? 0) - (b.createdTimestamp ?? 0));
+  const lineOf = (m) =>
+    m.partial
+      ? `[?] (nieznana wiadomość ${m.id})`
+      : `[${new Date(m.createdTimestamp).toLocaleString('pl-PL')}] ${m.author?.tag ?? m.author?.id}: ${m.content}${m.attachments?.size ? ` [${m.attachments.size} zał.]` : ''}`;
+  const txt = list.map(lineOf).join('\n');
+  const preview = list.slice(-10).map(lineOf).join('\n');
+  await sendServerLog(
+    channel.guild,
+    'wiadomosci',
+    logCard({
+      emoji: '🧹',
+      heading: 'Masowe usunięcie',
+      color: logColors.remove,
+      lines: [row('Kanał', `<#${channel.id}>`), row('Wiadomości', `**${list.length}**`), by ? row('Przez', `<@${by}> (\`/clear\`)`) : null],
+      quote: `**Ostatnie ${Math.min(10, list.length)}:**\n${codeBlock(shortText(preview, 1400))}${list.length > 10 ? '\n-# Pełna lista w załączniku.' : ''}`,
+    }),
+    [new AttachmentBuilder(Buffer.from(txt, 'utf8'), { name: `usuniete-${channel.name ?? channel.id}.txt` })],
+  );
+}
+
+// ─── Wejścia i wyjścia ─────────────────────────────────────────────────
+
+function logMemberJoin(member, found) {
+  const age = Date.now() - member.user.createdTimestamp;
+  const via = found?.inviterId ? `zaproszenie od <@${found.inviterId}>${found.code ? ` (\`${found.code}\`)` : ''}` : found?.vanity ? 'link własny serwera' : found?.code ? `link \`${found.code}\`` : 'nieznane';
+  return sendServerLog(
+    member.guild,
+    'wejscia',
+    logCard({
+      emoji: '📥',
+      heading: 'Nowa osoba',
+      color: logColors.add,
+      thumb: avatarOf(member.user),
+      lines: [
+        userLine(member.user),
+        row('Konto założone', `${ts(member.user.createdTimestamp, 'D')} (${ts(member.user.createdTimestamp)})`),
+        age < fakeAccountDays * 86_400_000 ? row('⚠️ Uwaga', `nowe konto (młodsze niż ${fakeAccountDays} dni)`) : null,
+        member.user.bot ? row('🤖 Bot', 'tak') : null,
+        row('Wejście przez', via),
+        member.guild.memberCount ? row('Członków', `\`${member.guild.memberCount}\``) : null,
+      ],
+      id: member.id,
+    }),
+  );
+}
+
+async function logMemberLeave(member) {
+  const roles = member.partial ? [] : [...member.roles.cache.values()].filter((r) => r.id !== member.guild.id).map((r) => `<@&${r.id}>`);
+  await sendServerLog(
+    member.guild,
+    'wejscia',
+    logCard({
+      emoji: '📤',
+      heading: 'Osoba wyszła',
+      color: logColors.remove,
+      thumb: avatarOf(member.user),
+      lines: [
+        userLine(member.user),
+        member.joinedTimestamp ? row('Na serwerze', `${duration(Date.now() - member.joinedTimestamp)} (od ${ts(member.joinedTimestamp, 'D')})`) : null,
+        roles.length ? row('Role', roles.join(' ').slice(0, 900)) : null,
+        member.guild.memberCount ? row('Członków', `\`${member.guild.memberCount}\``) : null,
+      ],
+      id: member.id,
+    }),
+  );
+}
+
+// ─── Członkowie (avatar) i kanały głosowe ──────────────────────────────
+
+async function logMemberAvatar(oldMember, newMember) {
+  if (oldMember.partial || newMember.user?.bot || oldMember.avatar === newMember.avatar) return;
+  await sendServerLog(
+    newMember.guild,
+    'czlonkowie',
+    logCard({
+      emoji: '🖼️',
+      heading: 'Nowy avatar na serwerze',
+      color: logColors.change,
+      thumb: newMember.displayAvatarURL?.({ size: 128 }),
+      lines: [userLine(newMember.user)],
+      id: newMember.id,
+    }),
+  );
+}
+
+async function logVoice(oldState, newState) {
+  const member = newState.member ?? oldState.member;
+  if (!member || member.user?.bot || oldState.channelId === newState.channelId) return;
+  const [emoji, heading, color, detail] = !oldState.channelId
+    ? ['🔊', 'Wejście na głosowy', logColors.add, row('Kanał', `<#${newState.channelId}>`)]
+    : !newState.channelId
+      ? ['🔇', 'Wyjście z głosowego', logColors.remove, row('Kanał', `<#${oldState.channelId}>`)]
+      : ['🔀', 'Zmiana kanału głosowego', logColors.change, row('Kanał', `<#${oldState.channelId}> → <#${newState.channelId}>`)];
+  await sendServerLog(newState.guild, 'glosowe', logCard({ emoji, heading, color, thumb: avatarOf(member.user), lines: [userLine(member.user), detail], id: member.id }));
+}
+
+// ─── Dziennik zdarzeń: moderacja, role, nicki, zmiany na serwerze ──────
+
+function permissionDiff(oldBits, newBits) {
+  const a = BigInt(oldBits ?? 0);
+  const b = BigInt(newBits ?? 0);
+  const names = (bits) => Object.entries(PermissionFlagsBits).filter(([, bit]) => (bits & bit) === bit).map(([n]) => n);
+  const added = names(b & ~a);
+  const removed = names(a & ~b);
+  return [added.length ? `➕ ${added.join(', ')}` : null, removed.length ? `➖ ${removed.join(', ')}` : null].filter(Boolean).join(' ') || 'bez zmian';
+}
+
+const changeLabels = {
+  name: 'Nazwa',
+  topic: 'Temat',
+  nsfw: 'NSFW',
+  rate_limit_per_user: 'Tryb powolny (s)',
+  bitrate: 'Bitrate',
+  user_limit: 'Limit osób',
+  parent_id: 'Kategoria',
+  position: 'Pozycja',
+  color: 'Kolor',
+  hoist: 'Osobno na liście',
+  mentionable: 'Można oznaczać',
+  icon_hash: 'Ikona',
+  permissions: 'Uprawnienia',
+  allow: 'Zezwolone',
+  deny: 'Zabronione',
+  max_uses: 'Maks. użyć',
+  max_age: 'Ważność (s)',
+  code: 'Kod',
+  channel_id: 'Kanał',
+  verification_level: 'Poziom weryfikacji',
+  explicit_content_filter: 'Filtr treści',
+  default_message_notifications: 'Powiadomienia',
+  afk_channel_id: 'Kanał AFK',
+  afk_timeout: 'AFK po (s)',
+  system_channel_id: 'Kanał systemowy',
+  rules_channel_id: 'Kanał zasad',
+  vanity_url_code: 'Własny link',
+  banner_hash: 'Baner',
+  splash_hash: 'Tło zaproszenia',
+  owner_id: 'Właściciel',
+  type: 'Typ',
+};
+
+/** Wartość z dziennika zdarzeń do pokazania (kanały i osoby jako oznaczenia, kolory jako #hex). */
+function auditValue(key, v) {
+  if (v === undefined || v === null || v === '') return '`—`';
+  if (/_id$/.test(key) && /^\d{17,20}$/.test(String(v))) return key === 'owner_id' ? `<@${v}>` : `<#${v}>`;
+  if (key === 'color' && typeof v === 'number') return `\`#${v.toString(16).padStart(6, '0')}\``;
+  if (typeof v === 'object') return `\`${shortText(JSON.stringify(v), 120)}\``;
+  return `\`${shortText(String(v).replace(/`/g, "'"), 200)}\``;
+}
+
+/** Linia zmiany: „Nazwa: stara → nowa”, przy tworzeniu sama nowa wartość, uprawnienia jako ➕/➖. */
+function formatChange(change, created = false) {
+  const { key } = change;
+  const label = changeLabels[key] ?? key;
+  if (key === 'permissions' || key === 'allow' || key === 'deny') return row(label, permissionDiff(created ? 0 : change.old, change.new));
+  return row(label, created ? auditValue(key, change.new) : `${auditValue(key, change.old)} → ${auditValue(key, change.new)}`);
+}
+
+const A = AuditLogEvent;
+/** Zdarzenia z dziennika: [rodzaj logu, emoji, tytuł, kolor]. */
+const auditEvents = {
+  [A.MemberBanAdd]: ['moderacja', '🔨', 'Ban', logColors.remove],
+  [A.MemberBanRemove]: ['moderacja', '🕊️', 'Odbanowanie', logColors.add],
+  [A.MemberKick]: ['moderacja', '👢', 'Wyrzucenie', logColors.remove],
+  [A.MemberPrune]: ['moderacja', '🧹', 'Czystka nieaktywnych', logColors.remove],
+  [A.MemberMove]: ['moderacja', '🔀', 'Przeniesienie z głosowego', logColors.change],
+  [A.MemberDisconnect]: ['moderacja', '📴', 'Rozłączenie z głosowego', logColors.change],
+  [A.MemberRoleUpdate]: ['czlonkowie', '🎭', 'Zmiana ról', logColors.change],
+  [A.BotAdd]: ['serwer', '🤖', 'Dodano bota', logColors.warning],
+  [A.GuildUpdate]: ['serwer', '⚙️', 'Zmiana ustawień serwera', logColors.change],
+  [A.ChannelCreate]: ['serwer', '📁', 'Nowy kanał', logColors.add],
+  [A.ChannelUpdate]: ['serwer', '📝', 'Zmiana kanału', logColors.change],
+  [A.ChannelDelete]: ['serwer', '🗑️', 'Usunięty kanał', logColors.remove],
+  [A.ChannelOverwriteCreate]: ['serwer', '🔐', 'Nowe uprawnienia kanału', logColors.change],
+  [A.ChannelOverwriteUpdate]: ['serwer', '🔐', 'Zmiana uprawnień kanału', logColors.change],
+  [A.ChannelOverwriteDelete]: ['serwer', '🔐', 'Usunięte uprawnienia kanału', logColors.change],
+  [A.RoleCreate]: ['serwer', '🏷️', 'Nowa rola', logColors.add],
+  [A.RoleUpdate]: ['serwer', '🏷️', 'Zmiana roli', logColors.change],
+  [A.RoleDelete]: ['serwer', '🏷️', 'Usunięta rola', logColors.remove],
+  [A.InviteCreate]: ['serwer', '📨', 'Nowe zaproszenie', logColors.add],
+  [A.InviteDelete]: ['serwer', '📨', 'Usunięte zaproszenie', logColors.remove],
+  [A.WebhookCreate]: ['serwer', '🪝', 'Nowy webhook', logColors.warning],
+  [A.WebhookUpdate]: ['serwer', '🪝', 'Zmiana webhooka', logColors.change],
+  [A.WebhookDelete]: ['serwer', '🪝', 'Usunięty webhook', logColors.remove],
+  [A.EmojiCreate]: ['serwer', '😀', 'Nowe emoji', logColors.add],
+  [A.EmojiUpdate]: ['serwer', '😀', 'Zmiana emoji', logColors.change],
+  [A.EmojiDelete]: ['serwer', '😀', 'Usunięte emoji', logColors.remove],
+  [A.StickerCreate]: ['serwer', '🏷️', 'Nowa naklejka', logColors.add],
+  [A.StickerDelete]: ['serwer', '🏷️', 'Usunięta naklejka', logColors.remove],
+};
+
+/** Cel wpisu: osoba, kanał albo rola — z nazwą, nawet gdy już nie istnieje. */
+function auditTarget(entry) {
+  const id = entry.targetId;
+  const oldName = entry.changes?.find((c) => c.key === 'name')?.old ?? entry.changes?.find((c) => c.key === 'name')?.new;
+  switch (entry.targetType) {
+    case 'User':
+      return id ? row('Osoba', `<@${id}> (\`${entry.target?.tag ?? entry.target?.username ?? id}\`)`) : null;
+    case 'Channel':
+      return row('Kanał', entry.action === A.ChannelDelete ? `\`#${oldName ?? id}\`` : `<#${id}>${oldName ? ` (\`${oldName}\`)` : ''}`);
+    case 'Role':
+      return row('Rola', entry.action === A.RoleDelete ? `\`@${oldName ?? id}\`` : `<@&${id}>${oldName ? ` (\`${oldName}\`)` : ''}`);
+    case 'Invite':
+      return row('Kod', `\`${entry.changes?.find((c) => c.key === 'code')?.old ?? entry.changes?.find((c) => c.key === 'code')?.new ?? '?'}\``);
+    case 'Guild':
+      return null;
+    default:
+      return oldName ? row('Nazwa', `\`${oldName}\``) : id ? row('ID', `\`${id}\``) : null;
+  }
+}
+
+function overwriteTarget(entry, guildId) {
+  const o = entry.extra;
+  if (!o?.id) return null;
+  if (o.user || o.type === '1' || o.type === 1) return row('Dla', `<@${o.id}>`);
+  return row('Dla', o.id === guildId ? '`@everyone`' : `<@&${o.id}>`);
+}
+
+async function onAuditLogEntry(entry, discordGuild) {
+  const executorId = entry.executorId;
+  const botId = discordGuild.client?.user?.id;
+  const reasonLine = entry.reason ? row('Powód', shortText(entry.reason.replace(/`/g, "'"), 300)) : null;
+  const byLine = executorId ? row('Przez', `<@${executorId}>${executorId === botId ? ' (bot)' : ''}`) : null;
+  const target = entry.targetId && entry.targetType === 'User' ? await discordGuild.client.users.fetch(entry.targetId).catch(() => null) : null;
+  const targetLine = target ? userLine(target) : entry.targetId ? row('Osoba', `<@${entry.targetId}>`) : null;
+
+  // Mute (przerwa), wyciszenie na głosowym i nick — wszystkie przychodzą jako „zmiana członka”.
+  if (entry.action === A.MemberUpdate) {
+    const timeout = entry.changes.find((c) => c.key === 'communication_disabled_until');
+    const nick = entry.changes.find((c) => c.key === 'nick');
+    const voice = entry.changes.filter((c) => c.key === 'mute' || c.key === 'deaf');
+    if (timeout) {
+      const until = timeout.new ? Date.parse(timeout.new) : null;
+      await sendServerLog(
+        discordGuild,
+        'moderacja',
+        logCard({
+          emoji: until ? '🔇' : '🔊',
+          heading: until ? 'Mute' : 'Zdjęty mute',
+          color: until ? logColors.remove : logColors.add,
+          thumb: avatarOf(target),
+          lines: [targetLine, until ? row('Do', `${ts(until, 'f')} (${ts(until)})`) : null, byLine, reasonLine],
+          id: entry.targetId,
+        }),
+      );
+    }
+    if (voice.length) {
+      await sendServerLog(
+        discordGuild,
+        'moderacja',
+        logCard({
+          emoji: '🎙️',
+          heading: 'Wyciszenie na głosowym',
+          color: logColors.change,
+          thumb: avatarOf(target),
+          lines: [targetLine, ...voice.map((c) => row(c.key === 'mute' ? 'Mikrofon' : 'Słuchawki', c.new ? 'wyciszone' : 'włączone')), byLine, reasonLine],
+          id: entry.targetId,
+        }),
+      );
+    }
+    if (nick) {
+      await sendServerLog(
+        discordGuild,
+        'czlonkowie',
+        logCard({
+          emoji: '🏷️',
+          heading: 'Zmiana nicku',
+          color: logColors.change,
+          thumb: avatarOf(target),
+          lines: [targetLine, row('Nick', `\`${nick.old ?? '—'}\` → \`${nick.new ?? '—'}\``), executorId !== entry.targetId ? byLine : null],
+          id: entry.targetId,
+        }),
+      );
+    }
+    return;
+  }
+
+  const def = auditEvents[entry.action];
+  if (!def) return;
+  const [type, emoji, heading, color] = def;
+  // Zmiany robione przez samego bota (tickety, liczniki w nazwach, weryfikacja, /generuj) zaśmiecałyby logi serwera.
+  if (type === 'serwer' && executorId === botId) return;
+
+  const lines = [auditTarget(entry)];
+  if (entry.action === A.MemberRoleUpdate) {
+    const added = entry.changes.find((c) => c.key === '$add')?.new ?? [];
+    const removed = entry.changes.find((c) => c.key === '$remove')?.new ?? [];
+    if (added.length) lines.push(row('Dodane', added.map((r) => `<@&${r.id}>`).join(' ')));
+    if (removed.length) lines.push(row('Zabrane', removed.map((r) => `<@&${r.id}>`).join(' ')));
+  } else if (entry.action === A.MemberPrune) {
+    lines.push(row('Usunięto', `\`${entry.extra?.removed ?? '?'}\` osób nieaktywnych od \`${entry.extra?.days ?? '?'}\` dni`));
+  } else if (entry.action === A.MemberMove || entry.action === A.MemberDisconnect) {
+    if (entry.extra?.channel) lines.push(row('Kanał', `<#${entry.extra.channel.id}>`));
+    if (entry.extra?.count) lines.push(row('Osób', `\`${entry.extra.count}\``));
+  } else if ([A.ChannelOverwriteCreate, A.ChannelOverwriteUpdate, A.ChannelOverwriteDelete].includes(entry.action)) {
+    lines.push(overwriteTarget(entry, discordGuild.id));
+    lines.push(...entry.changes.filter((c) => c.key === 'allow' || c.key === 'deny').map((c) => formatChange(c)));
+  } else if (entry.action !== A.ChannelDelete && entry.action !== A.RoleDelete) {
+    const shown = entry.changes.filter((c) => !['id', 'type', 'flags', 'available', 'tags', 'permission_overwrites', 'inviter_id', 'uses', 'temporary'].includes(c.key));
+    const isCreate = [A.ChannelCreate, A.RoleCreate, A.InviteCreate, A.EmojiCreate, A.StickerCreate, A.WebhookCreate].includes(entry.action);
+    for (const c of shown.slice(0, 10)) if (!(isCreate && c.key === 'name')) lines.push(formatChange(c, isCreate));
+    if (shown.length > 10) lines.push(`-# …i ${shown.length - 10} innych zmian`);
+  }
+  lines.push(byLine, reasonLine);
+  await sendServerLog(discordGuild, type, logCard({ emoji, heading, color, thumb: avatarOf(target), lines, id: entry.targetId }));
+}
+
+/** Tworzy kanały logów (prywatne: widzą je admini) i zapisuje je w ustawieniach. */
+async function createServerLogChannels(discordGuild, categoryId) {
+  const g = guild(discordGuild.id);
+  const botId = discordGuild.client.user.id;
+  const overwrites = [
+    { id: discordGuild.id, deny: [F.ViewChannel] },
+    { id: botId, allow: [F.ViewChannel, F.SendMessages, F.EmbedLinks, F.AttachFiles, F.ReadMessageHistory] },
+    ...(g.settings.staffRoleId ? [{ id: g.settings.staffRoleId, allow: [F.ViewChannel, F.ReadMessageHistory], deny: [F.SendMessages] }] : []),
+  ];
+  let parent = categoryId;
+  if (!parent) {
+    const category = await discordGuild.channels.create({ name: serverLayout.categoryName('📜', 'LOGI'), type: ChannelType.GuildCategory, permissionOverwrites: overwrites, reason: '/setup logi-utworz' });
+    parent = category.id;
+  }
+  const created = {};
+  for (const [key, t] of Object.entries(serverLogTypes)) {
+    const channel = await discordGuild.channels.create({ name: serverLayout.channelName(t.emoji, t.channel), type: ChannelType.GuildText, parent, permissionOverwrites: overwrites, reason: '/setup logi-utworz' });
+    created[key] = channel.id;
+  }
+  updateGuild(discordGuild.id, (gg) => (gg.settings.serverLogs = { ...gg.settings.serverLogs, ...created }));
+  return created;
 }
 
 // ═══ GENERATOR SERWERA (/generuj) ══════════════════════════════════════
@@ -3514,7 +3993,7 @@ async function generateServer(client, discordGuild, invokerId) {
     .catch((err) => report.errors.push(`Nie nadano roli Administracja: ${err.message}`));
 
   // 3. Kategorie i kanały.
-  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true, ticketCategories: {}, ticketLogs: {} };
+  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true, ticketCategories: {}, ticketLogs: {}, serverLogs: {} };
   const panels = [];
   let reportChannel = null;
   for (const cat of serverLayout.categories) {
@@ -3538,6 +4017,7 @@ async function generateServer(client, discordGuild, invokerId) {
       report.channels++;
       if (ch.setting) settings[ch.setting] = channel.id;
       if (ch.ticketLog) settings.ticketLogs[ch.ticketLog] = channel.id;
+      if (ch.serverLog) settings.serverLogs[ch.serverLog] = channel.id;
       if (ch.panel) panels.push([ch.panel, channel]);
       if (ch.report) reportChannel = channel;
     }
@@ -3735,6 +4215,7 @@ async function onMemberAdd(member) {
     }
   });
   const invites = sendInviteLog(member, g, found);
+  logMemberJoin(member, found).catch(console.error);
   const res = { welcome: await welcome, invites: await invites };
   const secs = ((Date.now() - (member.joinedTimestamp ?? Date.now())) / 1000).toFixed(1);
   console.log(`👋 ${member.user.tag ?? member.id}: powitanie i zaproszenie wysłane ${secs} s po wejściu`);
@@ -3792,7 +4273,7 @@ async function autoLegitCheck(client, discordGuild, invokerId) {
   const result = { done: [], failed: [] };
   if (!pending.length) return result;
   const lcChannel = await discordGuild.channels.fetch(g.settings.lcChannelId).catch(() => null);
-  if (!lcChannel) throw new Error('Nie znaleziono kanału legit checków. Ustaw go w /setup legitcheck.');
+  if (!lcChannel) throw new Error('Nie znaleziono kanału legit checków. Ustaw go w /setup kanaly legitcheck.');
   const hook = await lcWebhook(lcChannel, client);
 
   for (const t of pending) {
@@ -3921,110 +4402,177 @@ command(
   },
 );
 
+// /setup — wszystkie ustawienia w jednym miejscu: pokaz, podstawowe, kanaly, ticket, logi, logi-utworz.
+const textChannel = (name, desc) => (o) => o.setName(name).setDescription(desc).addChannelTypes(ChannelType.GuildText);
+const logTypeChoices = Object.entries(serverLogTypes).map(([value, t]) => ({ name: `${t.emoji} ${t.label}`, value }));
+
+/** Podsumowanie całej konfiguracji (/setup pokaz i odpowiedź po każdej zmianie). */
+function setupView(g, heading = 'Konfiguracja') {
+  const s = g.settings;
+  const ch = (id) => (id ? `<#${id}>` : '`—`');
+  const role = (id) => (id ? `<@&${id}>` : '`—`');
+  const b = box(colors.brand);
+  text(
+    b,
+    [
+      title(heading, '⚙️'),
+      '**Podstawowe** — `/setup podstawowe`',
+      row('📁 Kategoria ticketów', ch(s.categoryId)),
+      row('🛡️ Rola admina', role(s.staffRoleId)),
+      row('📜 Logi ticketów (ogólne)', ch(s.logChannelId)),
+      row('✅ Rola za regulamin', role(s.rulesRoleId)),
+      row('🔢 Liczniki w nazwach', s.counters ? '`włączone`' : '`wyłączone`'),
+      row('🎫 Limit ticketów na osobę', `\`${s.maxOpen}\``),
+    ].join('\n'),
+  );
+  sep(b);
+  text(
+    b,
+    [
+      '**Kanały** — `/setup kanaly`',
+      row('⭐ Opinie', ch(s.reviewChannelId)),
+      row('✅ Legit check', ch(s.lcChannelId)),
+      row('🚀 Boosty', ch(s.boostChannelId)),
+      row('👋 Powitania', ch(s.welcomeChannelId)),
+      row('📩 Zaproszenia', ch(s.invitesChannelId)),
+      row('🧾 Zakupy hostingu', ch(s.purchaseLogChannelId)),
+    ].join('\n'),
+  );
+  sep(b);
+  text(
+    b,
+    [
+      '**Tickety według rodzaju** — `/setup ticket`',
+      ...Object.entries(ticketTypes).map(([type, t]) => row(`${t.emoji} ${t.label}`, `kategoria ${ch(ticketCategoryFor(s, type))} • logi ${ch(ticketLogFor(s, type))}`)),
+    ].join('\n'),
+  );
+  sep(b);
+  text(
+    b,
+    [
+      '**Logi serwera** — `/setup logi` albo `/setup logi-utworz`',
+      ...Object.entries(serverLogTypes).map(([key, t]) => row(`${t.emoji} ${t.label}`, s.serverLogs?.[key] ? ch(s.serverLogs[key]) : '`wyłączone`')),
+      '-# 🛡️ Antyspam wysyła karty na kanał „Logi ticketów (ogólne)”.',
+    ].join('\n'),
+  );
+  return b;
+}
+
+const replySetup = (i, g, heading) => i.reply({ components: [setupView(g, heading)], flags: V2_EPHEMERAL, allowedMentions: { parse: [] } });
+
 command(
   new SlashCommandBuilder()
     .setName('setup')
     .setDescription('Konfiguracja bota TanieBoty')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
-    .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria ticketów').addChannelTypes(ChannelType.GuildCategory).setRequired(true))
-    .addRoleOption((o) => o.setName('admin').setDescription('Rola adminów obsługujących tickety').setRequired(true))
-    .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów i transcriptów').addChannelTypes(ChannelType.GuildText).setRequired(true))
-    .addChannelOption((o) => o.setName('opinie').setDescription('Kanał, na który trafiają opinie').addChannelTypes(ChannelType.GuildText))
-    .addChannelOption((o) => o.setName('boosty').setDescription('Kanał podziękowań za boosty').addChannelTypes(ChannelType.GuildText))
-    .addChannelOption((o) => o.setName('powitania').setDescription('Kanał powitań nowych osób').addChannelTypes(ChannelType.GuildText))
-    .addChannelOption((o) => o.setName('zaproszenia').setDescription('Kanał z informacją, kto kogo zaprosił').addChannelTypes(ChannelType.GuildText))
-    .addChannelOption((o) => o.setName('legitcheck').setDescription('Kanał legit checków (rep po zrealizowanym zamówieniu)').addChannelTypes(ChannelType.GuildText))
-    .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
-    .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
-    .addIntegerOption((o) => o.setName('limit').setDescription('Maks. otwartych ticketów na osobę').setMinValue(1).setMaxValue(10)),
-  async (i) => {
-    const s = updateGuild(i.guildId, (g) => {
-      const st = g.settings;
-      st.categoryId = i.options.getChannel('kategoria').id;
-      st.staffRoleId = i.options.getRole('admin').id;
-      st.logChannelId = i.options.getChannel('logi').id;
-      st.reviewChannelId = i.options.getChannel('opinie')?.id ?? st.reviewChannelId ?? null;
-      st.boostChannelId = i.options.getChannel('boosty')?.id ?? st.boostChannelId ?? null;
-      st.lcChannelId = i.options.getChannel('legitcheck')?.id ?? st.lcChannelId ?? null;
-      st.welcomeChannelId = i.options.getChannel('powitania')?.id ?? st.welcomeChannelId ?? null;
-      st.invitesChannelId = i.options.getChannel('zaproszenia')?.id ?? st.invitesChannelId ?? null;
-      st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
-      st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
-      st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
-    }).settings;
-    const ch = (id) => (id ? `<#${id}>` : '`—`');
-    await i.reply({
-      components: [
-        notice(
-          [
-            title('Konfiguracja', '⚙️'),
-            '>>> ' +
-              [
-                row('📁 Kategoria ticketów', ch(s.categoryId)),
-                row('🛡️ Admin', `<@&${s.staffRoleId}>`),
-                row('📜 Logi', ch(s.logChannelId)),
-                row('⭐ Opinie', ch(s.reviewChannelId)),
-                row('🚀 Boosty', ch(s.boostChannelId)),
-                row('✅ Legit check', ch(s.lcChannelId)),
-                row('👋 Powitania', ch(s.welcomeChannelId)),
-                row('📩 Zaproszenia', ch(s.invitesChannelId)),
-                row('✅ Rola za regulamin', s.rulesRoleId ? `<@&${s.rulesRoleId}>` : '`—`'),
-                row('🔢 Liczniki kanałów', s.counters ? '`włączone`' : '`wyłączone`'),
-                row('🎫 Limit ticketów', `\`${s.maxOpen}\``),
-              ].join('\n'),
-            '',
-            '-# 💡 Teraz wyślij panele: `/panel typ:tickety`, `regulamin`, `opinie`, `legit`, `cennik`',
-          ].join('\n'),
-          colors.success,
-        ),
-      ],
-      flags: V2_EPHEMERAL,
-      allowedMentions: { parse: [] },
-    });
-  },
-);
-
-command(
-  new SlashCommandBuilder()
-    .setName('ustaw-ticket')
-    .setDescription('Osobna kategoria i kanał logów dla jednego rodzaju ticketu')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .setDMPermission(false)
-    .addStringOption((o) =>
-      o
-        .setName('rodzaj')
-        .setDescription('Rodzaj ticketu')
-        .setRequired(true)
-        .addChoices(...Object.entries(ticketTypes).map(([value, t]) => ({ name: `${t.emoji} ${t.label}`, value }))),
+    .addSubcommand((sc) => sc.setName('pokaz').setDescription('Pokaż całą konfigurację: kanały, role, logi'))
+    .addSubcommand((sc) =>
+      sc
+        .setName('podstawowe')
+        .setDescription('Kategoria ticketów, rola admina, logi ticketów, regulamin, liczniki, limit')
+        .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria ticketów').addChannelTypes(ChannelType.GuildCategory))
+        .addRoleOption((o) => o.setName('admin').setDescription('Rola adminów obsługujących tickety'))
+        .addChannelOption(textChannel('logi', 'Kanał logów ticketów, transcriptów i antyspamu'))
+        .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
+        .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
+        .addIntegerOption((o) => o.setName('limit').setDescription('Maks. otwartych ticketów na osobę').setMinValue(1).setMaxValue(10)),
     )
-    .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria, w której tworzą się te tickety').addChannelTypes(ChannelType.GuildCategory))
-    .addChannelOption((o) => o.setName('logi').setDescription('Kanał logów dla tych ticketów').addChannelTypes(ChannelType.GuildText)),
+    .addSubcommand((sc) =>
+      sc
+        .setName('kanaly')
+        .setDescription('Kanały: opinie, legit check, boosty, powitania, zaproszenia, zakupy hostingu')
+        .addChannelOption(textChannel('opinie', 'Kanał, na który trafiają opinie'))
+        .addChannelOption(textChannel('legitcheck', 'Kanał legit checków (rep po zrealizowanym zamówieniu)'))
+        .addChannelOption(textChannel('boosty', 'Kanał podziękowań za boosty'))
+        .addChannelOption(textChannel('powitania', 'Kanał powitań nowych osób'))
+        .addChannelOption(textChannel('zaproszenia', 'Kanał z informacją, kto kogo zaprosił'))
+        .addChannelOption(textChannel('zakupy', 'Kanał logów zakupów hostingu')),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('ticket')
+        .setDescription('Osobna kategoria i kanał logów dla jednego rodzaju ticketu')
+        .addStringOption((o) =>
+          o
+            .setName('rodzaj')
+            .setDescription('Rodzaj ticketu')
+            .setRequired(true)
+            .addChoices(...Object.entries(ticketTypes).map(([value, t]) => ({ name: `${t.emoji} ${t.label}`, value }))),
+        )
+        .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria, w której tworzą się te tickety').addChannelTypes(ChannelType.GuildCategory))
+        .addChannelOption(textChannel('logi', 'Kanał logów dla tych ticketów')),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('logi')
+        .setDescription('Ustaw albo wyłącz kanał jednego rodzaju logów serwera')
+        .addStringOption((o) => o.setName('rodzaj').setDescription('Rodzaj logów').setRequired(true).addChoices(...logTypeChoices))
+        .addChannelOption(textChannel('kanal', 'Kanał tych logów'))
+        .addBooleanOption((o) => o.setName('wylacz').setDescription('Wyłącz ten rodzaj logów')),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('logi-utworz')
+        .setDescription('Utwórz wszystkie kanały logów serwera (prywatne, widzą je admini)')
+        .addChannelOption((o) => o.setName('kategoria').setDescription('Kategoria na kanały logów (domyślnie nowa „📜 LOGI”)').addChannelTypes(ChannelType.GuildCategory)),
+    ),
   async (i) => {
-    const type = i.options.getString('rodzaj');
-    const category = i.options.getChannel('kategoria');
-    const logs = i.options.getChannel('logi');
-    if (!category && !logs) return replyFail(i, 'Podaj kategorię, kanał logów albo oba.');
-    const { settings } = updateGuild(i.guildId, (g) => {
-      if (category) g.settings.ticketCategories[type] = category.id;
-      if (logs) g.settings.ticketLogs[type] = logs.id;
-    });
-    const t = ticketTypes[type];
-    const ch = (id) => (id ? `<#${id}>` : '`—`');
-    return i.reply({
-      components: [
-        notice(
-          [
-            `### ${t.emoji} ${x} ${t.label}`,
-            row('Kategoria', ch(ticketCategoryFor(settings, type))),
-            row('Logi', ch(ticketLogFor(settings, type))),
-          ].join('\n'),
-          colors.success,
-        ),
-      ],
-      flags: V2_EPHEMERAL,
-      allowedMentions: { parse: [] },
-    });
+    const sub = i.options.getSubcommand();
+    const opt = (name) => i.options.getChannel(name)?.id;
+    if (sub === 'pokaz') return replySetup(i, guild(i.guildId));
+
+    if (sub === 'podstawowe') {
+      const g = updateGuild(i.guildId, (gg) => {
+        const st = gg.settings;
+        st.categoryId = opt('kategoria') ?? st.categoryId ?? null;
+        st.staffRoleId = i.options.getRole('admin')?.id ?? st.staffRoleId ?? null;
+        st.logChannelId = opt('logi') ?? st.logChannelId ?? null;
+        st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
+        st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
+        st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
+      });
+      return replySetup(i, g, 'Zapisano');
+    }
+
+    if (sub === 'kanaly') {
+      const map = { opinie: 'reviewChannelId', legitcheck: 'lcChannelId', boosty: 'boostChannelId', powitania: 'welcomeChannelId', zaproszenia: 'invitesChannelId', zakupy: 'purchaseLogChannelId' };
+      if (!Object.keys(map).some(opt)) return replyFail(i, 'Wybierz co najmniej jeden kanał do ustawienia.');
+      const g = updateGuild(i.guildId, (gg) => {
+        for (const [name, key] of Object.entries(map)) if (opt(name)) gg.settings[key] = opt(name);
+      });
+      return replySetup(i, g, 'Zapisano');
+    }
+
+    if (sub === 'ticket') {
+      const type = i.options.getString('rodzaj');
+      if (!opt('kategoria') && !opt('logi')) return replyFail(i, 'Podaj kategorię, kanał logów albo oba.');
+      const g = updateGuild(i.guildId, (gg) => {
+        if (opt('kategoria')) gg.settings.ticketCategories[type] = opt('kategoria');
+        if (opt('logi')) gg.settings.ticketLogs[type] = opt('logi');
+      });
+      return replySetup(i, g, 'Zapisano');
+    }
+
+    if (sub === 'logi') {
+      const type = i.options.getString('rodzaj');
+      const off = i.options.getBoolean('wylacz');
+      if (!off && !opt('kanal')) return replyFail(i, 'Podaj kanał (`kanal:#kanał`) albo wyłącz logi (`wylacz:True`).');
+      const g = updateGuild(i.guildId, (gg) => {
+        if (off) delete gg.settings.serverLogs[type];
+        else gg.settings.serverLogs[type] = opt('kanal');
+      });
+      logWarned.delete(`${i.guildId}:${type}`);
+      return replySetup(i, g, 'Zapisano');
+    }
+
+    if (sub === 'logi-utworz') {
+      await i.deferReply({ flags: V2_EPHEMERAL });
+      const created = await createServerLogChannels(i.guild, opt('kategoria')).catch((err) => err);
+      if (created instanceof Error) return i.editReply({ components: [fail(describeError(created))], flags: V2 });
+      for (const key of Object.keys(created)) logWarned.delete(`${i.guildId}:${key}`);
+      return i.editReply({ components: [setupView(guild(i.guildId), 'Kanały logów utworzone')], flags: V2, allowedMentions: { parse: [] } });
+    }
   },
 );
 
@@ -4058,7 +4606,7 @@ command(
     if (i.options.getBoolean('usun-baner')) updateGuild(i.guildId, (g) => delete g.settings.banners[type]);
     if (customUrl && !noBanner && !isUrl(customUrl)) return replyFail(i, 'Baner musi być bezpośrednim linkiem do obrazka (http/https) albo słowem `brak`.');
     const st = guild(i.guildId).settings;
-    if (type === 'tickety' && !Object.keys(ticketTypes).some((t) => ticketCategoryFor(st, t))) return replyFail(i, 'Najpierw użyj `/setup` albo `/generuj`.');
+    if (type === 'tickety' && !Object.keys(ticketTypes).some((t) => ticketCategoryFor(st, t))) return replyFail(i, 'Najpierw użyj `/setup podstawowe` albo `/generuj`.');
     if (customUrl) updateGuild(i.guildId, (g) => (g.settings.banners[type] = noBanner ? false : customUrl));
 
     const channelId = i.options.getChannel('kanal')?.id ?? i.channelId;
@@ -4270,7 +4818,7 @@ command(
     .setDMPermission(false),
   async (i) => {
     const g = guild(i.guildId);
-    if (!g.settings.lcChannelId) return replyFail(i, 'Najpierw ustaw kanał legit checków: `/setup legitcheck:#kanał`.');
+    if (!g.settings.lcChannelId) return replyFail(i, 'Najpierw ustaw kanał legit checków: `/setup kanaly legitcheck:#kanał`.');
     await i.deferReply({ flags: V2_EPHEMERAL });
     const { done, failed } = await autoLegitCheck(i.client, i.guild, i.user.id);
     if (!done.length && !failed.length) return i.editReply({ components: [notice(`### ✅ ${x} Brak ticketów czekających na repa.`, colors.success)], flags: V2 });
@@ -4437,7 +4985,7 @@ command(
   async (i) => {
     const { settings } = guild(i.guildId);
     const enable = i.options.getString('tryb') === 'on';
-    if (!settings.rulesRoleId) return replyFail(i, 'Najpierw ustaw rolę za regulamin: `/setup … rola-regulamin:@✅ Zweryfikowany`.');
+    if (!settings.rulesRoleId) return replyFail(i, 'Najpierw ustaw rolę za regulamin: `/setup podstawowe rola-regulamin:@✅ Zweryfikowany`.');
     if (enable && !guild(i.guildId).panels.regulamin) return replyFail(i, 'Najpierw wyślij panel regulaminu: `/panel typ:regulamin` — bez niego nikt nie zaakceptuje regulaminu.');
     if (!i.guild.members.me?.permissions.has(PermissionFlagsBits.Administrator)) return replyFail(i, 'Bot potrzebuje uprawnień **Administratora**, żeby zmieniać uprawnienia kanałów i nadawać role.');
     await i.deferReply({ flags: V2_EPHEMERAL });
@@ -4476,7 +5024,7 @@ command(
       line('📩 Zaproszenia', g.settings.invitesChannelId, res.invites),
       row('👥 Server Members Intent', membersIntentOn ? '✅ włączony — bot dostaje informację o nowych osobach' : '❌ **wyłączony** — Discord nie informuje bota o wejściu nowej osoby. Włącz go: Developer Portal → Bot → Server Members Intent, potem Restart bota.'),
     ];
-    const hint = !g.settings.welcomeChannelId || !g.settings.invitesChannelId ? '\n-# Ustaw kanały: `/setup … powitania:#👋┃witamy zaproszenia:#📩┃zaproszenia`' : '';
+    const hint = !g.settings.welcomeChannelId || !g.settings.invitesChannelId ? '\n-# Ustaw kanały: `/setup kanaly powitania:#👋┃witamy zaproszenia:#📩┃zaproszenia`' : '';
     const allOk = !res.welcome && !res.invites && membersIntentOn;
     return i.editReply({
       components: [notice([title('Test powitań', '👋'), '>>> ' + lines.join('\n')].join('\n') + hint, allOk ? colors.success : colors.warning)],
@@ -4494,7 +5042,7 @@ command(
     .setDMPermission(false),
   async (i) => {
     const { settings } = guild(i.guildId);
-    if (!settings.boostChannelId) return replyFail(i, 'Najpierw ustaw kanał boostów: `/setup … boosty:#kanał` (albo użyj `/generuj`).');
+    if (!settings.boostChannelId) return replyFail(i, 'Najpierw ustaw kanał boostów: `/setup kanaly boosty:#kanał` (albo użyj `/generuj`).');
     await i.deferReply({ flags: V2_EPHEMERAL });
     recentBoosts.delete(`${i.guildId}:${i.user.id}`);
     const sent = await announceBoost(i.guild, i.user);
@@ -4516,6 +5064,7 @@ command(
     const amount = i.options.getInteger('ilosc');
     await i.deferReply({ flags: V2_EPHEMERAL });
     // true = pomija wiadomości starsze niż 14 dni (Discord nie pozwala usuwać ich hurtem).
+    clearedBy.set(i.channelId, i.user.id);
     const deleted = await i.channel.bulkDelete(amount, true).catch((err) => err);
     if (deleted instanceof Error) return i.editReply({ components: [fail(describeError(deleted))], flags: V2 });
     const old = deleted.size < amount ? `\nPozostałe są starsze niż 14 dni albo kanał ma mniej wiadomości — Discord nie pozwala usuwać starszych hurtem.` : '';
@@ -4832,7 +5381,7 @@ const knownErrors = {
   50001: 'Bot nie ma dostępu do tego kanału lub serwera.',
   50013: 'Bot nie ma wymaganych uprawnień. Najprościej nadaj mu rolę z Administratorem i przesuń ją wyżej.',
   50035: 'Discord odrzucił wiadomość (np. zły link do obrazka).',
-  10003: 'Kanał nie istnieje. Sprawdź `/setup`.',
+  10003: 'Kanał nie istnieje. Sprawdź `/setup pokaz`.',
 };
 function describeError(err) {
   const hint = knownErrors[err?.code] ?? 'Coś poszło nie tak. Spróbuj ponownie.';
@@ -5374,7 +5923,8 @@ async function generatorTest() {
   assert(deleted.includes('old1') && deleted.includes('oldcat'), 'stare kanały usunięte');
   assert(deleted.indexOf('old1') < deleted.indexOf('oldcat'), 'najpierw kanały, potem kategorie');
   assert(report.errors.some((e) => e.includes('#rules')), 'błąd usuwania kanału społeczności zgłoszony, generowanie trwa dalej');
-  assert(cats.length === 11 && chans.length === 22, `11 kategorii i 22 kanały (${cats.length}/${chans.length})`);
+  assert(cats.length === 12 && chans.length === 28, `12 kategorii i 28 kanałów (${cats.length}/${chans.length})`);
+  assert(Object.keys(serverLogTypes).every((k) => guild(GID).settings.serverLogs[k]), 'kanały logów serwera ustawione');
   assert(['👋┃witamy', '📩┃zaproszenia'].every((n) => created.find((item) => item.id === byName(n).parent)?.name === '━━ 👋 WITAMY ━━'), 'WITAMY: witamy i zaproszenia');
   assert(['━━ 📌 WAŻNE ━━', '━━ 🤝 ZAUFANIE ━━', '━━ 🎫 TICKETY ━━', '━━ 💻 ZAMÓWIENIA BOTÓW ━━', '━━ 🖥️ ZAMÓWIENIA HOSTINGU ━━', '━━ ❓ PYTANIA ━━', '━━ 🤝 WSPÓŁPRACA ━━', '━━ 🛡️ ADMINISTRACJA ━━'].every(byName), 'nazwy kategorii w stylu ━━');
   const parentOf = (name) => created.find((item) => item.id === byName(name).parent)?.name;
@@ -6040,6 +6590,165 @@ async function antispamTest() {
   console.log('✅ Test antyspamu i /clear: 7 scenariuszy OK');
 }
 
+// ─── Test logów serwera i /setup (symulacja) ───────────────────────────
+
+async function serverLogsTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test logów nie przeszedł: ${msg}`);
+  };
+  const GID = 'logs-guild';
+  const sent = {};
+  let failFiles = false;
+  const mkLogChannel = (id) => ({
+    id,
+    send: async (p) => {
+      if (failFiles && p.files?.length) throw new Error('Cannot upload attachments');
+      (sent[id] ??= []).push({ json: JSON.stringify(p.components[0].toJSON()), files: p.files?.length ?? 0 });
+    },
+  });
+  const created = [];
+  const fakeGuild = {
+    id: GID,
+    memberCount: 50,
+    client: { user: { id: 'bot' }, users: { fetch: async (id) => ({ id, tag: `user-${id}`, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' }) } },
+    channels: {
+      fetch: async (id) => (id.startsWith('L-') ? mkLogChannel(id) : null),
+      create: async (o) => {
+        const ch = { id: `L-new-${created.length}`, ...o };
+        created.push(ch);
+        return ch;
+      },
+    },
+  };
+  const user = (id, bot = false) => ({ id, bot, tag: `user-${id}`, username: `user-${id}`, createdTimestamp: Date.now() - 2 * 86_400_000, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png' });
+  const g = guild(GID);
+  const types = Object.keys(serverLogTypes);
+  g.settings.serverLogs = Object.fromEntries(types.map((k) => [k, `L-${k}`]));
+  const last = (type) => sent[`L-${type}`]?.at(-1)?.json ?? '';
+  const count = (type) => sent[`L-${type}`]?.length ?? 0;
+  const msg = (extra) => ({ id: 'm1', guild: fakeGuild, channelId: 'czat', author: user('u1'), content: 'siema to test', createdTimestamp: Date.now() - 1000, attachments: new Map(), partial: false, ...extra });
+
+  // 1. Usunięta wiadomość: treść, autor, kanał.
+  await logMessageDelete(msg());
+  assert(last('wiadomosci').includes('USUNIĘTA WIADOMOŚĆ') && last('wiadomosci').includes('siema to test') && last('wiadomosci').includes('<#czat>'), 'usunięta wiadomość z treścią');
+  // Nieznana (sprzed startu), bot, usunięta przez bota, na kanale logów — odpowiednio opisane albo pominięte.
+  await logMessageDelete({ id: 'm2', guild: fakeGuild, channelId: 'czat', partial: true, author: null });
+  assert(last('wiadomosci').includes('Treść nieznana'), 'nieznana treść');
+  const before = count('wiadomosci');
+  await logMessageDelete(msg({ author: user('b', true) }));
+  markBotDeleted('m3');
+  await logMessageDelete(msg({ id: 'm3' }));
+  await logMessageDelete(msg({ channelId: 'L-serwer' }));
+  assert(count('wiadomosci') === before, 'boty, usunięte przez bota i kanały logów pominięte');
+
+  // 2. Edycja: przed i po; sama zmiana podglądu linku pomijana.
+  await logMessageUpdate(msg({ content: 'stara' }), msg({ content: 'nowa', url: 'https://discord.com/channels/x/y/z' }));
+  assert(last('wiadomosci').includes('EDYTOWANA') && last('wiadomosci').includes('stara') && last('wiadomosci').includes('nowa'), 'edycja przed/po');
+  const beforeEdit = count('wiadomosci');
+  await logMessageUpdate(msg({ content: 'to samo' }), msg({ content: 'to samo' }));
+  assert(count('wiadomosci') === beforeEdit, 'bez zmiany treści brak logu');
+
+  // 3. Masowe usunięcie (/clear) z plikiem .txt; bez pliku, gdy Discord blokuje załączniki.
+  const bulk = new Map([['a', msg({ id: 'a', content: 'raz' })], ['b', msg({ id: 'b', content: 'dwa' })]]);
+  clearedBy.set('czat', 'admin1');
+  await logBulkDelete(bulk, { id: 'czat', name: 'czat', guild: fakeGuild });
+  const bulkLog = sent['L-wiadomosci'].at(-1);
+  assert(bulkLog.json.includes('MASOWE USUNIĘCIE') && bulkLog.json.includes('<@admin1>') && bulkLog.json.includes('dwa') && bulkLog.files === 1, 'masowe usunięcie z plikiem');
+  failFiles = true;
+  await logBulkDelete(bulk, { id: 'czat', name: 'czat', guild: fakeGuild });
+  assert(sent['L-wiadomosci'].at(-1).files === 0 && sent['L-wiadomosci'].at(-1).json.includes('MASOWE'), 'bez pliku, gdy załączniki zablokowane');
+  failFiles = false;
+  const beforeSpam = count('wiadomosci');
+  for (const id of bulk.keys()) markBotDeleted(id);
+  await logBulkDelete(bulk, { id: 'czat', name: 'czat', guild: fakeGuild });
+  assert(count('wiadomosci') === beforeSpam, 'usunięcia antyspamu pominięte');
+
+  // 4. Wejście (nowe konto, zaproszenie) i wyjście (role, czas na serwerze).
+  await logMemberJoin({ id: 'u1', guild: fakeGuild, user: user('u1') }, { inviterId: 'inv', code: 'abc' });
+  assert(last('wejscia').includes('NOWA OSOBA') && last('wejscia').includes('nowe konto') && last('wejscia').includes('<@inv>'), 'wejście z zaproszeniem i ostrzeżeniem');
+  await logMemberLeave({ id: 'u1', guild: fakeGuild, user: user('u1'), partial: false, joinedTimestamp: Date.now() - 3 * 86_400_000, roles: { cache: new Map([[GID, { id: GID }], ['r1', { id: 'r1' }]]) } });
+  assert(last('wejscia').includes('OSOBA WYSZŁA') && last('wejscia').includes('<@&r1>') && !last('wejscia').includes(`<@&${GID}>`) && last('wejscia').includes('3 d'), 'wyjście z rolami');
+
+  // 5. Głosowe: wejście, przejście, wyjście.
+  const vs = (channelId) => ({ channelId, guild: fakeGuild, member: { id: 'u1', user: user('u1') } });
+  await logVoice(vs(null), vs('v1'));
+  await logVoice(vs('v1'), vs('v2'));
+  await logVoice(vs('v2'), vs(null));
+  assert(count('glosowe') === 3 && last('glosowe').includes('WYJŚCIE Z GŁOSOWEGO'), 'logi głosowe');
+
+  // 6. Dziennik zdarzeń: ban, mute, role, nick, zmiany kanałów; zmiany robione przez bota w kanałach pominięte.
+  const A = AuditLogEvent;
+  const entry = (action, targetType, extra) => ({ action, targetType, targetId: 'u2', executorId: 'mod', reason: null, changes: [], extra: null, ...extra });
+  await onAuditLogEntry(entry(A.MemberBanAdd, 'User', { reason: 'scam' }), fakeGuild);
+  assert(last('moderacja').includes('BAN') && last('moderacja').includes('<@mod>') && last('moderacja').includes('scam') && last('moderacja').includes('<@u2>'), 'ban z moderatorem i powodem');
+  const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  await onAuditLogEntry(entry(A.MemberUpdate, 'User', { executorId: 'bot', reason: 'Antyspam', changes: [{ key: 'communication_disabled_until', old: null, new: until }] }), fakeGuild);
+  assert(last('moderacja').includes('MUTE') && last('moderacja').includes('(bot)') && last('moderacja').includes('Antyspam'), 'mute od antyspamu');
+  await onAuditLogEntry(entry(A.MemberRoleUpdate, 'User', { changes: [{ key: '$add', new: [{ id: 'r9', name: 'Klient' }] }, { key: '$remove', new: [{ id: 'r8' }] }] }), fakeGuild);
+  assert(last('czlonkowie').includes('ZMIANA RÓL') && last('czlonkowie').includes('<@&r9>') && last('czlonkowie').includes('Zabrane'), 'role dodane i zabrane');
+  await onAuditLogEntry(entry(A.MemberUpdate, 'User', { executorId: 'u2', changes: [{ key: 'nick', old: 'stary', new: 'nowy' }] }), fakeGuild);
+  assert(last('czlonkowie').includes('ZMIANA NICKU') && last('czlonkowie').includes('`stary` → `nowy`') && !last('czlonkowie').includes('Przez'), 'nick zmieniony przez siebie');
+  await onAuditLogEntry(entry(A.ChannelUpdate, 'Channel', { targetId: 'c1', changes: [{ key: 'name', old: 'czat', new: 'czat-2' }, { key: 'rate_limit_per_user', old: 0, new: 5 }] }), fakeGuild);
+  assert(last('serwer').includes('ZMIANA KANAŁU') && last('serwer').includes('`czat` → `czat-2`') && last('serwer').includes('Tryb powolny'), 'zmiana kanału');
+  await onAuditLogEntry(entry(A.RoleUpdate, 'Role', { targetId: 'r5', changes: [{ key: 'permissions', old: '0', new: String(PermissionFlagsBits.BanMembers) }] }), fakeGuild);
+  assert(last('serwer').includes('➕ BanMembers'), 'uprawnienia roli jako ➕/➖');
+  await onAuditLogEntry(entry(A.ChannelOverwriteUpdate, 'Channel', { targetId: 'c1', extra: { id: GID, type: '0' }, changes: [{ key: 'deny', old: '0', new: String(PermissionFlagsBits.SendMessages) }] }), fakeGuild);
+  assert(last('serwer').includes('@everyone') && last('serwer').includes('➕ SendMessages'), 'uprawnienia kanału dla @everyone');
+  const beforeBot = count('serwer');
+  await onAuditLogEntry(entry(A.ChannelCreate, 'Channel', { executorId: 'bot', targetId: 'ticket-1' }), fakeGuild);
+  await onAuditLogEntry(entry(A.MessagePin, 'Message'), fakeGuild);
+  assert(count('serwer') === beforeBot, 'kanały tworzone przez bota i nieobsługiwane zdarzenia pominięte');
+  await onAuditLogEntry(entry(A.BotAdd, 'User', { targetId: 'obcy-bot' }), fakeGuild);
+  assert(last('serwer').includes('DODANO BOTA'), 'dodanie bota');
+
+  // 7. Wyłączony rodzaj logów = brak wysyłki.
+  delete g.settings.serverLogs.glosowe;
+  await logVoice(vs(null), vs('v1'));
+  assert(count('glosowe') === 3, 'wyłączone logi nic nie wysyłają');
+
+  // 8. /setup: pokaz, kanaly, logi, wylacz, ticket, logi-utworz.
+  const run = async (sub, opts = {}) => {
+    const replies = [];
+    await commands.get('setup').execute({
+      guildId: GID,
+      guild: fakeGuild,
+      options: {
+        getSubcommand: () => sub,
+        getChannel: (n) => (opts[n] ? { id: opts[n] } : null),
+        getRole: (n) => (opts[n] ? { id: opts[n] } : null),
+        getString: (n) => opts[n] ?? null,
+        getBoolean: (n) => opts[n] ?? null,
+        getInteger: (n) => opts[n] ?? null,
+      },
+      reply: async (p) => replies.push(p),
+      deferReply: async () => {},
+      editReply: async (p) => replies.push(p),
+    });
+    return JSON.stringify(replies.at(-1).components[0].toJSON());
+  };
+  let out = await run('pokaz');
+  assert(['PODSTAWOWE', 'Kanały', 'Tickety według rodzaju', 'Logi serwera', 'Kanały głosowe', 'wyłączone'].every((t) => out.toUpperCase().includes(t.toUpperCase())), '/setup pokaz pokazuje wszystko');
+  out = await run('kanaly', { boosty: 'boost-ch', zakupy: 'buy-ch' });
+  assert(g.settings.boostChannelId === 'boost-ch' && g.settings.purchaseLogChannelId === 'buy-ch' && out.includes('<#buy-ch>'), '/setup kanaly');
+  out = await run('kanaly');
+  assert(out.includes('co najmniej jeden'), '/setup kanaly bez opcji → błąd');
+  await run('logi', { rodzaj: 'glosowe', kanal: 'L-voice' });
+  assert(g.settings.serverLogs.glosowe === 'L-voice', '/setup logi ustawia kanał');
+  await run('logi', { rodzaj: 'serwer', wylacz: true });
+  assert(!g.settings.serverLogs.serwer, '/setup logi wylacz');
+  await run('ticket', { rodzaj: 'hosting', logi: 'host-logs' });
+  assert(g.settings.ticketLogs.hosting === 'host-logs', '/setup ticket');
+  await run('podstawowe', { limit: 3 });
+  assert(g.settings.maxOpen === 3 && g.settings.boostChannelId === 'boost-ch', '/setup podstawowe zmienia tylko podane');
+  out = await run('logi-utworz');
+  assert(created.length === 7 && created[0].type === ChannelType.GuildCategory && types.every((k) => g.settings.serverLogs[k]?.startsWith('L-new-')), '/setup logi-utworz tworzy kategorię i 6 kanałów');
+  assert(created[1].permissionOverwrites.some((o) => o.id === GID && o.deny.includes(PermissionFlagsBits.ViewChannel)), 'kanały logów prywatne');
+  assert(!commands.has('ustaw-ticket'), '/ustaw-ticket przeniesione do /setup ticket');
+
+  delete store.guilds[GID];
+  console.log('✅ Test logów serwera i /setup: 8 scenariuszy OK');
+}
+
 async function hostingTest() {
   const assert = (cond, msg) => {
     if (!cond) throw new Error(`Test hostingu nie przeszedł: ${msg}`);
@@ -6701,6 +7410,7 @@ if (process.argv.includes('--check')) {
   await boostTest();
   await hostingTest();
   await antispamTest();
+  await serverLogsTest();
   process.exit(0);
 }
 
@@ -6759,9 +7469,9 @@ async function onReady(ready) {
 async function prepareGuild(g) {
   const t0 = Date.now();
   const secs = () => ((Date.now() - t0) / 1000).toFixed(1);
-  if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup powitania:#kanał`);
-  if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup zaproszenia:#kanał`);
-  if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup boosty:#kanał).`);
+  if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup kanaly powitania:#kanał`);
+  if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup kanaly zaproszenia:#kanał`);
+  if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup kanaly boosty:#kanał).`);
   const invites = await cacheInvites(g);
   if (invites) console.log(`📩 ${g.name}: zaproszenia wczytane (${invites.size}) w ${secs()} s`);
   else console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
@@ -6786,7 +7496,15 @@ function start(attempt = 0) {
   const { content, members } = intentAttempts[attempt];
   messageContentOn = content;
   membersIntentOn = members;
-  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildInvites];
+  const intents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildInvites,
+    // Logi: dziennik zdarzeń (bany, mute, role, zmiany na serwerze) i kanały głosowe. Nie wymagają włączania w Developer Portal.
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildVoiceStates,
+  ];
   if (content) intents.push(GatewayIntentBits.MessageContent);
   if (members) intents.push(GatewayIntentBits.GuildMembers);
   botClient = new Client({ intents, partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User, Partials.GuildMember] });
@@ -6798,18 +7516,31 @@ function start(attempt = 0) {
   botClient.on(Events.MessageReactionRemove, (r, u) => onLegitReaction(r, u, false).catch(console.error));
   botClient.on(Events.MessageReactionRemoveAll, (m) => onLegitReactionsCleared(m).catch(console.error));
   botClient.on(Events.MessageReactionRemoveEmoji, (r) => onLegitReactionsCleared(r.message).catch(console.error));
-  botClient.on(Events.MessageDelete, (m) => onMessageDeleted(m).catch(console.error));
-  botClient.on(Events.MessageBulkDelete, async (msgs) => {
+  botClient.on(Events.MessageDelete, (m) => {
+    onMessageDeleted(m).catch(console.error);
+    logMessageDelete(m).catch(console.error);
+  });
+  botClient.on(Events.MessageBulkDelete, async (msgs, channel) => {
+    logBulkDelete(msgs, channel).catch(console.error);
     for (const m of msgs.values()) await onMessageDeleted(m).catch(console.error);
   });
+  botClient.on(Events.MessageUpdate, (a, b) => logMessageUpdate(a, b).catch(console.error));
+  botClient.on(Events.VoiceStateUpdate, (a, b) => logVoice(a, b).catch(console.error));
+  botClient.on(Events.GuildAuditLogEntryCreate, (entry, g) => onAuditLogEntry(entry, g).catch(console.error));
   botClient.on(Events.ChannelDelete, (ch) => onChannelDeleted(ch).catch(console.error));
   botClient.on(Events.InviteCreate, (inv) => inviteCache.get(inv.guild?.id)?.set(inv.code, inv.uses ?? 0));
   botClient.on(Events.InviteDelete, (inv) => inviteCache.get(inv.guild?.id)?.delete(inv.code));
   botClient.on(Events.GuildCreate, (g) => cacheInvites(g));
   if (members) {
     botClient.on(Events.GuildMemberAdd, (m) => onMemberAdd(m).catch(console.error));
-    botClient.on(Events.GuildMemberRemove, (m) => onMemberRemove(m));
-    botClient.on(Events.GuildMemberUpdate, (a, b) => onMemberUpdate(a, b).catch(console.error));
+    botClient.on(Events.GuildMemberRemove, (m) => {
+      onMemberRemove(m);
+      logMemberLeave(m).catch(console.error);
+    });
+    botClient.on(Events.GuildMemberUpdate, (a, b) => {
+      onMemberUpdate(a, b).catch(console.error);
+      logMemberAvatar(a, b).catch(console.error);
+    });
   }
 
   let switched = false;
