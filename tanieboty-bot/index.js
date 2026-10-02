@@ -3405,6 +3405,55 @@ async function onMemberUpdate(oldMember, newMember) {
   await announceBoost(newMember.guild, newMember.user);
 }
 
+// ─── Blokada wysyłania plików przez Discorda ───────────────────────────
+// Discord może czasowo zablokować serwerowi wysyłanie plików (błąd 400001). Wtedy każda wiadomość z banerem albo transcriptem
+// jest wysyłana jeszcze raz — bez plików i bez obrazków z załączników (attachment://). Reszta wiadomości wychodzi normalnie.
+const UPLOADS_BLOCKED = 400001;
+/** Kanał → do kiedy od razu wysyłamy bez plików (żeby nie robić dwóch zapytań na każdą wiadomość). */
+const uploadBlocked = new Map();
+let uploadWarned = 0;
+
+const usesAttachment = (c) => JSON.stringify(c).includes('attachment://');
+/** Usuwa z komponentów galerie, miniaturki i pliki wskazujące na załączniki (attachment://). */
+function stripAttachmentMedia(node) {
+  if (Array.isArray(node)) return node.map(stripAttachmentMedia);
+  if (!node || typeof node !== 'object') return node;
+  const out = { ...node };
+  if (Array.isArray(out.components)) {
+    out.components = out.components.filter((c) => !([12, 13].includes(c?.type) && usesAttachment(c))).map(stripAttachmentMedia);
+  }
+  // Sekcja z miniaturką z załącznika → sam tekst.
+  if (out.type === 9 && usesAttachment(out.accessory ?? {})) return { type: 10, content: out.components.map((c) => c.content).filter(Boolean).join('\n') };
+  if (out.data) out.data = stripAttachmentMedia(out.data);
+  if ('attachments' in out) delete out.attachments;
+  return out;
+}
+
+const withoutUploads = (options) => ({ ...options, files: undefined, body: stripAttachmentMedia(options.body) });
+
+/** Nakładka na zapytania do Discorda: przy blokadzie plików ponawia wiadomość bez nich. */
+function guardUploads(rest) {
+  const original = rest.request.bind(rest);
+  rest.request = async (options) => {
+    if (!options?.files?.length) return original(options);
+    const channelId = /\/channels\/(\d+)\//.exec(options.fullRoute ?? '')?.[1];
+    if (!channelId || (uploadBlocked.get(channelId) ?? 0) < Date.now()) {
+      try {
+        return await original(options);
+      } catch (err) {
+        if (err?.code !== UPLOADS_BLOCKED) throw err;
+        if (channelId) uploadBlocked.set(channelId, Date.now() + 30 * 60_000);
+        if (Date.now() - uploadWarned > 60 * 60_000) {
+          uploadWarned = Date.now();
+          console.warn('⚠️ Discord zablokował serwerowi wysyłanie plików — wiadomości idą bez banerów i transcriptów, dopóki blokada trwa.');
+        }
+      }
+    }
+    return original(withoutUploads(options));
+  };
+  return rest;
+}
+
 // ═══ LOGI SERWERA ══════════════════════════════════════════════════════
 // Każdy rodzaj zdarzeń trafia na swój kanał (/setup logi albo /setup logi-utworz, /setup pokaz).
 // Kto coś zrobił i z jakim powodem — z dziennika zdarzeń serwera (bot potrzebuje uprawnienia „Wyświetlanie dziennika zdarzeń”).
@@ -6749,6 +6798,48 @@ async function serverLogsTest() {
   console.log('✅ Test logów serwera i /setup: 8 scenariuszy OK');
 }
 
+// ─── Test blokady plików (symulacja) ───────────────────────────────────
+
+async function uploadGuardTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Test blokady plików nie przeszedł: ${msg}`);
+  };
+  const calls = [];
+  const rest = {
+    request: async (o) => {
+      calls.push(o);
+      if (o.files?.length) throw Object.assign(new Error('Access to file uploads has been limited for this guild'), { code: UPLOADS_BLOCKED });
+      return { id: 'ok' };
+    },
+  };
+  guardUploads(rest);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const g = { settings: { banners: {} } };
+    const body = { components: [welcomeView({ id: 'u', user: { createdTimestamp: 0, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' }, displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png', toString: () => '<@u>', guild: { memberCount: 5 } }, g).toJSON()], attachments: [{ id: 0 }], flags: V2 };
+    assert(JSON.stringify(body).includes('attachment://'), 'powitanie ma baner z załącznika');
+    const res = await rest.request({ fullRoute: '/channels/123/messages', method: 'POST', files: [{ name: 'baner-witamy.jpg' }], body });
+    const retry = calls[1];
+    assert(res.id === 'ok' && calls.length === 2 && !retry.files && !JSON.stringify(retry.body).includes('attachment://') && !retry.body.attachments, 'ponowione bez pliku i bez baneru');
+    assert(JSON.stringify(retry.body).includes('NOWA OSOBA'), 'reszta wiadomości bez zmian');
+    // Ten sam kanał: od razu bez pliku (jedno zapytanie).
+    await rest.request({ fullRoute: '/channels/123/messages', method: 'POST', files: [{ name: 'x' }], body });
+    assert(calls.length === 3 && !calls[2].files, 'zablokowany kanał od razu bez plików');
+    // Odpowiedź na interakcję (body.data) też jest czyszczona.
+    await rest.request({ fullRoute: '/interactions/1/t/callback', method: 'POST', files: [{ name: 'x' }], body: { type: 4, data: body } });
+    assert(!JSON.stringify(calls.at(-1).body).includes('attachment://'), 'interakcja bez baneru');
+    // Inne błędy nie są ukrywane.
+    rest.request = guardUploads({ request: async () => { throw Object.assign(new Error('Missing Permissions'), { code: 50013 }); } }).request;
+    const err = await rest.request({ fullRoute: '/channels/9/messages', files: [{}], body: {} }).catch((e) => e);
+    assert(err.code === 50013, 'inne błędy przechodzą dalej');
+  } finally {
+    console.warn = warn;
+    uploadBlocked.clear();
+  }
+  console.log('✅ Test blokady plików: ponowienie bez banerów i transcriptów OK');
+}
+
 async function hostingTest() {
   const assert = (cond, msg) => {
     if (!cond) throw new Error(`Test hostingu nie przeszedł: ${msg}`);
@@ -7411,6 +7502,7 @@ if (process.argv.includes('--check')) {
   await hostingTest();
   await antispamTest();
   await serverLogsTest();
+  await uploadGuardTest();
   process.exit(0);
 }
 
@@ -7508,6 +7600,7 @@ function start(attempt = 0) {
   if (content) intents.push(GatewayIntentBits.MessageContent);
   if (members) intents.push(GatewayIntentBits.GuildMembers);
   botClient = new Client({ intents, partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User, Partials.GuildMember] });
+  guardUploads(botClient.rest);
 
   botClient.once(Events.ClientReady, onReady);
   botClient.on(Events.InteractionCreate, onInteraction);
