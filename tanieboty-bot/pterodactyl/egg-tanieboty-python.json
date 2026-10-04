@@ -7,7 +7,7 @@
     "exported_at": "2024-04-02T14:19:30+02:00",
     "name": "TanieBoty - Bot Discord (Python)",
     "author": "tanieboty@discord",
-    "description": "Hosting bota Discord w Pythonie (discord.py, nextcord, py-cord…). Wgraj main.py i requirements.txt — biblioteki zainstalują się przy starcie.",
+    "description": "Hosting bota Discord w Pythonie (discord.py, nextcord, py-cord…). Wgraj main.py i requirements.txt - biblioteki zainstalują się przy starcie.",
     "features": null,
     "docker_images": {
         "Python 3.12": "ghcr.io/parkervcp/yolks:python_3.12",
@@ -24,7 +24,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\n# Pliki bota wgrywasz sam przez Files — biblioteki instalują się przy starcie.\nmkdir -p /mnt/server\necho \"Instalacja zakończona — wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
+            "script": "#!/bin/bash\n# Pliki bota wgrywasz sam przez Files - biblioteki instalują się przy starcie.\nmkdir -p /mnt/server\necho \"Instalacja zakończona - wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
             "container": "debian:bookworm-slim",
             "entrypoint": "bash"
         }

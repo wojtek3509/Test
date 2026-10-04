@@ -24,7 +24,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\n# Pliki bota wgrywasz sam przez Files — biblioteki instalują się przy starcie.\nmkdir -p /mnt/server\necho \"Instalacja zakończona — wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
+            "script": "#!/bin/bash\n# Pliki bota wgrywasz sam przez Files - biblioteki instalują się przy starcie.\nmkdir -p /mnt/server\necho \"Instalacja zakończona - wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
             "container": "debian:bookworm-slim",
             "entrypoint": "bash"
         }

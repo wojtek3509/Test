@@ -1,4 +1,4 @@
-# TanieBoty — bot Discord
+# TanieBoty - bot Discord
 
 Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbudowany na **Components V2**: tytuły w ramce `## ```🤖 TanieBoty × TYTUŁ```` , sekcje z miniaturką, separatory, banery i menu. Cały bot to jeden plik `index.js`.
 
@@ -7,8 +7,8 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | Panel / funkcja | Jak włączyć | Co robi |
 | --- | --- | --- |
 | 🎫 Tickety | `/panel typ:tickety` | Menu kategorii: Bot discord, Hosting, Pytanie, Współpraca. Formularz i prywatny kanał. W zamówieniu bota klient wybiera też **płatność** (BLIK, KOD BLIK, LTC, BTC, ETH, USDT, PayPal, PSC, SOL, USDC albo **✏️ Inna**). Po wybraniu „Inna” przed utworzeniem ticketu bot prosi o wpisanie metody (np. Revolut). Ta płatność jest potem zaznaczona w „Zrealizowane” i trafia do wzoru voucha. Transcript powstaje dopiero po zamknięciu i trafia do logów oraz do klienta w DM. |
-| 📜 Regulamin | `/panel typ:regulamin` | Lista §1–§4 i menu, które pokazuje wybraną sekcję. Opcjonalny przycisk „Akceptuję regulamin” nadający rolę. |
-| ⭐ Opinie | `/panel typ:opinie` | Panel jest zawsze na dole kanału (po każdej opinii wysyła się od nowa). Przycisk „Wystaw opinię” i formularz: produkt, **jakość bota**, **czas realizacji**, **obsługa klienta** (1–5 ⭐) i treść. Panel pokazuje średnie ocen na żywo. Po zamknięciu ticketu klient dostaje w DM przycisk do opinii. |
+| 📜 Regulamin | `/panel typ:regulamin` | Lista §1-§4 i menu, które pokazuje wybraną sekcję. Opcjonalny przycisk „Akceptuję regulamin” nadający rolę. |
+| ⭐ Opinie | `/panel typ:opinie` | Panel jest zawsze na dole kanału (po każdej opinii wysyła się od nowa). Przycisk „Wystaw opinię” i formularz: produkt, **jakość bota**, **czas realizacji**, **obsługa klienta** (1-5 ⭐) i treść. Panel pokazuje średnie ocen na żywo. Po zamknięciu ticketu klient dostaje w DM przycisk do opinii. |
 | 🤔 Czy legit? | `/panel typ:legit` | ✅ jest liczone (bez reakcji bota) i zapisywane w bazie, a nazwa kanału (`czy-legit→404`) aktualizuje się sama co 10 minut. ❌ jest zawsze usuwane, a autor dostaje przerwę na 7 dni. Admini nie dostają przerwy. |
 | ✅ Vouche | `/panel typ:vouch` | Panel „Jak napisać voucha?” na kanale legit checków: wzór `+rep @sprzedawca Co zakupiłeś [ Kwota PLN ] [ Forma płatności ]` i przykłady. Po każdym vouchu przenosi się na dół kanału. Każdy vouch zaczynający się od `+rep` dostaje ✅ i liczy się do licznika. |
 | 💰 Cennik | `/panel typ:cennik` | Cennik hostingu (1 miesiąc 5 zł, 3 miesiące 14 zł, 1 rok 50 zł) i przycisk „Kup hosting”, który od razu otwiera ticket z wyborem pakietu. |
@@ -25,7 +25,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 | 📜 Logi serwera | `/setup logi-utworz` albo `/setup logi rodzaj:… kanal:#…` (lub `/generuj`) | Sześć rodzajów, każdy na swoim kanale: **💬 wiadomości** (usunięte z treścią, edytowane przed/po, masowe usunięcia z plikiem .txt i informacją, kto użył `/clear`), **🚪 wejścia i wyjścia** (wiek konta, zaproszenie, role i czas na serwerze), **👤 członkowie** (nicki, role, avatary), **🔨 moderacja** (bany, odbany, wyrzucenia, mute, wyciszenia na głosowych), **⚙️ serwer** (kanały, role, uprawnienia jako ➕/➖, ustawienia, emoji, zaproszenia, webhooki, nowe boty) i **🔊 głosowe**. Przy zdarzeniach z dziennika zdarzeń jest **kto** to zrobił i **powód**. Zmiany robione przez samego bota (tickety, liczniki w nazwach) i wiadomości usuwane przez antyspam nie trafiają do logów. `/setup logi wylacz:True` wyłącza rodzaj. |
 | ⚙️ Konfiguracja | `/setup pokaz` | Wszystkie ustawienia w jednym miejscu: `podstawowe` (kategoria, rola admina, logi ticketów, regulamin, liczniki, limit), `kanaly` (opinie, legit check, boosty, powitania, zaproszenia, zakupy hostingu), `ticket` (kategoria i logi dla rodzaju ticketu), `logi`, `logi-utworz`. Po każdej zmianie bot pokazuje całą konfigurację. |
 | 🛡️ Antyspam | automatycznie (karta na kanale z `/setup podstawowe logi:#kanał`) | Kto wyśle **7 wiadomości w 15 sekund** (liczone razem ze wszystkich kanałów), dostaje mute na **7 dni**, a te wiadomości są usuwane. Admini i kanały ticketów są pomijani. Na kanale logów pojawia się karta z osobą, kanałami i przyciskiem **Zdejmij mute (admin)**. Bot potrzebuje uprawnienia „Wycisz członków” i roli wyżej niż spamer. |
-| 🧹 Czyszczenie | `/clear ilosc:1–100` | Usuwa ostatnie wiadomości na kanale (dla osób z uprawnieniem „Zarządzanie wiadomościami”). Discord nie pozwala usuwać hurtem wiadomości starszych niż 14 dni — bot je pomija i o tym informuje. |
+| 🧹 Czyszczenie | `/clear ilosc:1-100` | Usuwa ostatnie wiadomości na kanale (dla osób z uprawnieniem „Zarządzanie wiadomościami”). Discord nie pozwala usuwać hurtem wiadomości starszych niż 14 dni - bot je pomija i o tym informuje. |
 | 🖥️ Hosting | `/panel typ:cennik` + `config.json → hosting` | Sprzedaż hostingu botów na Twoim panelu Pterodactyl: zakup automatyczny za krypto (serwer tworzy się sam), zakup ręczny w tickecie, przypomnienia, blokada po terminie i przedłużanie. Szczegóły niżej. |
 
 ## Zamykanie ticketu i legit check
@@ -33,7 +33,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 1. Admin klika **Zamknij** i wybiera **✅ Zrealizowane** albo **❌ Niezrealizowane**.
 2. **Zrealizowane** otwiera formularz: nazwa produktu (np. *Bot do exchange*), cena (np. *50 PLN*) i płatność (BLIK, LTC, BTC, PayPal…).
 3. W tickecie pojawia się karta „Zamówienie zrealizowane” z gotowym wzorem repa, np. `+rep @sprzedawca Bot do exchange [ 50 PLN ] [ LTC ]`. Przycisk **📋 Skopiuj wzór** podaje go jako zwykły tekst do skopiowania.
-4. Klient wysyła repa na kanale legit checków (`/setup kanaly legitcheck:#kanał`). Na tym kanale przechodzi **tylko dokładny wzór z ticketu** (wielkość liter i spacje nie mają znaczenia). Każda inna wiadomość, także rep osoby bez ticketu, jest usuwana, a autor dostaje na 15 sekund informację (z poprawnym wzorem, jeśli ma ticket). Dotyczy to też adminów i właściciela — bot potrzebuje uprawnienia „Zarządzanie wiadomościami” na tym kanale. Gdy rep jest poprawny, bot:
+4. Klient wysyła repa na kanale legit checków (`/setup kanaly legitcheck:#kanał`). Na tym kanale przechodzi **tylko dokładny wzór z ticketu** (wielkość liter i spacje nie mają znaczenia). Każda inna wiadomość, także rep osoby bez ticketu, jest usuwana, a autor dostaje na 15 sekund informację (z poprawnym wzorem, jeśli ma ticket). Dotyczy to też adminów i właściciela - bot potrzebuje uprawnienia „Zarządzanie wiadomościami” na tym kanale. Gdy rep jest poprawny, bot:
    - dodaje reakcję ✅,
    - przenosi panel „Jak napisać voucha?” (wzór i przykłady) na dół kanału,
    - podbija licznik w nazwie kanału,
@@ -41,7 +41,7 @@ Bot dla serwera sprzedającego boty Discord i hosting. Cały interfejs jest zbud
 5. Tickety **Pytanie** i **Współpraca** nie mają wyboru zrealizowane/niezrealizowane: „Zamknij” od razu otwiera formularz z powodem, a w logach wynik to „🔒 Zamknięte”.
 6. **Niezrealizowane** zamyka ticket od razu (z opcjonalnym powodem). Admin może też użyć przycisku **Zamknij bez repa**.
 
-Ticket zamyka tylko administracja (przycisk **Zamknij (admin)**). Klient nie może zamknąć swojego ticketu — po kliknięciu dostaje informację, żeby napisał, że sprawa jest załatwiona.
+Ticket zamyka tylko administracja (przycisk **Zamknij (admin)**). Klient nie może zamknąć swojego ticketu - po kliknięciu dostaje informację, żeby napisał, że sprawa jest załatwiona.
 
 „Zrealizowane” działa dopiero po ustawieniu kanału legit checków. Kliknięcie „Skopiuj wzór” nigdy nie zamyka ticketu.
 
@@ -57,7 +57,7 @@ Ticket zamyka tylko administracja (przycisk **Zamknij (admin)**). Klient nie mo�
    - `/setup pokaz` sprawdza, czy wszystko jest ustawione
    - `/panel typ:tickety`, `regulamin`, `opinie`, `legit`, `cennik` (każdy z opcjonalnym `baner:<link do obrazka>`)
 
-W Developer Portal → **Bot** włącz **Message Content Intent** i **Server Members Intent** (ten drugi jest potrzebny do powitań i zaproszeń). Do ustalania, kto kogo zaprosił, bot potrzebuje uprawnienia **Zarządzanie serwerem**, a do logów (kto zbanował, kto zmienił kanał) — **Wyświetlanie dziennika zdarzeń** (Administrator wystarcza na oba). Dzięki temu bot sprawdza, czy rep zaczyna się od `+rep`. Bez niego bot też wystartuje, ale wtedy rep musi oznaczać sprzedawcę.
+W Developer Portal → **Bot** włącz **Message Content Intent** i **Server Members Intent** (ten drugi jest potrzebny do powitań i zaproszeń). Do ustalania, kto kogo zaprosił, bot potrzebuje uprawnienia **Zarządzanie serwerem**, a do logów (kto zbanował, kto zmienił kanał) - **Wyświetlanie dziennika zdarzeń** (Administrator wystarcza na oba). Dzięki temu bot sprawdza, czy rep zaczyna się od `+rep`. Bez niego bot też wystartuje, ale wtedy rep musi oznaczać sprzedawcę.
 
 Liczniki w nazwach kanałów (czy legit, legit check, opinie) są zapisywane w bazie od razu, a nazwy kanałów aktualizują się co 10 minut. To limit Discorda: nazwę kanału można zmienić tylko 2 razy na 10 minut.
 

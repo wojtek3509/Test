@@ -1,4 +1,4 @@
-// TanieBoty — bot Discord dla sklepu z botami, cały w jednym pliku (Components V2).
+// TanieBoty - bot Discord dla sklepu z botami, cały w jednym pliku (Components V2).
 // Uruchomienie: npm install && node index.js   (sprawdzenie offline: node index.js --check)
 import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
@@ -68,7 +68,7 @@ const colors = {
   boost: 0xf47fff,
 };
 
-// Cennik hostingu (/panel typ:cennik) — te same pakiety są do wyboru przy zakupie hostingu.
+// Cennik hostingu (/panel typ:cennik) - te same pakiety są do wyboru przy zakupie hostingu.
 // [nazwa, cena, id, liczba dni]
 const hostingPlans = [
   ['1 miesiąc', '5 zł', '1m', 31],
@@ -175,13 +175,13 @@ const ticketTypes = {
     // Formularz zakupu hostingu: automatyczny (krypto) albo ręczny (ticket, czekasz na właściciela).
     fields: [
       { id: 'lang', label: 'Język bota', select: Object.entries(hostingLanguages).map(([id, l]) => [`${l.emoji} ${l.label}`, id]) },
-      { id: 'period', label: 'Okres hostingu', select: hostingPlans.map(([name, price, id]) => [`${name} — ${price}`, id]) },
+      { id: 'period', label: 'Okres hostingu', select: hostingPlans.map(([name, price, id]) => [`${name} - ${price}`, id]) },
       {
         id: 'mode',
         label: 'Sposób zakupu',
         select: [
-          ['⚡ Automatyczny — krypto, serwer od razu', 'auto'],
-          ['⏳ Ręczny — czekasz na właściciela', 'manual'],
+          ['⚡ Automatyczny - krypto, serwer od razu', 'auto'],
+          ['⏳ Ręczny - czekasz na właściciela', 'manual'],
         ],
       },
       { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [p.label, id, p.emoji]) },
@@ -214,19 +214,19 @@ const rules = [
     emoji: '📘',
     points: [
       `Dołączenie do ${brand.invite ? `[serwera ${brand.name}](${brand.invite})` : `serwera **${brand.name}**`} i korzystanie z niego oznacza pełną akceptację niniejszego regulaminu.`,
-      'Każdy użytkownik ma obowiązek zachowywać kulturę osobistą i szacunek wobec innych — w szczególności wobec klientów i właścicieli serwera.',
+      'Każdy użytkownik ma obowiązek zachowywać kulturę osobistą i szacunek wobec innych - w szczególności wobec klientów i właścicieli serwera.',
       'Handel między użytkownikami w jakiejkolwiek formie jest **zakazany**. Złamanie zakazu grozi wyciszeniem lub stałą blokadą konta.',
       'Reklamowanie i promowanie czegokolwiek bez wcześniejszej zgody administracji jest surowo zabronione.',
       'Zabronione jest używanie botów spamujących, exploitów i innych sposobów automatyzacji lub obchodzenia zabezpieczeń serwera.',
       'Zakazane jest udostępnianie treści naruszających prawa autorskie, patenty lub inną własność intelektualną.',
       'Administracja może moderować treści na serwerze, w szczególności:\n- usuwać wiadomości nieodpowiednie, niezgodne z regulaminem lub naruszające prawa innych,\n- blokować osoby, które zakłócają działanie serwera lub działają wbrew jego celowi.',
-      'Korzystając z serwera, zgadzasz się na stosowanie narzędzi moderacji oraz przetwarzanie niezbędnych danych w celu zapewnienia bezpieczeństwa — zgodnie z zasadami Discorda i obowiązującym prawem (w tym RODO).',
-      `Błędy techniczne i inne problemy zgłaszaj administracji — dzięki temu ${brand.invite ? `[serwer](${brand.invite})` : 'serwer'} działa sprawnie dla wszystkich.`,
+      'Korzystając z serwera, zgadzasz się na stosowanie narzędzi moderacji oraz przetwarzanie niezbędnych danych w celu zapewnienia bezpieczeństwa - zgodnie z zasadami Discorda i obowiązującym prawem (w tym RODO).',
+      `Błędy techniczne i inne problemy zgłaszaj administracji - dzięki temu ${brand.invite ? `[serwer](${brand.invite})` : 'serwer'} działa sprawnie dla wszystkich.`,
       'W sporach między użytkownikami administracja może pełnić rolę mediatora, ale nie odpowiada za nieporozumienia poza serwerem.',
       'Właściciele serwera wykonują swoje obowiązki neutralnie i profesjonalnie.',
       'Serwer nie odpowiada za straty finansowe wynikające z działań użytkowników, ich błędnych decyzji lub niewłaściwego korzystania z usług.',
       'Po __zrealizowanym zamówieniu__ klient może wystawić rzetelną opinię o realizacji, jej czasie i przebiegu. Opinie niezgodne z prawdą są usuwane.',
-      'Zniesławianie, publiczne oczernianie, szerzenie dezinformacji lub inne działania szkodzące dobremu imieniu serwera, jego usług lub twórców (publicznie lub prywatnie) to **rażące naruszenie regulaminu**. Skutkuje natychmiastowym zakończeniem wszystkich usług (w tym usunięciem i zablokowaniem bota) oraz stałą blokadą konta — bez zwrotu wpłaconych środków.',
+      'Zniesławianie, publiczne oczernianie, szerzenie dezinformacji lub inne działania szkodzące dobremu imieniu serwera, jego usług lub twórców (publicznie lub prywatnie) to **rażące naruszenie regulaminu**. Skutkuje natychmiastowym zakończeniem wszystkich usług (w tym usunięciem i zablokowaniem bota) oraz stałą blokadą konta - bez zwrotu wpłaconych środków.',
       'Administracja może zmienić regulamin w każdej chwili. Zmiany obowiązują od momentu publikacji, dlatego warto regularnie do niego zaglądać.',
     ],
   },
@@ -255,7 +255,7 @@ const rules = [
         title: 'Postanowienia końcowe',
         points: [
           'Płatności za nasze usługi są **bezzwrotne**, poza wyjątkami opisanymi wyżej.',
-          'Masz problem z usługą? Zanim poprosisz o zwrot, napisz do nas w tickecie — postaramy się rozwiązać go jak najszybciej.',
+          'Masz problem z usługą? Zanim poprosisz o zwrot, napisz do nas w tickecie - postaramy się rozwiązać go jak najszybciej.',
           'Prośbę o zwrot zgłaszasz na piśmie (w tickecie) z dokładnym uzasadnieniem, najpóźniej **7 dni** od sytuacji, która ją uzasadnia.',
           'Ostateczną decyzję o zwrocie podejmują założyciele i **nie podlega ona negocjacjom**.',
         ],
@@ -270,7 +270,7 @@ const rules = [
         title: 'Składanie zamówień',
         points: [
           'Zamówienie składasz przez ticket, podając opis wymagań (funkcje, integracje) oraz informacje o hostingu (okres, nazwa, forma płatności).',
-          'Każde zamówienie wyceniamy indywidualnie — dostajesz plan z listą funkcji, ceną i szacowanym terminem.',
+          'Każde zamówienie wyceniamy indywidualnie - dostajesz plan z listą funkcji, ceną i szacowanym terminem.',
           'Zamówienie trafia do realizacji dopiero po **pełnej płatności z góry**.',
           'Bot działa na jednym, wybranym serwerze. Przeniesienie go na inny serwer kosztuje **5 zł**.',
         ],
@@ -280,10 +280,10 @@ const rules = [
         points: [
           'Prace zaczynamy od razu po otrzymaniu płatności i potwierdzeniu specyfikacji przez klienta.',
           'Maksymalny czas realizacji to **14 dni kalendarzowych**.',
-          'Termin może się wydłużyć:\n- w szczególnych sytuacjach (np. zmiany w API Discorda, problemy techniczne) — poinformujemy Cię o nowej dacie i ewentualnej rekompensacie,\n- w okresie świąt i ogłoszonych przerw,\n- gdy klient opóźnia przekazanie potrzebnych informacji.',
+          'Termin może się wydłużyć:\n- w szczególnych sytuacjach (np. zmiany w API Discorda, problemy techniczne) - poinformujemy Cię o nowej dacie i ewentualnej rekompensacie,\n- w okresie świąt i ogłoszonych przerw,\n- gdy klient opóźnia przekazanie potrzebnych informacji.',
           'Po zakończeniu dostajesz gotowego bota oraz wsparcie techniczne.',
           '**Cena obejmuje przygotowanie i utrzymanie bota.** __Kod źródłowy (src) nie wchodzi w skład zamówienia.__',
-          'Kod źródłowy można dokupić za **40% wartości zamówienia**:\n- założyciele mogą odmówić jego sprzedaży, jeśli istnieje ryzyko odsprzedaży, upublicznienia lub przekazania kodu innym,\n- zakup kodu to licencja niewyłączna — prawa autorskie majątkowe zostają przy autorze,\n- bez pisemnej zgody założyciela **nie wolno** kodu odsprzedawać, udostępniać ani sublicencjonować,\n- kod możesz dowolnie modyfikować na własne potrzeby.',
+          'Kod źródłowy można dokupić za **40% wartości zamówienia**:\n- założyciele mogą odmówić jego sprzedaży, jeśli istnieje ryzyko odsprzedaży, upublicznienia lub przekazania kodu innym,\n- zakup kodu to licencja niewyłączna - prawa autorskie majątkowe zostają przy autorze,\n- bez pisemnej zgody założyciela **nie wolno** kodu odsprzedawać, udostępniać ani sublicencjonować,\n- kod możesz dowolnie modyfikować na własne potrzeby.',
         ],
       },
       {
@@ -298,7 +298,7 @@ const rules = [
         title: 'Anulowanie zamówienia',
         points: [
           'Opłacone zamówienie jest wiążące i **nie można go anulować**.',
-          'Gdy klient nie współpracuje (np. nie dostarcza materiałów na czas, nie nada bota uprawnień na serwerze), możemy wstrzymać realizację do czasu uzupełnienia braków — bez zwrotu płatności.',
+          'Gdy klient nie współpracuje (np. nie dostarcza materiałów na czas, nie nada bota uprawnień na serwerze), możemy wstrzymać realizację do czasu uzupełnienia braków - bez zwrotu płatności.',
           'Brak kontaktu ze strony klienta przez **30 dni** oznacza anulowanie zamówienia.',
           'Możemy odmówić realizacji, jeśli klient łamie regulamin Discorda. Kwestie finansowe rozstrzygamy wtedy indywidualnie.',
         ],
@@ -312,19 +312,19 @@ const rules = [
       {
         title: 'Metody płatności',
         points: [
-          'Płatności przyjmujemy **wyłącznie na naszym Discordzie** (w tickecie). Dostępne metody:\n- BLIK,\n- PayPal,\n- kryptowaluty: Litecoin (LTC), Bitcoin (BTC), Ethereum (ETH), USDT,\n- PaySafeCard (kod) — *bez prowizji od kwoty*.',
+          'Płatności przyjmujemy **wyłącznie na naszym Discordzie** (w tickecie). Dostępne metody:\n- BLIK,\n- PayPal,\n- kryptowaluty: Litecoin (LTC), Bitcoin (BTC), Ethereum (ETH), USDT,\n- PaySafeCard (kod) - *bez prowizji od kwoty*.',
         ],
       },
       {
         title: 'BLIK',
-        points: ['Płatność BLIK wykonujesz opcją **„BLIK — przelew na telefon”**, czyli szybkim przelewem na numer telefonu.'],
+        points: ['Płatność BLIK wykonujesz opcją **„BLIK - przelew na telefon”**, czyli szybkim przelewem na numer telefonu.'],
       },
       {
         title: 'PayPal',
         points: [
           'Płacisz wyłącznie opcją **Friends & Family (F&F)** i **bez żadnej notatki** w tytule.',
           'Płatność z notatką lub z innym błędem nie zostanie uznana, a zwrot za nią nie przysługuje.',
-          'Klient odpowiada za wykonanie płatności zgodnie z instrukcją — błędy mogą opóźnić realizację zamówienia.',
+          'Klient odpowiada za wykonanie płatności zgodnie z instrukcją - błędy mogą opóźnić realizację zamówienia.',
         ],
       },
       {
@@ -332,7 +332,7 @@ const rules = [
         points: [
           'Przyjmujemy **Litecoin (LTC), Bitcoin (BTC), Ethereum (ETH) i USDT**. Adres portfela i sieć podajemy w tickecie.',
           'Płatności w kryptowalutach realizujemy zgodnie z zasadami bezpieczeństwa transakcji kryptowalutowych.',
-          'Transakcje krypto są **nieodwracalne** — klient w pełni odpowiada za poprawność płatności (adres, kwota, sieć).',
+          'Transakcje krypto są **nieodwracalne** - klient w pełni odpowiada za poprawność płatności (adres, kwota, sieć).',
         ],
       },
       {
@@ -370,7 +370,7 @@ const selectOption = ([label, value, emoji]) => ({ label, value, ...(emoji ? { e
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 /** Płatność w zamówieniu bota: wszystkie z listy + „Inna” (klient wpisuje ją sam). */
 const OTHER_PAYMENT = 'inne';
-const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [p.label, id, p.emoji]), ['Inna — wpiszesz ją za chwilę', OTHER_PAYMENT, '✏️']];
+const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [p.label, id, p.emoji]), ['Inna - wpiszesz ją za chwilę', OTHER_PAYMENT, '✏️']];
 /** Opcje pola wyboru (lista albo nazwa listy liczonej później, np. 'orderPayments'). */
 const selectOptions = (f) => (f.select === 'orderPayments' ? orderPaymentOptions() : f.select);
 /** Płatność z formularza do pokazania: wybrana z listy albo wpisana przez klienta. */
@@ -394,7 +394,7 @@ const reviewProducts = {
 const reviewCooldownMinutes = 60;
 
 // „Czy legit?”: emoji reakcji. Własne emoji z serwera, na którym jest bot (animowane: '<a:nazwa:id>').
-// Gdy bot nie może ich użyć, dodaje zwykłe ✅ / ❌ — obie wersje są liczone tak samo.
+// Gdy bot nie może ich użyć, dodaje zwykłe ✅ / ❌ - obie wersje są liczone tak samo.
 const legitEmojis = {
   yes: '<a:TAK:1554504948211785778>', // zielone TAK
   no: '<a:NIE:1554505001492021248>', // czerwone NIE
@@ -474,7 +474,7 @@ const serverLayout = {
         { emoji: '🎵', name: 'muzyka', mode: 'voice' },
       ],
     },
-    // Tu bot tworzy kanały ticketów — każdy rodzaj w swojej kategorii, widoczne tylko dla Administracji i Adminów (+ autora ticketu).
+    // Tu bot tworzy kanały ticketów - każdy rodzaj w swojej kategorii, widoczne tylko dla Administracji i Adminów (+ autora ticketu).
     { emoji: '💻', name: 'ZAMÓWIENIA BOTÓW', private: true, ticketType: 'bot', channels: [] },
     { emoji: '🖥️', name: 'ZAMÓWIENIA HOSTINGU', private: true, ticketType: 'hosting', channels: [] },
     { emoji: '❓', name: 'PYTANIA', private: true, ticketType: 'question', channels: [] },
@@ -492,7 +492,7 @@ const serverLayout = {
         { emoji: '💬', name: 'admin-czat', mode: 'open', report: true },
       ],
     },
-    // Logi serwera — każdy rodzaj na swoim kanale (te same, co /setup logi-utworz).
+    // Logi serwera - każdy rodzaj na swoim kanale (te same, co /setup logi-utworz).
     {
       emoji: '📜',
       name: 'LOGI',
@@ -513,7 +513,7 @@ const serverLayout = {
 // Każdy serwer Discord ma swój folder data/<ID serwera>/, a w nim osobne pliki według tematu:
 //   ustawienia.json, tickety.json, opinie.json, konkursy.json, zaproszenia.json,
 //   statystyki.json, panele.json, hosting.json.
-// Nie edytuj ich, gdy bot działa — przy następnym zapisie bot nadpisze zmiany (najpierw Stop, potem edycja, potem Start).
+// Nie edytuj ich, gdy bot działa - przy następnym zapisie bot nadpisze zmiany (najpierw Stop, potem edycja, potem Start).
 
 let dataDir = process.env.TANIEBOTY_DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), 'data');
 const dataFiles = {
@@ -528,7 +528,7 @@ const dataFiles = {
 };
 const OTHER_FILE = 'inne.json';
 const fileOfKey = (key) => Object.keys(dataFiles).find((f) => dataFiles[f].includes(key)) ?? OTHER_FILE;
-// ID serwera Discord to same cyfry — inne foldery (np. kopie zapasowe) pomijamy.
+// ID serwera Discord to same cyfry - inne foldery (np. kopie zapasowe) pomijamy.
 const isGuildFolder = (name) => /^\d{5,}$/.test(name);
 
 function writeJson(file, data) {
@@ -561,7 +561,7 @@ function loadStore() {
   return loaded;
 }
 
-// saveTimer musi istnieć przed loadStore() — przeniesienie starego db.json od razu zapisuje pliki (flush).
+// saveTimer musi istnieć przed loadStore() - przeniesienie starego db.json od razu zapisuje pliki (flush).
 let saveTimer = null;
 let store = { guilds: {} };
 store = loadStore();
@@ -619,7 +619,7 @@ function updateGuild(id, fn) {
   return g;
 }
 
-/** Kategoria i kanał logów dla rodzaju ticketu (ustawienie dla rodzaju, a gdy go brak — ogólne z /setup). */
+/** Kategoria i kanał logów dla rodzaju ticketu (ustawienie dla rodzaju, a gdy go brak - ogólne z /setup). */
 const ticketCategoryFor = (settings, type) => settings.ticketCategories?.[type] ?? settings.categoryId ?? null;
 const ticketLogFor = (settings, type) => settings.ticketLogs?.[type] ?? settings.logChannelId ?? null;
 
@@ -629,7 +629,7 @@ const openTicketsOf = (guildId, userId) => Object.values(guild(guildId).tickets)
 // ═══ STAN BOTA ═════════════════════════════════════════════════════════
 
 // „Message Content Intent” (Developer Portal → Bot) pozwala sprawdzić, czy rep zaczyna się od „+rep”.
-// Jeśli nie jest włączony, bot i tak wystartuje — wtedy rep musi tylko oznaczać sprzedawcę.
+// Jeśli nie jest włączony, bot i tak wystartuje - wtedy rep musi tylko oznaczać sprzedawcę.
 let messageContentOn = true;
 // „Server Members Intent” jest potrzebny do powitań i zaproszeń.
 let membersIntentOn = true;
@@ -681,7 +681,7 @@ function banner(container, url) {
 }
 
 // ─── Banery wbudowane ───────────────────────────────────────────────────
-// Pliki z folderu grafiki/ (obok index.js) bot dołącza do wiadomości sam — bez linków, które mogą wygasnąć.
+// Pliki z folderu grafiki/ (obok index.js) bot dołącza do wiadomości sam - bez linków, które mogą wygasnąć.
 // Własny link z /panel baner:<link> ma pierwszeństwo, a baner:brak wyłącza baner danego panelu.
 const bannerDir = join(dirname(fileURLToPath(import.meta.url)), 'grafiki');
 const bannerFiles = {
@@ -733,7 +733,7 @@ const notice = (content, color = colors.brand) => text(box(color), framedTitle(c
 const ok = (content) => text(box(colors.success), `${title('Gotowe', '✅')}\n>>> ${content}`);
 const fail = (content) => text(box(colors.danger), `${title('Błąd', '❌')}\n>>> ${content}`);
 
-/** Obrazek do nagłówków: ikona serwera, a gdy jej brak — avatar bota. */
+/** Obrazek do nagłówków: ikona serwera, a gdy jej brak - avatar bota. */
 const logoOf = (g, client) => (panelThumbnails ? (g?.iconURL?.({ size: 256 }) ?? client?.user?.displayAvatarURL?.({ size: 256 }) ?? null) : null);
 
 const placeholderNone = `❌ ${x} Nie wybrałeś/aś żadnej kategorii.`;
@@ -747,7 +747,7 @@ function ticketsPanel(g, logo) {
     [title('Tickety', '🎫'), `>>> 📩 ${x} **Wybierz odpowiednią kategorię, aby utworzyć ticketa.**`, '', ...Object.values(ticketTypes).map((t) => `${t.emoji} ${x} **${t.label}**`)].join('\n'),
     logo,
   );
-  text(b, '> -# Prosimy o zachowanie cierpliwości na ticketach — odpowiadamy najszybciej, jak to możliwe.');
+  text(b, '> -# Prosimy o zachowanie cierpliwości na ticketach - odpowiadamy najszybciej, jak to możliwe.');
   banner(b, bannerUrl(g, 'tickety'));
   sep(b);
   b.addActionRowComponents((r) =>
@@ -798,7 +798,7 @@ function rulesBlocks(index) {
   return r.sections.map((sec, si) => `### ${x} \`${n}.${si + 1}\` ${sec.title}\n${list(`${n}.${si + 1}`, sec.points)}`);
 }
 
-// Discord pozwala na maks. 4000 znaków tekstu w jednej wiadomości — długie rozdziały dzielimy na kilka.
+// Discord pozwala na maks. 4000 znaków tekstu w jednej wiadomości - długie rozdziały dzielimy na kilka.
 const RULES_MESSAGE_LIMIT = 3600;
 
 /** Wiadomości z rozdziałem regulaminu (zwykle jedna, przy długich rozdziałach kilka). */
@@ -859,8 +859,8 @@ function reviewsPanel(g, logo) {
     [
       `### 📊 ${x} Nasze oceny`,
       row('Opinii', `\`${s.count}\``),
-      row('Średnia', s.count ? `\`${s.avg.toFixed(2)}/5\` ${stars(Math.round(s.avg))}` : '`—`'),
-      ...reviewCriteria.map((cr) => row(`${cr.emoji} ${cr.label}`, s.count ? `\`${s.per[cr.id].toFixed(1)}/5\`` : '`—`')),
+      row('Średnia', s.count ? `\`${s.avg.toFixed(2)}/5\` ${stars(Math.round(s.avg))}` : '`-`'),
+      ...reviewCriteria.map((cr) => row(`${cr.emoji} ${cr.label}`, s.count ? `\`${s.per[cr.id].toFixed(1)}/5\`` : '`-`')),
     ].join('\n'),
   );
   banner(b, bannerUrl(g, 'opinie'));
@@ -907,8 +907,8 @@ function legitPanel(g, logo) {
     [
       title('Czy legit?', '🤔'),
       `## ❓ Czy nasz serwer __${brand.name}__ jest LEGIT?`,
-      `- ${legitEmojis.yes} Jeżeli uważasz, że __**TAK**__ — zaznacz zieloną reakcję ${legitEmojis.yes} poniżej!`,
-      `- ${legitEmojis.no} Jeżeli uważasz, że __**NIE**__ — zaznacz czerwoną reakcję ${legitEmojis.no} poniżej!`,
+      `- ${legitEmojis.yes} Jeżeli uważasz, że __**TAK**__ - zaznacz zieloną reakcję ${legitEmojis.yes} poniżej!`,
+      `- ${legitEmojis.no} Jeżeli uważasz, że __**NIE**__ - zaznacz czerwoną reakcję ${legitEmojis.no} poniżej!`,
     ].join('\n'),
     logo,
   );
@@ -931,8 +931,8 @@ function pricingPanel(g, logo) {
         [
           point('Twój bot działa **24/7** na naszym hostingu.'),
           point('Kliknij **Kup hosting**, wybierz język, okres i płatność.'),
-          point('**⚡ Krypto** (LTC, ETH, USDC, SOL) — serwer tworzy się **automatycznie** zaraz po wpłacie.'),
-          point('**⏳ Ręcznie** (BLIK albo krypto) — otwiera się ticket i czekasz na właściciela.'),
+          point('**⚡ Krypto** (LTC, ETH, USDC, SOL) - serwer tworzy się **automatycznie** zaraz po wpłacie.'),
+          point('**⏳ Ręcznie** (BLIK albo krypto) - otwiera się ticket i czekasz na właściciela.'),
         ].join('\n'),
     ].join('\n'),
     logo,
@@ -1125,10 +1125,10 @@ const resultLabel = (result) => ({ done: '✅ **Zrealizowane**', notdone: '❌ *
 function closerRow(ticket) {
   if (ticket.result === 'closed') {
     const who = ticket.closedBy === ticket.userId ? 'Zamknął (klient)' : 'Zamknął';
-    return row(who, ticket.closedBy ? `<@${ticket.closedBy}>` : '—');
+    return row(who, ticket.closedBy ? `<@${ticket.closedBy}>` : '-');
   }
   if (ticket.result === 'done') return row('✅ Oznaczył jako zrealizowane', `<@${ticket.decidedBy ?? ticket.deal?.sellerId ?? ticket.closedBy}>`);
-  if (!ticket.closedBy) return row('Zamknął', '—');
+  if (!ticket.closedBy) return row('Zamknął', '-');
   if (ticket.closedBy === ticket.userId) return row('Zamknął (klient)', `<@${ticket.closedBy}>`);
   return row('❌ Oznaczył jako niezrealizowane', `<@${ticket.closedBy}>`);
 }
@@ -1167,7 +1167,7 @@ function closedView(ticket, subtitle, withReviewButton, guildId) {
   b.addFileComponents((f) => f.setURL(`attachment://${transcriptName(ticket)}`));
   if (withReviewButton) {
     sep(b, true);
-    text(b, `### ⭐ ${x} Jak nam poszło?\n-# Wystaw opinię — oceń jakość bota, czas realizacji i obsługę klienta`);
+    text(b, `### ⭐ ${x} Jak nam poszło?\n-# Wystaw opinię - oceń jakość bota, czas realizacji i obsługę klienta`);
     b.addActionRowComponents((r) =>
       r.setComponents(new ButtonBuilder().setCustomId(`rev:open:${guildId}`).setLabel('Wystaw opinię').setEmoji('⭐').setStyle(ButtonStyle.Primary)),
     );
@@ -1228,7 +1228,7 @@ const PENDING_FORM_MS = 15 * 60_000;
 
 function otherPaymentPrompt(type) {
   const b = box(colors.brand);
-  text(b, [title('Inna płatność', '✏️'), '>>> Wybrałeś/aś **inną** metodę płatności. Kliknij przycisk poniżej i wpisz, jak chcesz zapłacić — potem utworzy się ticket.'].join('\n'));
+  text(b, [title('Inna płatność', '✏️'), '>>> Wybrałeś/aś **inną** metodę płatności. Kliknij przycisk poniżej i wpisz, jak chcesz zapłacić - potem utworzy się ticket.'].join('\n'));
   b.addActionRowComponents((r) =>
     r.setComponents(new ButtonBuilder().setCustomId(`tk:otherpay:${type}`).setLabel('Wpisz płatność').setEmoji('✏️').setStyle(ButtonStyle.Primary)),
   );
@@ -1324,14 +1324,14 @@ function staffTicket(i) {
   return { ticket };
 }
 
-const clientCloseMessage = 'Ticket może zamknąć tylko **administracja**. Jeśli sprawa jest załatwiona, napisz o tym w tickecie — admin go zamknie.';
+const clientCloseMessage = 'Ticket może zamknąć tylko **administracja**. Jeśli sprawa jest załatwiona, napisz o tym w tickecie - admin go zamknie.';
 
 async function onCloseRequest(i) {
   const ticket = getTicket(i.guildId, i.channelId);
   if (!ticket || ticket.closedAt) return replyV2(i, fail('To nie jest aktywny kanał ticketu.'));
-  // Ticket zamyka tylko administracja — klient nie może zamknąć swojego ticketu.
+  // Ticket zamyka tylko administracja - klient nie może zamknąć swojego ticketu.
   if (!isStaff(i.member, guild(i.guildId).settings)) return replyV2(i, fail(clientCloseMessage));
-  // Pytania i współpraca: bez „Zrealizowane / Niezrealizowane” — od razu formularz z powodem.
+  // Pytania i współpraca: bez „Zrealizowane / Niezrealizowane” - od razu formularz z powodem.
   if (!ticketTypes[ticket.type].order) return i.showModal(closeReasonModal());
   const b = box(colors.danger);
   {
@@ -1339,8 +1339,8 @@ async function onCloseRequest(i) {
       b,
       [
         title('Jak zakończyć ticket?', '🔒'),
-        point('**✅ Zrealizowane** — podajesz produkt, cenę i płatność, klient wystawia legit checka, a ticket zamknie się sam.'),
-        point('**❌ Niezrealizowane** — ticket zamyka się od razu, transcript trafia do logów.'),
+        point('**✅ Zrealizowane** - podajesz produkt, cenę i płatność, klient wystawia legit checka, a ticket zamknie się sam.'),
+        point('**❌ Niezrealizowane** - ticket zamyka się od razu, transcript trafia do logów.'),
       ].join('\n'),
     );
     b.addActionRowComponents((r) =>
@@ -1449,7 +1449,7 @@ function repRequestView(ticket, lcChannelId) {
   return b;
 }
 
-/** Panel na kanale legit checków — zawsze na dole, pod ostatnim vouchem. */
+/** Panel na kanale legit checków - zawsze na dole, pod ostatnim vouchem. */
 function vouchPanel(g, logo) {
   const b = box(colors.success);
   header(
@@ -1471,9 +1471,9 @@ function vouchPanel(g, logo) {
     b,
     [
       point('Gdy wyślesz voucha z ticketu, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
-      point('⚠️ Na tym kanale można wysłać **tylko voucha z ticketu** — inne wiadomości są automatycznie usuwane.'),
+      point('⚠️ Na tym kanale można wysłać **tylko voucha z ticketu** - inne wiadomości są automatycznie usuwane.'),
       g.settings.reviewChannelId ? point(`Zostaw też opinię na <#${g.settings.reviewChannelId}> ⭐`) : null,
-      point(`Zrealizowaliśmy już **${g.stats.done}** zamówień — dziękujemy za zaufanie! 💙`),
+      point(`Zrealizowaliśmy już **${g.stats.done}** zamówień - dziękujemy za zaufanie! 💙`),
     ]
       .filter(Boolean)
       .join('\n'),
@@ -1505,7 +1505,7 @@ async function onDoneSubmit(i) {
   const card = await i.channel.messages.fetch(updated.messageId).catch(() => null);
   await card?.edit({ components: [ticketMessage(updated, user)], flags: V2 }).catch(() => {});
 
-  // Ticket NIE zamyka się tutaj — czeka, aż klient wyśle repa na kanale legit checków.
+  // Ticket NIE zamyka się tutaj - czeka, aż klient wyśle repa na kanale legit checków.
   await i.reply({ components: [repRequestView(updated, g.settings.lcChannelId)], flags: V2, allowedMentions: { users: [updated.userId] } });
 }
 
@@ -1518,7 +1518,7 @@ const normalizeRep = (text) =>
     .trim()
     .toLowerCase();
 
-/** Czy wiadomość to vouch z ticketu. Bez „Message Content Intent” bot nie widzi treści — wtedy wystarczy oznaczenie sprzedawcy. */
+/** Czy wiadomość to vouch z ticketu. Bez „Message Content Intent” bot nie widzi treści - wtedy wystarczy oznaczenie sprzedawcy. */
 function matchesTicketRep(message, ticket) {
   if (!messageContentOn) return message.mentions.users.has(ticket.deal.sellerId);
   return normalizeRep(message.content) === normalizeRep(repTemplate(ticket));
@@ -1539,7 +1539,7 @@ async function onLegitCheckMessage(message) {
   const g = guild(message.guild.id);
   // Wiadomości botów i webhooków (np. /autolc) pomijamy.
   if (message.channelId !== g.settings.lcChannelId || message.author.bot || message.webhookId) return false;
-  // Na kanale zostają tylko vouche z ticketów — wiadomości adminów też są usuwane.
+  // Na kanale zostają tylko vouche z ticketów - wiadomości adminów też są usuwane.
   const ticket = Object.values(g.tickets).find((t) => t.awaitingRep && !t.closedAt && t.userId === message.author.id && t.deal);
 
   if (!ticket) {
@@ -1643,7 +1643,7 @@ const hostingApi = () => ({
   eth: 'https://eth.blockscout.com/api',
   ethRpc: 'https://ethereum-rpc.publicnode.com',
   sol: 'https://api.mainnet-beta.solana.com',
-  // Zapasowe serwery Solany — publiczny serwer często ogranicza zapytania z serwerów w centrach danych.
+  // Zapasowe serwery Solany - publiczny serwer często ogranicza zapytania z serwerów w centrach danych.
   solFallbacks: ['https://solana-rpc.publicnode.com', 'https://solana.drpc.org'],
   coinbase: 'https://api.coinbase.com/v2/exchange-rates',
   prices: 'https://api.coingecko.com/api/v3/simple/price',
@@ -1680,7 +1680,7 @@ async function getJson(url, init = {}) {
   try {
     res = await httpFetch(url, { ...rest, headers, signal: AbortSignal.timeout(timeout) });
   } catch (err) {
-    // „fetch failed” nic nie mówi — podajemy adres i przyczynę (np. ECONNREFUSED, ENOTFOUND, timeout).
+    // „fetch failed” nic nie mówi - podajemy adres i przyczynę (np. ECONNREFUSED, ENOTFOUND, timeout).
     const cause = err?.name === 'TimeoutError' || /timeout/i.test(err?.message) ? 'brak odpowiedzi (timeout)' : err?.cause?.code || err?.cause?.message || err?.message;
     throw Object.assign(new Error(`${new URL(url).host}: ${cause}`), { network: true });
   }
@@ -1698,7 +1698,7 @@ async function getJson(url, init = {}) {
   return data;
 }
 
-// Ostrzeżenia z pętli (np. API blockchaina nie odpowiada) — najwyżej raz na 10 minut dla danego źródła.
+// Ostrzeżenia z pętli (np. API blockchaina nie odpowiada) - najwyżej raz na 10 minut dla danego źródła.
 const warnedAt = new Map();
 function warnOnce(key, message) {
   if (Date.now() - (warnedAt.get(key) ?? 0) < 10 * 60_000) return;
@@ -1745,9 +1745,9 @@ async function panelUserByEmail(email) {
   return (res?.data ?? []).map((d) => d.attributes).find((u) => String(u.email).toLowerCase() === wanted) ?? null;
 }
 
-/** Łączy konto w panelu z kontem Discord (jeśli nie jest jeszcze z niczym połączone) — kolejne zakupy trafią na nie same. */
+/** Łączy konto w panelu z kontem Discord (jeśli nie jest jeszcze z niczym połączone) - kolejne zakupy trafią na nie same. */
 async function linkPanelUser(account, discordId) {
-  // Konta admina nie łączymy z klientem — jego zakupy trafiałyby wtedy na konto admina.
+  // Konta admina nie łączymy z klientem - jego zakupy trafiałyby wtedy na konto admina.
   if (account.external_id || account.root_admin) return false;
   await ptero('PATCH', `/users/${account.id}`, {
     email: account.email,
@@ -1876,7 +1876,7 @@ async function hostingLog(client, guildId, content, color = colors.brand) {
 const recLine = (rec) => row(`\`#${rec.id}\` ${rec.name}`, `<@${rec.userId}> • ${langLabel(rec.lang)} • do ${ts(rec.expiresAt, 'f')}`);
 
 /**
- * Nowy serwer albo przedłużenie — wspólne dla zakupu automatycznego, ręcznego i /hosting utworz.
+ * Nowy serwer albo przedłużenie - wspólne dla zakupu automatycznego, ręcznego i /hosting utworz.
  * key = unikalny identyfikator zakupu (zabezpiecza przed podwójnym serwerem przy ponownej próbie).
  */
 async function activateHosting(client, guildId, { key, userId, lang, plan, email, renew, payment, source, name }) {
@@ -1927,10 +1927,10 @@ async function activateHosting(client, guildId, { key, userId, lang, plan, email
     [
       `### 🆕 ${x} Nowy hosting`,
       recLine(rec),
-      row('Pakiet', `${planOf(plan)[0]} — ${planOf(plan)[1]}`),
+      row('Pakiet', `${planOf(plan)[0]} - ${planOf(plan)[1]}`),
       row('Płatność', `${payLabel(payment)} • ${source}`),
       account.password ? row('Konto w panelu', `nowe: \`${account.user.username}\``) : row('Konto w panelu', `istniejące: \`${account.user.username}\``),
-      dm ? null : row('⚠️ DM', 'klient ma zablokowane wiadomości prywatne — dane logowania trzeba przekazać ręcznie'),
+      dm ? null : row('⚠️ DM', 'klient ma zablokowane wiadomości prywatne - dane logowania trzeba przekazać ręcznie'),
     ]
       .filter(Boolean)
       .join('\n'),
@@ -2013,7 +2013,7 @@ function hostingRenewedView(rec, guildId) {
           row('🖥️ Serwer', `**${rec.name}** (ID \`${rec.id}\`)`),
           row('📅 Ważny do', `${ts(rec.expiresAt, 'f')} (${ts(rec.expiresAt)})`),
           rec.started === true ? row('▶️ Status', 'serwer odblokowany i uruchomiony') : null,
-          rec.started === false ? row('▶️ Status', 'serwer odblokowany — kliknij **Start** w panelu') : null,
+          rec.started === false ? row('▶️ Status', 'serwer odblokowany - kliknij **Start** w panelu') : null,
         ]
           .filter(Boolean)
           .join('\n'),
@@ -2042,7 +2042,7 @@ function hostingExpiredView(rec, guildId) {
     b,
     [
       title('Hosting zablokowany', '⛔'),
-      `Okres hostingu serwera **${rec.name}** minął — serwer został **zablokowany**.`,
+      `Okres hostingu serwera **${rec.name}** minął - serwer został **zablokowany**.`,
       point('Twoje pliki są bezpieczne. Po przedłużeniu serwer **odblokuje się automatycznie**.'),
       point(`Bez przedłużenia serwer może zostać usunięty po ${hostingTimes.deleteNoticeDays} dniach.`),
     ].join('\n'),
@@ -2056,14 +2056,14 @@ function orderStatusLine(o) {
   const need = hostingTimes.confirmations;
   const sol = cryptoCoins[o.coin]?.chain === 'sol';
   return {
-    waiting: `⏳ Czekam na płatność — masz czas do ${ts(o.expiresAt, 't')} (${ts(o.expiresAt)})`,
+    waiting: `⏳ Czekam na płatność - masz czas do ${ts(o.expiresAt, 't')} (${ts(o.expiresAt)})`,
     seen: sol ? '🔄 Płatność wykryta! Czekam na finalizację w sieci Solana (ok. 15 s)…' : `🔄 Płatność wykryta! Potwierdzenia: **${o.confirmations}/${need}**`,
-    paid: '✅ Płatność potwierdzona — tworzę serwer…',
-    creating: '✅ Płatność potwierdzona — tworzę serwer…',
-    error: '⚠️ Płatność potwierdzona, ale panel chwilowo nie odpowiada — ponawiam automatycznie.',
-    failed: '⚠️ Płatność potwierdzona — administracja dokończy zamówienie ręcznie (dostała powiadomienie).',
+    paid: '✅ Płatność potwierdzona - tworzę serwer…',
+    creating: '✅ Płatność potwierdzona - tworzę serwer…',
+    error: '⚠️ Płatność potwierdzona, ale panel chwilowo nie odpowiada - ponawiam automatycznie.',
+    failed: '⚠️ Płatność potwierdzona - administracja dokończy zamówienie ręcznie (dostała powiadomienie).',
     done: o.renew ? '✅ Gotowe! Hosting przedłużony.' : '✅ Gotowe! Dane do panelu są w osobnej wiadomości.',
-    expired: '⌛ Czas na płatność minął. Jeśli wysłałeś/aś środki, otwórz ticket — sprawdzimy to ręcznie.',
+    expired: '⌛ Czas na płatność minął. Jeśli wysłałeś/aś środki, otwórz ticket - sprawdzimy to ręcznie.',
     cancelled: '❌ Zamówienie anulowane.',
   }[o.status];
 }
@@ -2082,7 +2082,7 @@ function orderView(o, guildId) {
         row('💰 Kwota', `\`${o.amount} ${c.label}\` (≈ ${o.pln} zł)`),
         row('🌐 Sieć', `**${c.network}**`),
         row('📬 Adres', `\`${o.wallet}\``),
-        row('📦 Pakiet', `${planOf(o.plan)[0]} — ${planOf(o.plan)[1]}`),
+        row('📦 Pakiet', `${planOf(o.plan)[0]} - ${planOf(o.plan)[1]}`),
         o.renew ? row('🔁 Serwer', `ID \`${o.renew}\``) : row('💻 Język', langLabel(o.lang)),
         o.txid ? row('🔗 Transakcja', `\`${o.txid.split(':')[0]}\``) : null,
         row('🧾 Zamówienie', `\`${o.id}\``),
@@ -2096,7 +2096,7 @@ function orderView(o, guildId) {
       b,
       [
         `### ⚠️ ${x} Ważne`,
-        point(`Wyślij **dokładnie \`${o.amount}\` ${c.label}** — co do ostatniej cyfry. Po tej kwocie rozpoznajemy Twoją płatność.`),
+        point(`Wyślij **dokładnie \`${o.amount}\` ${c.label}** - co do ostatniej cyfry. Po tej kwocie rozpoznajemy Twoją płatność.`),
         point(`Tylko sieć **${c.network}**${c.token ? ` (token USDC: \`${c.token}\`)` : ''}. Wysłanie inną siecią = utrata środków.`),
         point('Opłatę sieci płacisz osobno. Wysyłasz z giełdy? Upewnij się, że **dojdzie** dokładnie ta kwota.'),
         point(`Serwer utworzy się sam po ${c.chain === 'sol' ? 'finalizacji transakcji (ok. 15 s)' : `**${hostingTimes.confirmations} potwierdzeniach** w sieci`}.`),
@@ -2122,14 +2122,14 @@ function manualPaymentView(form) {
   const info = coin
     ? wallet && `Wyślij równowartość **${plan[1]}** w **${coin.label}** (sieć **${coin.network}**) na adres:\n\`${wallet}\``
     : null;
-  // BLIK: numer telefonu właściciel podaje w tickecie — klient nie płaci, zanim go dostanie.
+  // BLIK: numer telefonu właściciel podaje w tickecie - klient nie płaci, zanim go dostanie.
   const blik = form.payment === 'blik';
   const b = box(colors.gold);
   text(
     b,
     [
       title('Płatność', '💳'),
-      '>>> ' + [row('📦 Pakiet', `${plan[0]} — **${plan[1]}**`), row('💳 Metoda', payLabel(form.payment))].join('\n'),
+      '>>> ' + [row('📦 Pakiet', `${plan[0]} - **${plan[1]}**`), row('💳 Metoda', payLabel(form.payment))].join('\n'),
       '',
       `### 📬 ${x} Dane do płatności`,
       info || (blik ? '📱 **Numer telefonu do BLIK poda właściciel w tym tickecie.**\n⚠️ Nie wysyłaj pieniędzy, zanim go nie dostaniesz od właściciela.' : 'Właściciel poda je w tym tickecie.'),
@@ -2153,14 +2153,14 @@ function myHostingView(recs, orders, guildId) {
       row(rec.suspended ? '⛔ Zablokowany od' : '📅 Ważny do', rec.suspended ? ts(rec.suspendedAt ?? rec.expiresAt, 'f') : `${ts(rec.expiresAt, 'f')} (${ts(rec.expiresAt)})`),
     ].join('\n'),
   );
-  const pending = orders.map((o) => row('⏳ Oczekująca płatność', `\`${o.amount} ${cryptoCoins[o.coin].label}\` — szczegóły w DM`));
+  const pending = orders.map((o) => row('⏳ Oczekująca płatność', `\`${o.amount} ${cryptoCoins[o.coin].label}\` - szczegóły w DM`));
   text(
     b,
-    [title('Mój hosting', '🖥️'), lines.length ? lines.join('\n') : '*Nie masz jeszcze hostingu. Kup go na kanale z cennikiem albo w ticketach.*', ...pending, '', `-# 🌐 Panel: ${panelUrl() || '—'}`].join('\n'),
+    [title('Mój hosting', '🖥️'), lines.length ? lines.join('\n') : '*Nie masz jeszcze hostingu. Kup go na kanale z cennikiem albo w ticketach.*', ...pending, '', `-# 🌐 Panel: ${panelUrl() || '-'}`].join('\n'),
   );
   // Każdy serwer ma swój rząd: „Przedłuż” i „Zmień nazwę” (limit wiadomości Discorda: 10 serwerów).
   for (const rec of recs.slice(0, 10)) b.addActionRowComponents((r) => r.setComponents(renewButton(guildId, rec), renameButton(guildId, rec)));
-  if (recs.length > 10) text(b, `-# …i ${recs.length - 10} więcej — napisz do administracji.`);
+  if (recs.length > 10) text(b, `-# …i ${recs.length - 10} więcej - napisz do administracji.`);
   return b;
 }
 
@@ -2197,9 +2197,9 @@ function normalizeHostingForm(form) {
 function hostingFormError(form) {
   if (!form.lang || !form.period || !form.mode || !form.payment) return 'Uzupełnij wszystkie pola formularza.';
   if (!hostingPayments[form.payment] || !['auto', 'manual'].includes(form.mode)) return 'Wybierz sposób płatności z listy.';
-  if (!form.renew && !validEmail(form.email)) return 'Podaj poprawny adres e-mail — to będzie login do panelu hostingu.';
+  if (!form.renew && !validEmail(form.email)) return 'Podaj poprawny adres e-mail - to będzie login do panelu hostingu.';
   if (form.mode === 'auto') {
-    if (!form.renew && hostingLanguages[form.lang]?.manualOnly) return 'Ten język obsługujemy tylko przy **zakupie ręcznym** — wybierz „⏳ Ręczny”.';
+    if (!form.renew && hostingLanguages[form.lang]?.manualOnly) return 'Ten język obsługujemy tylko przy **zakupie ręcznym** - wybierz „⏳ Ręczny”.';
     if (!cryptoCoins[form.payment]) return 'Zakup automatyczny działa tylko z kryptowalutami (LTC, ETH, USDC, SOL). Wybierz krypto albo „⏳ Ręczny”.';
   }
   return null;
@@ -2212,20 +2212,20 @@ function cryptoAmount(coinKey, pln, rate, taken) {
   const base = Math.ceil(pln / rate / c.step - 1e-9) * stepUnits;
   const free = [];
   for (let k = 1; k < 1000; k++) if (!taken.has(base + k)) free.push(k);
-  if (!free.length) throw userError('Za dużo zamówień naraz — spróbuj za kilka minut.');
+  if (!free.length) throw userError('Za dużo zamówień naraz - spróbuj za kilka minut.');
   const shownUnits = base + free[randomInt(free.length)];
   return { shownUnits, amount: unitsToString(shownUnits, c.shown), units: (BigInt(shownUnits) * 10n ** BigInt(c.decimals - c.shown)).toString() };
 }
 
 let priceCache = { at: 0, data: {} };
-/** Kursy w PLN w formacie { litecoin: { pln: 400 }, … }. Najpierw Coinbase, a gdy nie odpowiada — CoinGecko. */
+/** Kursy w PLN w formacie { litecoin: { pln: 400 }, … }. Najpierw Coinbase, a gdy nie odpowiada - CoinGecko. */
 async function cryptoPricesPln() {
   if (Date.now() - priceCache.at < 120_000) return priceCache.data;
   const coins = Object.values(cryptoCoins);
   const errors = [];
   const sources = [
     async () => {
-      // Coinbase podaje, ile danej waluty dostaniesz za 1 PLN — kurs to odwrotność.
+      // Coinbase podaje, ile danej waluty dostaniesz za 1 PLN - kurs to odwrotność.
       const rates = (await getJson(`${hostingApi().coinbase}?currency=PLN`))?.data?.rates ?? {};
       return Object.fromEntries(coins.filter((c) => Number(rates[c.label]) > 0).map((c) => [c.gecko, { pln: 1 / Number(rates[c.label]) }]));
     },
@@ -2286,7 +2286,7 @@ async function onAutoPurchase(i, guildId, form) {
   if (!hostingReady()) return replyV2(i, fail('Automatyczny zakup jest chwilowo wyłączony. Wybierz **⏳ zakup ręczny**.'));
   if (!walletFor(form.payment)) return replyV2(i, fail(`Płatność ${payLabel(form.payment)} jest chwilowo niedostępna. Wybierz inną kryptowalutę albo zakup ręczny.`));
   if (Object.values(guild(guildId).hosting.orders).some((o) => o.userId === i.user.id && activeOrder(o))) {
-    return replyV2(i, fail('Masz już zamówienie czekające na płatność — szczegóły są w DM (tam możesz je anulować).'));
+    return replyV2(i, fail('Masz już zamówienie czekające na płatność - szczegóły są w DM (tam możesz je anulować).'));
   }
   await i.deferReply({ flags: V2_EPHEMERAL });
   try {
@@ -2334,13 +2334,13 @@ function orderLogStatus(o) {
   const c = cryptoCoins[o.coin];
   return {
     waiting: `⏳ Czeka na wpłatę (do ${ts(o.expiresAt, 't')})`,
-    seen: c.chain === 'sol' ? '🔄 Wpłata wykryta — czeka na finalizację' : `🔄 Wpłata wykryta — potwierdzenia ${o.confirmations}/${hostingTimes.confirmations}`,
-    paid: '✅ Opłacone — tworzenie serwera',
-    creating: '✅ Opłacone — tworzenie serwera',
-    error: '⚠️ Opłacone, błąd panelu — bot ponawia',
-    failed: '❌ Opłacone, ale serwer NIE powstał — dokończ ręcznie',
-    done: o.renew ? '🖥️ Zrealizowane — hosting przedłużony' : '🖥️ Zrealizowane — serwer utworzony',
-    expired: '⌛ Wygasło — brak wpłaty',
+    seen: c.chain === 'sol' ? '🔄 Wpłata wykryta - czeka na finalizację' : `🔄 Wpłata wykryta - potwierdzenia ${o.confirmations}/${hostingTimes.confirmations}`,
+    paid: '✅ Opłacone - tworzenie serwera',
+    creating: '✅ Opłacone - tworzenie serwera',
+    error: '⚠️ Opłacone, błąd panelu - bot ponawia',
+    failed: '❌ Opłacone, ale serwer NIE powstał - dokończ ręcznie',
+    done: o.renew ? '🖥️ Zrealizowane - hosting przedłużony' : '🖥️ Zrealizowane - serwer utworzony',
+    expired: '⌛ Wygasło - brak wpłaty',
     cancelled: '❌ Anulowane przez klienta',
   }[o.status];
 }
@@ -2356,7 +2356,7 @@ function orderLogView(o) {
       `### 🧾 ${x} Zamówienie \`${o.id}\`${o.renew ? ' • przedłużenie' : ''}`,
       row('Status', `**${orderLogStatus(o)}**`),
       row('Klient', `<@${o.userId}> (\`${o.userId}\`)`),
-      row('Pakiet', `${plan[0]} — ${plan[1]}`),
+      row('Pakiet', `${plan[0]} - ${plan[1]}`),
       o.renew ? row('Serwer', `ID \`${o.renew}\``) : row('Język', langLabel(o.lang)),
       o.renew ? null : row('Nazwa serwera', o.name ? `\`${o.name}\`` : '*domyślna*'),
       row('Kwota', `\`${o.amount} ${c.label}\` (${c.network}) ≈ ${o.pln} zł • kurs ${Number(o.rate).toFixed(2)} zł`),
@@ -2476,7 +2476,7 @@ async function onHostingConfirm(i) {
             `### ✅ ${x} ${ticket.form.renew ? 'Hosting przedłużony' : 'Serwer utworzony'}`,
             row('🖥️ Serwer', `\`${res.rec.name}\` (ID \`${res.rec.id}\`)`),
             row('📅 Ważny do', ts(res.rec.expiresAt, 'f')),
-            row('📩 Klient', res.dmOk ? 'dostał szczegóły w DM' : 'ma zablokowane DM — szczegóły poniżej'),
+            row('📩 Klient', res.dmOk ? 'dostał szczegóły w DM' : 'ma zablokowane DM - szczegóły poniżej'),
           ].join('\n'),
           colors.success,
         ),
@@ -2515,7 +2515,7 @@ async function onRenameSubmit(i, guildId, rec) {
   if (!hostingReady()) return replyV2(i, fail('Panel jest chwilowo niedostępny. Spróbuj później.'));
   await i.deferReply({ flags: V2_EPHEMERAL });
   try {
-    // PATCH /details wymaga też właściciela i external_id — przepisujemy obecne wartości.
+    // PATCH /details wymaga też właściciela i external_id - przepisujemy obecne wartości.
     const a = (await ptero('GET', `/servers/${rec.id}`)).attributes;
     await ptero('PATCH', `/servers/${rec.id}/details`, { name, user: a.user, external_id: a.external_id ?? null, description: a.description ?? null });
     const old = rec.name;
@@ -2524,7 +2524,7 @@ async function onRenameSubmit(i, guildId, rec) {
     await i.editReply({ components: [ok(`Nowa nazwa serwera: **${name}**`)], flags: V2 });
   } catch (err) {
     if (!err.userFacing) console.error('Hosting (nazwa):', err);
-    await i.editReply({ components: [fail(notFound(err) ? 'Ten serwer już nie istnieje w panelu.' : 'Nie udało się zmienić nazwy — spróbuj za chwilę.')], flags: V2 });
+    await i.editReply({ components: [fail(notFound(err) ? 'Ten serwer już nie istnieje w panelu.' : 'Nie udało się zmienić nazwy - spróbuj za chwilę.')], flags: V2 });
   }
 }
 
@@ -2549,7 +2549,7 @@ async function routeHosting(i) {
   const order = guild(guildId).hosting.orders[id];
   if (!order || order.userId !== i.user.id) return replyV2(i, fail('Nie znaleziono zamówienia.'));
   if (action === 'copy' && i.isButton()) {
-    // Zwykły tekst (bez Components V2) — na telefonie łatwo go skopiować przytrzymaniem.
+    // Zwykły tekst (bez Components V2) - na telefonie łatwo go skopiować przytrzymaniem.
     return i.reply({ content: extra === 'addr' ? order.wallet : order.amount, flags: MessageFlags.Ephemeral });
   }
   if (action === 'cancel' && i.isButton()) {
@@ -2587,7 +2587,7 @@ async function scanLtc(wallet, since) {
 
 async function scanLtcBlockcypher(wallet, since) {
   const data = await getJson(`${hostingApi().ltcBlockcypher}/addrs/${wallet}?limit=50`, { timeout: 12_000 });
-  // Wyjścia na nasz adres mają tx_input_n = -1. Jedna transakcja może mieć kilka wyjść — sumujemy.
+  // Wyjścia na nasz adres mają tx_input_n = -1. Jedna transakcja może mieć kilka wyjść - sumujemy.
   const byTx = new Map();
   for (const ref of [...(data?.unconfirmed_txrefs ?? []), ...(data?.txrefs ?? [])]) {
     if (ref.tx_input_n !== -1) continue;
@@ -2853,7 +2853,7 @@ async function processOrders(client, guildId) {
     }
   }
 
-  // 'creating' zostaje tylko po restarcie bota w trakcie tworzenia — external_id chroni przed duplikatem.
+  // 'creating' zostaje tylko po restarcie bota w trakcie tworzenia - external_id chroni przed duplikatem.
   for (const o of orders.filter((o) => o.status === 'paid' || o.status === 'creating' || (o.status === 'error' && o.attempts < 10))) {
     await fulfilOrder(client, guildId, o);
   }
@@ -2893,7 +2893,7 @@ async function checkExpirations(client, guildId) {
           `### 🗑️ ${x} Serwer można usunąć`,
           recLine(rec),
           point(`Zablokowany od ${ts(rec.suspendedAt ?? rec.expiresAt, 'f')} i nieprzedłużony.`),
-          point(`Usuń: \`/hosting usun serwer:${rec.id} potwierdz:True\` (albo zostaw — pliki czekają).`),
+          point(`Usuń: \`/hosting usun serwer:${rec.id} potwierdz:True\` (albo zostaw - pliki czekają).`),
         ].join('\n'),
         colors.danger,
       );
@@ -2925,7 +2925,7 @@ function hostingLoop(client) {
   setInterval(() => hostingTick(client).catch(console.error), 30_000);
 }
 
-/** /hosting test — sprawdza po kolei wszystko, czego potrzebuje hosting. */
+/** /hosting test - sprawdza po kolei wszystko, czego potrzebuje hosting. */
 async function hostingDiagnostics() {
   const out = [];
   const check = async (label, fn) => {
@@ -2948,7 +2948,7 @@ async function hostingDiagnostics() {
       const allocs = (await ptero('GET', `/nodes/${node.id}/allocations?per_page=500`)).data ?? [];
       free += allocs.filter((a) => !a.attributes.assigned).length;
     }
-    if (!free) throw new Error('brak wolnych portów — dodaj porty: Admin → Nodes → węzeł → Allocation');
+    if (!free) throw new Error('brak wolnych portów - dodaj porty: Admin → Nodes → węzeł → Allocation');
     return `publiczne węzły: ${pub.map((n) => n.name).join(', ')} • wolne porty: ${free}`;
   });
   eggCache.clear();
@@ -2959,7 +2959,7 @@ async function hostingDiagnostics() {
     });
   }
   await check('Klucz Client API (auto-start)', async () => {
-    if (!hostingConfig.clientApiKey) return 'nie ustawiony — po odblokowaniu klient sam kliknie Start';
+    if (!hostingConfig.clientApiKey) return 'nie ustawiony - po odblokowaniu klient sam kliknie Start';
     await ptero('GET', '', null, true);
     return 'działa';
   });
@@ -3092,11 +3092,11 @@ async function postPanel(client, discordGuild, channel, type) {
   try {
     message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], files: bannerAttachments(guild(discordGuild.id), type), flags: V2 });
   } catch (err) {
-    // 50035 = Discord odrzucił treść — zwykle zły link do baneru. Próbujemy bez niego.
+    // 50035 = Discord odrzucił treść - zwykle zły link do baneru. Próbujemy bez niego.
     if (err.code !== 50035 || !guild(discordGuild.id).settings.banners[type]) throw err;
     updateGuild(discordGuild.id, (gg) => delete gg.settings.banners[type]);
     message = await channel.send({ components: [panelBuilders[type](guild(discordGuild.id), logo)], files: bannerAttachments(guild(discordGuild.id), type), flags: V2 });
-    warning = '\n⚠️ Link do baneru był nieprawidłowy — panel wysłano bez niego.';
+    warning = '\n⚠️ Link do baneru był nieprawidłowy - panel wysłano bez niego.';
   }
   updateGuild(discordGuild.id, (gg) => (gg.panels[type] = { channelId: channel.id, messageId: message.id }));
   if (type === 'legit') {
@@ -3106,7 +3106,7 @@ async function postPanel(client, discordGuild, channel, type) {
       [legitEmojis.no, '❌'],
     ]) {
       await message.react(custom).catch(async (err) => {
-        console.warn(`Czy legit: nie mogę użyć emoji ${custom} (${err.message}) — dodaję ${fallback}. Bot musi być na serwerze, z którego jest to emoji.`);
+        console.warn(`Czy legit: nie mogę użyć emoji ${custom} (${err.message}) - dodaję ${fallback}. Bot musi być na serwerze, z którego jest to emoji.`);
         await message.react(fallback).catch(() => {});
       });
     }
@@ -3131,7 +3131,7 @@ async function refreshPanel(client, guildId, type) {
 
 // ─── Liczniki w nazwach kanałów (np. ⭐┃opinie→9) ───────────────────────
 // Liczby są od razu zapisywane w bazie. Discord pozwala zmienić nazwę kanału tylko 2 razy na 10 minut,
-// więc nazwy kanałów aktualizujemy co 10 minut (i raz przy starcie bota) — tylko gdy liczba się zmieniła.
+// więc nazwy kanałów aktualizujemy co 10 minut (i raz przy starcie bota) - tylko gdy liczba się zmieniła.
 
 /** [id kanału, wzór nazwy, liczba] dla wszystkich liczników serwera. */
 function counterTargets(g) {
@@ -3150,7 +3150,7 @@ async function updateCounters(client) {
       const name = pattern.replace('{n}', n);
       const channel = await client.channels.fetch(channelId).catch(() => null);
       if (!channel || channel.name === name) continue;
-      // Nie czekamy w nieskończoność na limit Discorda — spróbujemy ponownie za 10 minut.
+      // Nie czekamy w nieskończoność na limit Discorda - spróbujemy ponownie za 10 minut.
       await Promise.race([channel.setName(name, 'Licznik'), new Promise((r) => setTimeout(r, 15_000))]).catch((err) =>
         console.warn(`Licznik ${name}:`, err.message),
       );
@@ -3207,7 +3207,7 @@ async function onLegitReaction(reaction, user, added) {
           .send({
             components: [
               notice(
-                `### 🔇 ${x} Otrzymałeś/aś przerwę na ${legitTimeoutDays} dni\nReakcja ${legitEmojis.no} na **czy legit** wymaga dowodu. Jeśli go masz — napisz do administracji.`,
+                `### 🔇 ${x} Otrzymałeś/aś przerwę na ${legitTimeoutDays} dni\nReakcja ${legitEmojis.no} na **czy legit** wymaga dowodu. Jeśli go masz - napisz do administracji.`,
                 colors.warning,
               ),
             ],
@@ -3219,7 +3219,7 @@ async function onLegitReaction(reaction, user, added) {
     return;
   }
 
-  // ✅ — zapisujemy liczbę od razu; nazwa kanału aktualizuje się automatycznie co 10 minut.
+  // ✅ - zapisujemy liczbę od razu; nazwa kanału aktualizuje się automatycznie co 10 minut.
   if (isLegitEmoji(reaction.emoji, 'yes')) updateGuild(message.guildId, (gg) => (gg.legitVotes = { yes: votesOf(message, 'yes'), no: 0 }));
 }
 
@@ -3274,7 +3274,7 @@ async function endGiveaway(client, guildId, messageId, reroll = false) {
   const gw = g.giveaways[messageId];
   if (!gw) return null;
   const winnerIds = pickWinners(gw.entrants, gw.winners, reroll ? (gw.winnerIds ?? []) : []);
-  // Losowanie po restarcie bota: zostaje planowana data końca (nie godzina restartu). „Zakończ teraz” — obecna.
+  // Losowanie po restarcie bota: zostaje planowana data końca (nie godzina restartu). „Zakończ teraz” - obecna.
   updateGuild(guildId, () => Object.assign(gw, { ended: true, winnerIds, endsAt: reroll ? gw.endsAt : Math.min(Date.now(), gw.endsAt) }));
   const channel = await client.channels.fetch(gw.channelId).catch(() => null);
   const message = await channel?.messages.fetch(messageId).catch(() => null);
@@ -3333,7 +3333,7 @@ const BOOST_DEDUPE_MS = 2 * 60_000;
 async function announceBoost(discordGuild, user) {
   const { settings } = guild(discordGuild.id);
   if (!settings.boostChannelId) {
-    console.warn(`Boost od ${user.tag ?? user.id}: brak kanału boostów — ustaw go: /setup kanaly boosty:#kanał`);
+    console.warn(`Boost od ${user.tag ?? user.id}: brak kanału boostów - ustaw go: /setup kanaly boosty:#kanał`);
     return false;
   }
   const key = `${discordGuild.id}:${user.id}`;
@@ -3341,7 +3341,7 @@ async function announceBoost(discordGuild, user) {
   recentBoosts.set(key, Date.now());
   const channel = await discordGuild.channels.fetch(settings.boostChannelId).catch(() => null);
   if (!channel) {
-    console.warn('Boost: kanał boostów nie istnieje albo bot go nie widzi — ustaw go ponownie: /setup kanaly boosty:#kanał');
+    console.warn('Boost: kanał boostów nie istnieje albo bot go nie widzi - ustaw go ponownie: /setup kanaly boosty:#kanał');
     return false;
   }
   const fresh = await discordGuild.fetch().catch(() => discordGuild);
@@ -3373,7 +3373,7 @@ setInterval(() => {
   for (const [key, at] of spamPunished) if (now - at > SPAM_AFTERMATH_MS) spamPunished.delete(key);
 }, 60_000).unref();
 
-/** Usuwa wiadomości z listy — kanał po kanale, hurtem (Discord pozwala do 100 naraz). */
+/** Usuwa wiadomości z listy - kanał po kanale, hurtem (Discord pozwala do 100 naraz). */
 async function deleteTracked(list) {
   for (const m of list) markBotDeleted(m.id);
   const byChannel = new Map();
@@ -3407,7 +3407,7 @@ function spamLogView(user, info, unmutedBy = null) {
       row('Osoba', `${user} (\`${user.id}\`)`),
       row('Wiadomości', `**${info.count}** w ${spamRule.windowMs / 1000} s, usunięto **${info.deleted}**`),
       row('Kanały', info.channelIds.map((id) => `<#${id}>`).join(', ')),
-      info.muted ? row('Mute', `${spamRule.muteDays} dni, do <t:${Math.floor(info.until / 1000)}:f>`) : row('Mute', `❌ nie udało się — ${info.muteError}`),
+      info.muted ? row('Mute', `${spamRule.muteDays} dni, do <t:${Math.floor(info.until / 1000)}:f>`) : row('Mute', `❌ nie udało się - ${info.muteError}`),
       unmutedBy ? row('Zdjęty przez', `${unmutedBy}`) : null,
     ]
       .filter(Boolean)
@@ -3455,9 +3455,9 @@ async function onSpamCheck(message) {
   }
   const deleted = await deleteTracked(list);
   const info = { count: list.length, deleted, channelIds: [...new Set(list.map((m) => m.channel.id))], muted: !muteError, muteError, until };
-  console.log(`🛡️ Antyspam: ${message.author.tag ?? message.author.id} — ${list.length} wiadomości, usunięto ${deleted}, mute: ${muteError ? `nie (${muteError})` : `${spamRule.muteDays} dni`}`);
+  console.log(`🛡️ Antyspam: ${message.author.tag ?? message.author.id} - ${list.length} wiadomości, usunięto ${deleted}, mute: ${muteError ? `nie (${muteError})` : `${spamRule.muteDays} dni`}`);
   const logError = await sendTo(message.guild, g.settings.logChannelId, { components: [spamLogView(message.author, info)], flags: V2, allowedMentions: { parse: [] } });
-  if (logError) console.warn('Antyspam: brak logu —', logError);
+  if (logError) console.warn('Antyspam: brak logu -', logError);
   return true;
 }
 
@@ -3496,7 +3496,7 @@ async function onMemberUpdate(oldMember, newMember) {
 
 // ─── Blokada wysyłania plików przez Discorda ───────────────────────────
 // Discord może czasowo zablokować serwerowi wysyłanie plików (błąd 400001). Wtedy każda wiadomość z banerem albo transcriptem
-// jest wysyłana jeszcze raz — bez plików i bez obrazków z załączników (attachment://). Reszta wiadomości wychodzi normalnie.
+// jest wysyłana jeszcze raz - bez plików i bez obrazków z załączników (attachment://). Reszta wiadomości wychodzi normalnie.
 const UPLOADS_BLOCKED = 400001;
 /** Kanał → do kiedy od razu wysyłamy bez plików (żeby nie robić dwóch zapytań na każdą wiadomość). */
 const uploadBlocked = new Map();
@@ -3534,7 +3534,7 @@ function guardUploads(rest) {
         if (channelId) uploadBlocked.set(channelId, Date.now() + 30 * 60_000);
         if (Date.now() - uploadWarned > 60 * 60_000) {
           uploadWarned = Date.now();
-          console.warn('⚠️ Discord zablokował serwerowi wysyłanie plików — wiadomości idą bez banerów i transcriptów, dopóki blokada trwa.');
+          console.warn('⚠️ Discord zablokował serwerowi wysyłanie plików - wiadomości idą bez banerów i transcriptów, dopóki blokada trwa.');
         }
       }
     }
@@ -3545,7 +3545,7 @@ function guardUploads(rest) {
 
 // ═══ LOGI SERWERA ══════════════════════════════════════════════════════
 // Każdy rodzaj zdarzeń trafia na swój kanał (/setup logi albo /setup logi-utworz, /setup pokaz).
-// Kto coś zrobił i z jakim powodem — z dziennika zdarzeń serwera (bot potrzebuje uprawnienia „Wyświetlanie dziennika zdarzeń”).
+// Kto coś zrobił i z jakim powodem - z dziennika zdarzeń serwera (bot potrzebuje uprawnienia „Wyświetlanie dziennika zdarzeń”).
 const serverLogTypes = {
   wiadomosci: { emoji: '💬', label: 'Wiadomości', channel: 'logi-wiadomości', about: 'usunięte, edytowane i masowo usunięte wiadomości' },
   wejscia: { emoji: '🚪', label: 'Wejścia i wyjścia', channel: 'logi-wejścia', about: 'kto wszedł (wiek konta, zaproszenie) i kto wyszedł (role, czas na serwerze)' },
@@ -3555,7 +3555,7 @@ const serverLogTypes = {
   glosowe: { emoji: '🔊', label: 'Kanały głosowe', channel: 'logi-głosowe', about: 'wejścia, wyjścia i przejścia między kanałami głosowymi' },
 };
 const logColors = { add: colors.success, remove: colors.danger, change: colors.warning, info: colors.brand };
-/** Wiadomości usunięte przez samego bota (antyspam, legit check) — nie zaśmiecają logów. */
+/** Wiadomości usunięte przez samego bota (antyspam, legit check) - nie zaśmiecają logów. */
 const botDeletedMessages = new Set();
 const markBotDeleted = (id) => {
   botDeletedMessages.add(id);
@@ -3603,7 +3603,7 @@ async function sendServerLog(discordGuild, type, card, files = []) {
   }
   if (error && !logWarned.has(`${discordGuild.id}:${type}`)) {
     logWarned.add(`${discordGuild.id}:${type}`);
-    console.warn(`⚠️ Logi (${serverLogTypes[type].label}): ${error} — sprawdź /setup pokaz`);
+    console.warn(`⚠️ Logi (${serverLogTypes[type].label}): ${error} - sprawdź /setup pokaz`);
   }
   return !error;
 }
@@ -3636,7 +3636,7 @@ async function logMessageDelete(message) {
         message.createdTimestamp ? row('Wysłana', ts(message.createdTimestamp, 'f')) : null,
         known ? attachmentLine(message) : null,
       ],
-      quote: known ? (message.content ? `**Treść:**\n${codeBlock(shortText(message.content))}` : null) : '-# Treść nieznana — wiadomość wysłana, zanim bot się uruchomił.',
+      quote: known ? (message.content ? `**Treść:**\n${codeBlock(shortText(message.content))}` : null) : '-# Treść nieznana - wiadomość wysłana, zanim bot się uruchomił.',
       id: message.id,
     }),
   );
@@ -3658,7 +3658,7 @@ async function logMessageUpdate(oldMessage, newMessage) {
       thumb: avatarOf(newMessage.author),
       lines: [userLine(newMessage.author, 'Autor'), row('Kanał', `<#${newMessage.channelId}>`), row('Wiadomość', `[przejdź](${newMessage.url})`)],
       quote: [
-        `**Przed:**\n${oldMessage.partial || oldMessage.content == null ? '-# nieznana — wiadomość sprzed startu bota' : codeBlock(shortText(oldMessage.content || '(pusta)', 700))}`,
+        `**Przed:**\n${oldMessage.partial || oldMessage.content == null ? '-# nieznana - wiadomość sprzed startu bota' : codeBlock(shortText(oldMessage.content || '(pusta)', 700))}`,
         `**Po:**\n${codeBlock(shortText(newMessage.content || '(pusta)', 700))}`,
       ].join('\n'),
       id: newMessage.id,
@@ -3817,7 +3817,7 @@ const changeLabels = {
 
 /** Wartość z dziennika zdarzeń do pokazania (kanały i osoby jako oznaczenia, kolory jako #hex). */
 function auditValue(key, v) {
-  if (v === undefined || v === null || v === '') return '`—`';
+  if (v === undefined || v === null || v === '') return '`-`';
   if (/_id$/.test(key) && /^\d{17,20}$/.test(String(v))) return key === 'owner_id' ? `<@${v}>` : `<#${v}>`;
   if (key === 'color' && typeof v === 'number') return `\`#${v.toString(16).padStart(6, '0')}\``;
   if (typeof v === 'object') return `\`${shortText(JSON.stringify(v), 120)}\``;
@@ -3865,7 +3865,7 @@ const auditEvents = {
   [A.StickerDelete]: ['serwer', '🏷️', 'Usunięta naklejka', logColors.remove],
 };
 
-/** Cel wpisu: osoba, kanał albo rola — z nazwą, nawet gdy już nie istnieje. */
+/** Cel wpisu: osoba, kanał albo rola - z nazwą, nawet gdy już nie istnieje. */
 function auditTarget(entry) {
   const id = entry.targetId;
   const oldName = entry.changes?.find((c) => c.key === 'name')?.old ?? entry.changes?.find((c) => c.key === 'name')?.new;
@@ -3900,7 +3900,7 @@ async function onAuditLogEntry(entry, discordGuild) {
   const target = entry.targetId && entry.targetType === 'User' ? await discordGuild.client.users.fetch(entry.targetId).catch(() => null) : null;
   const targetLine = target ? userLine(target) : entry.targetId ? row('Osoba', `<@${entry.targetId}>`) : null;
 
-  // Mute (przerwa), wyciszenie na głosowym i nick — wszystkie przychodzą jako „zmiana członka”.
+  // Mute (przerwa), wyciszenie na głosowym i nick - wszystkie przychodzą jako „zmiana członka”.
   if (entry.action === A.MemberUpdate) {
     const timeout = entry.changes.find((c) => c.key === 'communication_disabled_until');
     const nick = entry.changes.find((c) => c.key === 'nick');
@@ -3943,7 +3943,7 @@ async function onAuditLogEntry(entry, discordGuild) {
           heading: 'Zmiana nicku',
           color: logColors.change,
           thumb: avatarOf(target),
-          lines: [targetLine, row('Nick', `\`${nick.old ?? '—'}\` → \`${nick.new ?? '—'}\``), executorId !== entry.targetId ? byLine : null],
+          lines: [targetLine, row('Nick', `\`${nick.old ?? '-'}\` → \`${nick.new ?? '-'}\``), executorId !== entry.targetId ? byLine : null],
           id: entry.targetId,
         }),
       );
@@ -4043,7 +4043,7 @@ function generateConfirmView(userId) {
     b,
     [
       title('Generuj serwer', '🏗️'),
-      title('Uwaga — tego nie da się cofnąć!', '⚠️'),
+      title('Uwaga - tego nie da się cofnąć!', '⚠️'),
       '>>> ' +
         [
           point('**Usunę wszystkie** obecne kanały i kategorie (razem z wiadomościami).'),
@@ -4075,7 +4075,7 @@ function generateReportView(report) {
           row('🎭 Role', report.roles.map((id) => `<@&${id}>`).join(', ')),
           row('📁 Kategorie', `\`${report.categories}\``),
           row('💬 Kanały', `\`${report.channels}\``),
-          row('🧩 Panele', report.panels.length ? report.panels.map((id) => `<#${id}>`).join(', ') : '`—`'),
+          row('🧩 Panele', report.panels.length ? report.panels.map((id) => `<#${id}>`).join(', ') : '`-`'),
           row('⚙️ Bot', 'skonfigurowany (jak `/setup`)'),
         ].join('\n'),
     ].join('\n'),
@@ -4102,7 +4102,7 @@ async function generateServer(client, discordGuild, invokerId) {
       await ch.delete('/generuj');
       report.deleted++;
     } catch (err) {
-      // Np. kanał zasad/aktualizacji na serwerze społeczności (50074) — Discord nie pozwala go usunąć.
+      // Np. kanał zasad/aktualizacji na serwerze społeczności (50074) - Discord nie pozwala go usunąć.
       report.errors.push(`Nie usunięto #${ch.name}: ${err.message}`);
     }
   }
@@ -4186,7 +4186,7 @@ async function generateServer(client, discordGuild, invokerId) {
 
 async function onGenerateButton(i, action, ownerId) {
   if (i.user.id !== ownerId) return replyFail(i, 'Tylko osoba, która wpisała `/generuj`, może to potwierdzić.');
-  if (action === 'cancel') return i.update({ components: [notice(`### ❎ ${x} Anulowano — nic nie zostało zmienione.`, colors.neutral)], flags: V2 });
+  if (action === 'cancel') return i.update({ components: [notice(`### ❎ ${x} Anulowano - nic nie zostało zmienione.`, colors.neutral)], flags: V2 });
   if (!i.memberPermissions?.has(F.Administrator)) return replyFail(i, 'Potrzebujesz uprawnień administratora.');
   await i.update({
     components: [notice(`### 🏗️ ${x} Generuję serwer…\nTen kanał za chwilę zniknie. Podsumowanie dostaniesz w **DM** i na kanale admin-czat.`, colors.brand)],
@@ -4229,7 +4229,7 @@ function welcomeView(member, g) {
 /** Skąd przyszła nowa osoba: link własny serwera, zaproszenie od kogoś albo nie wiadomo. */
 function joinSource(member, g, found) {
   if (found.vanity) return `przez link **.gg/${member.guild.vanityURLCode}**`;
-  if (found.inviterId) return `z zaproszenia od <@${found.inviterId}> — ma teraz **${inviteTotal(g.invites[found.inviterId])}** zaproszeń`;
+  if (found.inviterId) return `z zaproszenia od <@${found.inviterId}> - ma teraz **${inviteTotal(g.invites[found.inviterId])}** zaproszeń`;
   if (found.code) return `przez link **.gg/${found.code}**`;
   return '*(nie udało się ustalić, przez który link)*';
 }
@@ -4239,7 +4239,7 @@ function inviteLogView(member, g, found) {
   text(b, title('Zaproszenia', '📩'));
   sep(b);
   const lines = [point(`${member} właśnie **zawitał/a** do nas ${joinSource(member, g, found)}`)];
-  if (g.joins[member.id]?.fake) lines.push(point(`⚠️ Nowe konto (młodsze niż ${fakeAccountDays} dni) — nie liczy się do zaproszeń.`));
+  if (g.joins[member.id]?.fake) lines.push(point(`⚠️ Nowe konto (młodsze niż ${fakeAccountDays} dni) - nie liczy się do zaproszeń.`));
   text(b, '>>> ' + lines.join('\n'));
   banner(b, bannerUrl(g, 'zaproszenia'));
   sep(b);
@@ -4290,7 +4290,7 @@ function invitesRanking(g) {
   return b;
 }
 
-// Pamięć użyć linków — po wejściu nowej osoby porównujemy, który link zyskał użycie.
+// Pamięć użyć linków - po wejściu nowej osoby porównujemy, który link zyskał użycie.
 const inviteCache = new Map(); // guildId → Map(code → uses)
 const vanityCache = new Map(); // guildId → uses
 
@@ -4306,7 +4306,7 @@ async function cacheInvites(discordGuild) {
 }
 
 async function findUsedInvite(discordGuild) {
-  // Zaproszenia jeszcze się wczytują po starcie — bez stanu „przed” nie da się uczciwie ustalić, kto zaprosił.
+  // Zaproszenia jeszcze się wczytują po starcie - bez stanu „przed” nie da się uczciwie ustalić, kto zaprosił.
   if (!inviteCache.has(discordGuild.id)) {
     await cacheInvites(discordGuild);
     return { unknown: true };
@@ -4317,7 +4317,7 @@ async function findUsedInvite(discordGuild) {
   if (!invites) return { unknown: true };
   const used = [...invites.values()].find((inv) => (inv.uses ?? 0) > (before.get(inv.code) ?? 0));
   if (used) return { inviterId: used.inviter?.id ?? null, code: used.code };
-  // Jednorazowy link znika po użyciu — jeśli zniknął dokładnie jeden, to on.
+  // Jednorazowy link znika po użyciu - jeśli zniknął dokładnie jeden, to on.
   const gone = [...before.keys()].filter((code) => !invites.has(code));
   if (gone.length === 1) return { code: gone[0] };
   if (vanityBefore != null && (vanityCache.get(discordGuild.id) ?? 0) > vanityBefore) return { vanity: true };
@@ -4338,7 +4338,7 @@ async function sendTo(discordGuild, channelId, payload) {
 }
 
 async function onMemberAdd(member) {
-  // Powitanie wychodzi od razu — ustalanie zaproszenia (pobieranie linków z Discorda) idzie równolegle i go nie wstrzymuje.
+  // Powitanie wychodzi od razu - ustalanie zaproszenia (pobieranie linków z Discorda) idzie równolegle i go nie wstrzymuje.
   const welcome = sendWelcome(member, guild(member.guild.id));
   // Błąd przy ustalaniu zaproszenia nie może zablokować powitania.
   const found = await findUsedInvite(member.guild).catch((err) => (console.warn('Zaproszenia:', err.message), {}));
@@ -4378,7 +4378,7 @@ function sendInviteLog(member, g, found) {
   });
 }
 
-/** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } — null = wysłane, tekst = problem. */
+/** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } - null = wysłane, tekst = problem. */
 async function sendJoinMessages(member, g, found) {
   const [welcome, invites] = await Promise.all([sendWelcome(member, g), sendInviteLog(member, g, found)]);
   return { welcome, invites };
@@ -4431,7 +4431,7 @@ async function autoLegitCheck(client, discordGuild, invokerId) {
           .catch(() => {});
         await finalizeTicket(client, discordGuild, channel, { closedBy: invokerId, result: 'done' });
       } else {
-        // Kanał ticketu już nie istnieje — zamykamy tylko w bazie.
+        // Kanał ticketu już nie istnieje - zamykamy tylko w bazie.
         updateGuild(discordGuild.id, (gg) => {
           Object.assign(gg.tickets[t.channelId], { closedAt: Date.now(), closedBy: invokerId, result: 'done' });
           gg.stats.closed++;
@@ -4496,7 +4496,7 @@ async function onChannelDeleted(channel) {
     const log = logId ? await channel.client.channels.fetch(logId).catch(() => null) : null;
     await log
       ?.send({
-        components: [notice(`### 🗑️ ${x} Ticket usunięty ręcznie\n${row('Autor', `<@${ticket.userId}>`)}\n-# Kanał usunięto bez zamknięcia — brak transcriptu.`, colors.warning)],
+        components: [notice(`### 🗑️ ${x} Ticket usunięty ręcznie\n${row('Autor', `<@${ticket.userId}>`)}\n-# Kanał usunięto bez zamknięcia - brak transcriptu.`, colors.warning)],
         flags: V2,
         allowedMentions: { parse: [] },
       })
@@ -4510,7 +4510,7 @@ async function onChannelDeleted(channel) {
   }
 }
 
-/** Ktoś usunął wszystkie reakcje (lub jedno emoji) z panelu „czy legit” — przeliczamy. */
+/** Ktoś usunął wszystkie reakcje (lub jedno emoji) z panelu „czy legit” - przeliczamy. */
 async function onLegitReactionsCleared(message) {
   if (!message.guildId || !store.guilds[message.guildId]) return;
   const g = guild(message.guildId);
@@ -4540,21 +4540,21 @@ command(
   },
 );
 
-// /setup — wszystkie ustawienia w jednym miejscu: pokaz, podstawowe, kanaly, ticket, logi, logi-utworz.
+// /setup - wszystkie ustawienia w jednym miejscu: pokaz, podstawowe, kanaly, ticket, logi, logi-utworz.
 const textChannel = (name, desc) => (o) => o.setName(name).setDescription(desc).addChannelTypes(ChannelType.GuildText);
 const logTypeChoices = Object.entries(serverLogTypes).map(([value, t]) => ({ name: `${t.emoji} ${t.label}`, value }));
 
 /** Podsumowanie całej konfiguracji (/setup pokaz i odpowiedź po każdej zmianie). */
 function setupView(g, heading = 'Konfiguracja') {
   const s = g.settings;
-  const ch = (id) => (id ? `<#${id}>` : '`—`');
-  const role = (id) => (id ? `<@&${id}>` : '`—`');
+  const ch = (id) => (id ? `<#${id}>` : '`-`');
+  const role = (id) => (id ? `<@&${id}>` : '`-`');
   const b = box(colors.brand);
   text(
     b,
     [
       title(heading, '⚙️'),
-      '**Podstawowe** — `/setup podstawowe`',
+      '**Podstawowe** - `/setup podstawowe`',
       row('📁 Kategoria ticketów', ch(s.categoryId)),
       row('🛡️ Rola admina', role(s.staffRoleId)),
       row('📜 Logi ticketów (ogólne)', ch(s.logChannelId)),
@@ -4567,7 +4567,7 @@ function setupView(g, heading = 'Konfiguracja') {
   text(
     b,
     [
-      '**Kanały** — `/setup kanaly`',
+      '**Kanały** - `/setup kanaly`',
       row('⭐ Opinie', ch(s.reviewChannelId)),
       row('✅ Legit check', ch(s.lcChannelId)),
       row('🚀 Boosty', ch(s.boostChannelId)),
@@ -4580,7 +4580,7 @@ function setupView(g, heading = 'Konfiguracja') {
   text(
     b,
     [
-      '**Tickety według rodzaju** — `/setup ticket`',
+      '**Tickety według rodzaju** - `/setup ticket`',
       ...Object.entries(ticketTypes).map(([type, t]) => row(`${t.emoji} ${t.label}`, `kategoria ${ch(ticketCategoryFor(s, type))} • logi ${ch(ticketLogFor(s, type))}`)),
     ].join('\n'),
   );
@@ -4588,7 +4588,7 @@ function setupView(g, heading = 'Konfiguracja') {
   text(
     b,
     [
-      '**Logi serwera** — `/setup logi` albo `/setup logi-utworz`',
+      '**Logi serwera** - `/setup logi` albo `/setup logi-utworz`',
       ...Object.entries(serverLogTypes).map(([key, t]) => row(`${t.emoji} ${t.label}`, s.serverLogs?.[key] ? ch(s.serverLogs[key]) : '`wyłączone`')),
       '-# 🛡️ Antyspam wysyła karty na kanał „Logi ticketów (ogólne)”.',
     ].join('\n'),
@@ -4982,7 +4982,7 @@ const editableCounters = {
 command(
   new SlashCommandBuilder()
     .setName('ustaw-licznik')
-    .setDescription('Popraw licznik (np. wyzeruj po testach) — działa od razu, bez edycji plików')
+    .setDescription('Popraw licznik (np. wyzeruj po testach) - działa od razu, bez edycji plików')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addStringOption((o) =>
@@ -5000,7 +5000,7 @@ command(
     const before = read(guild(i.guildId)) ?? 0;
     updateGuild(i.guildId, (g) => write(g, value));
     await i.deferReply({ flags: V2_EPHEMERAL });
-    // Panel „Jak napisać voucha” pokazuje liczbę zrealizowanych — odświeżamy go od razu.
+    // Panel „Jak napisać voucha” pokazuje liczbę zrealizowanych - odświeżamy go od razu.
     if (key === 'zrealizowane') await refreshPanel(i.client, i.guildId, 'vouch');
     // Nazwy kanałów z licznikiem: Discord pozwala je zmienić 2 razy na 10 minut, więc może to chwilę potrwać.
     updateCounters(i.client).catch(() => {});
@@ -5073,7 +5073,7 @@ async function applyVerificationGate(discordGuild, enable, { giveExisting = fals
         report.shown++;
         continue;
       }
-      // Prywatne (tickety, administracja) — ukryte przed wszystkimi i bez roli po regulaminie.
+      // Prywatne (tickety, administracja) - ukryte przed wszystkimi i bez roli po regulaminie.
       if (hiddenForAll && !gatedByUs) {
         report.skipped++;
         continue;
@@ -5117,14 +5117,14 @@ command(
         .setName('tryb')
         .setDescription('Włącz albo wyłącz')
         .setRequired(true)
-        .addChoices({ name: '🔒 Włącz — reszta kanałów po akceptacji regulaminu', value: 'on' }, { name: '🔓 Wyłącz — wszystkie kanały widoczne od razu', value: 'off' }),
+        .addChoices({ name: '🔒 Włącz - reszta kanałów po akceptacji regulaminu', value: 'on' }, { name: '🔓 Wyłącz - wszystkie kanały widoczne od razu', value: 'off' }),
     )
     .addBooleanOption((o) => o.setName('nadaj-obecnym').setDescription('Daj rolę po regulaminie wszystkim obecnym członkom (żeby nic nie stracili)')),
   async (i) => {
     const { settings } = guild(i.guildId);
     const enable = i.options.getString('tryb') === 'on';
     if (!settings.rulesRoleId) return replyFail(i, 'Najpierw ustaw rolę za regulamin: `/setup podstawowe rola-regulamin:@✅ Zweryfikowany`.');
-    if (enable && !guild(i.guildId).panels.regulamin) return replyFail(i, 'Najpierw wyślij panel regulaminu: `/panel typ:regulamin` — bez niego nikt nie zaakceptuje regulaminu.');
+    if (enable && !guild(i.guildId).panels.regulamin) return replyFail(i, 'Najpierw wyślij panel regulaminu: `/panel typ:regulamin` - bez niego nikt nie zaakceptuje regulaminu.');
     if (!i.guild.members.me?.permissions.has(PermissionFlagsBits.Administrator)) return replyFail(i, 'Bot potrzebuje uprawnień **Administratora**, żeby zmieniać uprawnienia kanałów i nadawać role.');
     await i.deferReply({ flags: V2_EPHEMERAL });
     const r = await applyVerificationGate(i.guild, enable, { giveExisting: i.options.getBoolean('nadaj-obecnym') ?? false });
@@ -5156,11 +5156,11 @@ command(
     const g = guild(i.guildId);
     const res = await sendJoinMessages(i.member, g, {});
     const ch = (id) => (id ? `<#${id}>` : '`nie ustawiony`');
-    const line = (label, id, error) => row(label, `${ch(id)} — ${error ? `❌ ${error}` : '✅ wysłano'}`);
+    const line = (label, id, error) => row(label, `${ch(id)} - ${error ? `❌ ${error}` : '✅ wysłano'}`);
     const lines = [
       line('👋 Powitania', g.settings.welcomeChannelId, res.welcome),
       line('📩 Zaproszenia', g.settings.invitesChannelId, res.invites),
-      row('👥 Server Members Intent', membersIntentOn ? '✅ włączony — bot dostaje informację o nowych osobach' : '❌ **wyłączony** — Discord nie informuje bota o wejściu nowej osoby. Włącz go: Developer Portal → Bot → Server Members Intent, potem Restart bota.'),
+      row('👥 Server Members Intent', membersIntentOn ? '✅ włączony - bot dostaje informację o nowych osobach' : '❌ **wyłączony** - Discord nie informuje bota o wejściu nowej osoby. Włącz go: Developer Portal → Bot → Server Members Intent, potem Restart bota.'),
     ];
     const hint = !g.settings.welcomeChannelId || !g.settings.invitesChannelId ? '\n-# Ustaw kanały: `/setup kanaly powitania:#👋┃witamy zaproszenia:#📩┃zaproszenia`' : '';
     const allOk = !res.welcome && !res.invites && membersIntentOn;
@@ -5185,7 +5185,7 @@ command(
     recentBoosts.delete(`${i.guildId}:${i.user.id}`);
     const sent = await announceBoost(i.guild, i.user);
     return i.editReply({
-      components: [sent ? ok(`Wysłano próbne podziękowanie na <#${settings.boostChannelId}>.`) : fail('Nie udało się wysłać — sprawdź, czy bot widzi kanał boostów i może na nim pisać oraz wysyłać pliki.')],
+      components: [sent ? ok(`Wysłano próbne podziękowanie na <#${settings.boostChannelId}>.`) : fail('Nie udało się wysłać - sprawdź, czy bot widzi kanał boostów i może na nim pisać oraz wysyłać pliki.')],
       flags: V2,
     });
   },
@@ -5195,7 +5195,7 @@ command(
   new SlashCommandBuilder()
     .setName('clear')
     .setDescription('Usuń ostatnie wiadomości na tym kanale')
-    .addIntegerOption((o) => o.setName('ilosc').setDescription('Ile wiadomości usunąć (1–100)').setMinValue(1).setMaxValue(100).setRequired(true))
+    .addIntegerOption((o) => o.setName('ilosc').setDescription('Ile wiadomości usunąć (1-100)').setMinValue(1).setMaxValue(100).setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .setDMPermission(false),
   async (i) => {
@@ -5205,7 +5205,7 @@ command(
     clearedBy.set(i.channelId, i.user.id);
     const deleted = await i.channel.bulkDelete(amount, true).catch((err) => err);
     if (deleted instanceof Error) return i.editReply({ components: [fail(describeError(deleted))], flags: V2 });
-    const old = deleted.size < amount ? `\nPozostałe są starsze niż 14 dni albo kanał ma mniej wiadomości — Discord nie pozwala usuwać starszych hurtem.` : '';
+    const old = deleted.size < amount ? `\nPozostałe są starsze niż 14 dni albo kanał ma mniej wiadomości - Discord nie pozwala usuwać starszych hurtem.` : '';
     console.log(`🧹 /clear: ${i.user.tag} usunął ${deleted.size} wiadomości w #${i.channel.name}`);
     return i.editReply({ components: [ok(`Usunięto **${deleted.size}** wiadomości na <#${i.channelId}>.${old}`)], flags: V2 });
   },
@@ -5241,7 +5241,7 @@ command(
             .setName('okres')
             .setDescription('Okres hostingu')
             .setRequired(true)
-            .addChoices(...hostingPlans.map(([name, price, value, days]) => ({ name: `${name} — ${price} (${days} dni)`, value }))),
+            .addChoices(...hostingPlans.map(([name, price, value, days]) => ({ name: `${name} - ${price} (${days} dni)`, value }))),
         )
         .addStringOption((o) => o.setName('email').setDescription('E-mail klienta (login do panelu; pomijany, jeśli klient ma już konto)').setRequired(true))
         .addStringOption((o) => o.setName('nazwa').setDescription('Nazwa serwera (domyślnie: język • nazwa klienta)').setMaxLength(40)),
@@ -5339,7 +5339,7 @@ command(
           payment: 'reczne',
           source: `/hosting utworz przez <@${i.user.id}>`,
         });
-        return done(`Utworzono serwer **${res.rec.name}** (ID \`${res.rec.id}\`) dla ${user}, ważny do ${ts(res.rec.expiresAt, 'f')}.${res.dmOk ? '' : '\n⚠️ Klient ma zablokowane DM — przekaż mu dane logowania ręcznie.'}`);
+        return done(`Utworzono serwer **${res.rec.name}** (ID \`${res.rec.id}\`) dla ${user}, ważny do ${ts(res.rec.expiresAt, 'f')}.${res.dmOk ? '' : '\n⚠️ Klient ma zablokowane DM - przekaż mu dane logowania ręcznie.'}`);
       }
       if (sub === 'dodaj') {
         const user = i.options.getUser('uzytkownik');
@@ -5361,17 +5361,17 @@ command(
           reminded: [],
         };
         updateGuild(i.guildId, (gg) => (gg.hosting.servers[a.id] = added));
-        // Konto właściciela serwera łączymy z Discordem klienta — kolejne zakupy trafią na to samo konto.
+        // Konto właściciela serwera łączymy z Discordem klienta - kolejne zakupy trafią na to samo konto.
         const owner = (await ptero('GET', `/users/${a.user}`).catch(() => null))?.attributes;
         if (owner) await linkPanelUser(owner, user.id).catch((err) => console.warn('Hosting: łączenie konta:', err.message));
-        return done(`Serwer **${a.name}** (ID \`${a.id}\`) przypisany do ${user}, ważny do ${ts(added.expiresAt, 'f')}.${added.suspended ? '\n⚠️ Serwer jest zablokowany — odblokuj go `/hosting odblokuj` albo przedłuż.' : ''}`);
+        return done(`Serwer **${a.name}** (ID \`${a.id}\`) przypisany do ${user}, ważny do ${ts(added.expiresAt, 'f')}.${added.suspended ? '\n⚠️ Serwer jest zablokowany - odblokuj go `/hosting odblokuj` albo przedłuż.' : ''}`);
       }
       if (!rec || rec.deleted) return failed(`Nie znam serwera o ID \`${serverId}\`. Sprawdź \`/hosting lista\` albo dodaj go: \`/hosting dodaj\`.`);
       if (sub === 'przedluz') {
         const extended = await extendHosting(i.guildId, serverId, i.options.getInteger('dni'));
         await sendHostingDm(i.client, extended.userId, hostingRenewedView(extended, i.guildId));
         await hostingLog(i.client, i.guildId, [`### 🔁 ${x} Hosting przedłużony (+${i.options.getInteger('dni')} dni)`, recLine(extended), row('Przez', `<@${i.user.id}>`)].join('\n'), colors.success);
-        return done(`Serwer **${extended.name}** ważny do ${ts(extended.expiresAt, 'f')}.${extended.started === false ? '\n-# Serwer odblokowany — klient musi kliknąć Start (brak `clientApiKey`).' : ''}`);
+        return done(`Serwer **${extended.name}** ważny do ${ts(extended.expiresAt, 'f')}.${extended.started === false ? '\n-# Serwer odblokowany - klient musi kliknąć Start (brak `clientApiKey`).' : ''}`);
       }
       if (sub === 'limity') {
         const ram = i.options.getInteger('ram');
@@ -5401,7 +5401,7 @@ command(
         if (!rec.suspended) return failed('Ten serwer nie jest zablokowany.');
         await ptero('POST', `/servers/${rec.id}/unsuspend`);
         updateGuild(i.guildId, () => Object.assign(rec, { suspended: false, suspendedAt: null, deleteNotified: false }));
-        return done(`Odblokowano **${rec.name}**. Termin bez zmian: ${ts(rec.expiresAt, 'f')}${rec.expiresAt < Date.now() ? ' — **już minął**, bot zablokuje go ponownie w ciągu 5 minut. Użyj `/hosting przedluz`.' : '.'}`);
+        return done(`Odblokowano **${rec.name}**. Termin bez zmian: ${ts(rec.expiresAt, 'f')}${rec.expiresAt < Date.now() ? ' - **już minął**, bot zablokuje go ponownie w ciągu 5 minut. Użyj `/hosting przedluz`.' : '.'}`);
       }
       if (sub === 'usun') {
         if (!i.options.getBoolean('potwierdz')) return failed('Usunięcie wymaga `potwierdz:True`.');
@@ -5467,7 +5467,7 @@ async function route(i) {
     if (i.isButton()) {
       if (action === 'quick') return onTicketSelect(i, arg);
       if (action === 'close') return onCloseRequest(i);
-      // Stary przycisk „Zamknij” klienta (sprzed zmiany) — zamknięcie i tak sprawdza, czy to admin.
+      // Stary przycisk „Zamknij” klienta (sprzed zmiany) - zamknięcie i tak sprawdza, czy to admin.
       if (action === 'userclose') return closeTicket(i, { reason: 'Zamknięte' });
       if (action === 'done' || action === 'notdone') {
         const { error } = staffTicket(i);
@@ -5483,7 +5483,7 @@ async function route(i) {
       if (action === 'closenorep') {
         const { error } = staffTicket(i);
         if (error) return replyV2(i, fail(error));
-        return closeTicket(i, { reason: 'Zrealizowane — zamknięte bez legit checka', result: 'done' });
+        return closeTicket(i, { reason: 'Zrealizowane - zamknięte bez legit checka', result: 'done' });
       }
     }
   }
@@ -5736,9 +5736,9 @@ async function flowTest() {
   assert(!JSON.stringify(rulesMsgs).includes('§') && !JSON.stringify(rulesPanel(g, null).toJSON()).includes('§'), 'regulamin bez §');
   for (const msgs of rulesMsgs) for (const m of msgs) assert(texts(m).join('').length <= 4000, 'każda wiadomość regulaminu w limicie 4000 znaków');
   const ch1 = texts(rulesMsgs[0][0]).join('\n');
-  assert(ch1.includes('`1.1`') && ch1.includes('`1.15`') && ch1.includes('ROZDZIAŁ 1. POSTANOWIENIA OGÓLNE'), 'rozdział 1: punkty 1.1–1.15');
+  assert(ch1.includes('`1.1`') && ch1.includes('`1.15`') && ch1.includes('ROZDZIAŁ 1. POSTANOWIENIA OGÓLNE'), 'rozdział 1: punkty 1.1-1.15');
   const ch3 = rulesMsgs[2].map((m) => texts(m).join('\n')).join('\n');
-  assert(ch3.includes('`3.1` Składanie zamówień') && ch3.includes('`3.2.6`') && ch3.includes('`3.4.4`'), 'rozdział 3: podrozdziały 3.1–3.4');
+  assert(ch3.includes('`3.1` Składanie zamówień') && ch3.includes('`3.2.6`') && ch3.includes('`3.4.4`'), 'rozdział 3: podrozdziały 3.1-3.4');
   assert(texts(rulesMsgs[3][0]).join('').includes('`4.5.1`'), 'rozdział 4: punkt 4.5.1');
   assert(['Kryptowaluty', 'BTC', 'ETH', 'USDT', 'LTC'].every((w) => texts(rulesMsgs[3][0]).join('').includes(w)), 'rozdział 4: kryptowaluty');
   assert(texts(rulesMsgs[1][0]).join('').includes('punktu `1.14`'), 'odwołanie do punktu 1.14 w zwrotach');
@@ -5746,7 +5746,7 @@ async function flowTest() {
   assert(['1 miesiąc', '5 zł', '3 miesiące', '14 zł', '1 rok', '50 zł'].every((t) => priceJson.includes(t)), 'cennik: 3 pakiety hostingu');
   assert(!priceJson.includes('tk:quick:bot') && !priceJson.includes('Boty Discord'), 'cennik bez botów');
   const hostingJson = JSON.stringify(ticketModal('hosting').toJSON());
-  assert(hostingJson.includes('1 rok — 50 zł') && !hostingJson.includes('6 miesięcy'), 'formularz hostingu z pakietami z cennika');
+  assert(hostingJson.includes('1 rok - 50 zł') && !hostingJson.includes('6 miesięcy'), 'formularz hostingu z pakietami z cennika');
   const logo = logoOf({ iconURL: () => img }, { user: { displayAvatarURL: () => img } });
   for (const [type, build] of Object.entries(panelBuilders)) {
     assert(!JSON.stringify(build(g, logo).toJSON()).includes('"type":11'), `panel ${type} bez zdjęcia bota/serwera`);
@@ -5817,7 +5817,7 @@ async function flowTest() {
   assert(lcDeleted().filter(([, id]) => id === CLIENT).length === 3, 'wiadomości inne niż wzór z ticketu są usuwane');
   const wrongWarn = JSON.stringify(lcWarnings().at(-1)[2].components[0].toJSON());
   assert(wrongWarn.includes('TO NIE JEST POPRAWNY VOUCH') && wrongWarn.includes('Bot do exchange [ 50 PLN ] [ LTC ]'), 'bot pokazuje poprawny wzór z ticketu');
-  // Admin też nie może pisać niczego poza vouchem — wiadomość jest usuwana i nie jest liczona.
+  // Admin też nie może pisać niczego poza vouchem - wiadomość jest usuwana i nie jest liczona.
   const deletedBefore = lcDeleted().length;
   await onLegitCheckMessage(lcMessage(STAFF, '+', []));
   assert(lcDeleted().length === deletedBefore + 1 && g.stats.lc === 0, 'wiadomość admina usunięta i nie liczona');
@@ -5841,7 +5841,7 @@ async function flowTest() {
   assert(doneLog.includes('Oznaczył jako zrealizowane') && doneLog.includes(`<@${STAFF}>`), 'log pokazuje, kto kliknął Zrealizowane');
 
   // 8a. Log idzie na kanał przypisany do rodzaju ticketu.
-  assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'bez ustawień rodzaju — ogólny kanał logów');
+  assert(after.some(([type, id]) => type === 'send' && id === LOG_CH), 'bez ustawień rodzaju - ogólny kanał logów');
   channels['log-questions'] = mkChannel('log-questions', 'logi-pytania');
   g.settings.ticketLogs = { question: 'log-questions' };
 
@@ -5899,7 +5899,7 @@ async function flowTest() {
   assert(matchesTicketRep({ content: '', mentions: { users: { has: (id) => id === STAFF } } }, { deal: { sellerId: STAFF } }), 'bez intentu: oznaczenie sprzedawcy wystarcza');
   messageContentOn = true;
 
-  // 10. „Czy legit?” — ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
+  // 10. „Czy legit?” - ✅ zapisuje się od razu (bez bota), ❌ znika i daje przerwę 7 dni (staff bez przerwy).
   g.panels.legit = { channelId: LEGIT_CH, messageId: 'legit-msg' };
   const YES = { id: '1554504948211785778', name: 'TAK', animated: true };
   const NO = { id: '1554505001492021248', name: 'NIE', animated: true };
@@ -6117,7 +6117,7 @@ async function generatorTest() {
 
 /**
  * Komendy mogą być zarejestrowane globalnie albo na konkretnym serwerze. Jeśli istnieją w obu miejscach,
- * Discord pokazuje je podwójnie — dlatego zawsze czyścimy ten zestaw, którego nie używamy.
+ * Discord pokazuje je podwójnie - dlatego zawsze czyścimy ten zestaw, którego nie używamy.
  */
 async function registerCommands(rest, appId, guildId, guildIds, body) {
   const registerGlobal = async () => {
@@ -6132,7 +6132,7 @@ async function registerCommands(rest, appId, guildId, guildIds, body) {
     await rest.put(Routes.applicationGuildCommands(appId, guildId), { body });
   } catch (err) {
     if (err.code !== 50001) throw err;
-    console.warn(`⚠️ Brak dostępu do serwera ${guildId} — rejestruję komendy globalnie.`);
+    console.warn(`⚠️ Brak dostępu do serwera ${guildId} - rejestruję komendy globalnie.`);
     return registerGlobal();
   }
   // Usuwamy stare komendy globalne, żeby nie dublowały serwerowych.
@@ -6389,7 +6389,7 @@ function databaseTest() {
     assert(read('zaproszenia.json').invites.u.regular === 2 && read('statystyki.json').legitVotes.yes === 5, 'zaproszenia i statystyki');
     assert(read('inne.json').nowaSekcja.x === 1, 'nieznane sekcje w inne.json');
 
-    // 2. Zapis zmian i ponowne wczytanie (restart bota) — nic nie ginie.
+    // 2. Zapis zmian i ponowne wczytanie (restart bota) - nic nie ginie.
     store.guilds[GID].reviews.push({ number: 2, content: 'Polecam' });
     store.guilds['test-guild'] = { settings: {} }; // testowe ID bez cyfr nie trafia na dysk
     flush();
@@ -6401,7 +6401,7 @@ function databaseTest() {
     mkdirSync(join(tmp, 'kopie'), { recursive: true });
     assert(Object.keys(loadStore().guilds).length === 1, 'inne foldery w data/ są pomijane');
 
-    // 3. Prawdziwy start bota (osobny proces) ze starym db.json — przeniesienie przy starcie nie może się wysypać.
+    // 3. Prawdziwy start bota (osobny proces) ze starym db.json - przeniesienie przy starcie nie może się wysypać.
     const startDir = join(tmp, 'start');
     mkdirSync(startDir);
     writeFileSync(join(startDir, 'db.json'), JSON.stringify(old));
@@ -6548,11 +6548,11 @@ async function boostTest() {
     assert(json.includes('NOWY BOOST') && json.includes('<@u1>') && json.includes('`3`'), 'treść podziękowania');
     assert(json.includes('attachment://baner-boosty.jpg') && sent[0].files.length === 1, 'baner BOOSTY w załączniku');
 
-    // 2. Ta sama osoba — systemowa wiadomość chwilę później nie dubluje podziękowania.
+    // 2. Ta sama osoba - systemowa wiadomość chwilę później nie dubluje podziękowania.
     await onMessage({ guild: fakeGuild, type: MessageType.GuildBoost, author: user, channelId: 'x' });
     assert(sent.length === 1, 'bez duplikatu (status + wiadomość systemowa)');
 
-    // 3. Kolejny boost po czasie (np. drugi boost tej osoby) — z wiadomości systemowej.
+    // 3. Kolejny boost po czasie (np. drugi boost tej osoby) - z wiadomości systemowej.
     recentBoosts.set(`${GID}:u1`, Date.now() - BOOST_DEDUPE_MS - 1);
     await onMessage({ guild: fakeGuild, type: MessageType.GuildBoostTier1, author: user, channelId: 'x' });
     assert(sent.length === 2, 'kolejny boost z wiadomości systemowej');
@@ -6665,7 +6665,7 @@ async function antispamTest() {
     for (let k = 0; k < 6; k++) await send(normal, 'a');
     assert(!timeouts.length && !deleted.length, '6 wiadomości to nie spam');
 
-    // 2. Wolne pisanie: 7 wiadomości, ale co 3 s (ponad 15 s) — bez kary.
+    // 2. Wolne pisanie: 7 wiadomości, ale co 3 s (ponad 15 s) - bez kary.
     const slow = mkMember('slow');
     for (let k = 0; k < 7; k++) await send(slow, 'a', (clock += 3000));
     assert(!timeouts.length, 'wolne pisanie bez kary');
@@ -6770,7 +6770,7 @@ async function serverLogsTest() {
   // 1. Usunięta wiadomość: treść, autor, kanał.
   await logMessageDelete(msg());
   assert(last('wiadomosci').includes('USUNIĘTA WIADOMOŚĆ') && last('wiadomosci').includes('siema to test') && last('wiadomosci').includes('<#czat>'), 'usunięta wiadomość z treścią');
-  // Nieznana (sprzed startu), bot, usunięta przez bota, na kanale logów — odpowiednio opisane albo pominięte.
+  // Nieznana (sprzed startu), bot, usunięta przez bota, na kanale logów - odpowiednio opisane albo pominięte.
   await logMessageDelete({ id: 'm2', guild: fakeGuild, channelId: 'czat', partial: true, author: null });
   assert(last('wiadomosci').includes('Treść nieznana'), 'nieznana treść');
   const before = count('wiadomosci');
@@ -7695,12 +7695,12 @@ if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
 async function onReady(ready) {
   console.log(`✅ Zalogowano jako ${ready.user.tag}`);
   console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
-  console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak — zaproś bota linkiem powyżej'}`);
+  console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak - zaproś bota linkiem powyżej'}`);
   if (!messageContentOn) {
-    console.warn('⚠️ „Message Content Intent” jest wyłączony — bot nie sprawdzi „+rep”, tylko oznaczenie sprzedawcy. Włącz go w Developer Portal → Bot.');
+    console.warn('⚠️ „Message Content Intent” jest wyłączony - bot nie sprawdzi „+rep”, tylko oznaczenie sprzedawcy. Włącz go w Developer Portal → Bot.');
   }
   if (!membersIntentOn) {
-    console.warn('⚠️ „Server Members Intent” jest wyłączony — powitania i zaproszenia nie działają. Włącz go w Developer Portal → Bot i zrestartuj bota.');
+    console.warn('⚠️ „Server Members Intent” jest wyłączony - powitania i zaproszenia nie działają. Włącz go w Developer Portal → Bot i zrestartuj bota.');
   }
   ready.user.setActivity({ name: `${brand.emoji} ${brand.name} • tanie boty Discord`, type: ActivityType.Custom });
   if (!loopsStarted) {
@@ -7713,10 +7713,10 @@ async function onReady(ready) {
     const coins = Object.keys(cryptoCoins).filter(walletFor);
     console.log(`🖥️ Hosting: panel ${panelUrl()} • automatyczny zakup: ${coins.length ? coins.map((k) => cryptoCoins[k].label + (k.includes('_') ? `/${cryptoCoins[k].network.split(' ')[0]}` : '')).join(', ') : 'brak portfeli'}`);
   } else {
-    console.warn('⚠️ Hosting: brak konfiguracji panelu (config.json → hosting) — działa tylko zakup ręczny bez tworzenia serwerów.');
+    console.warn('⚠️ Hosting: brak konfiguracji panelu (config.json → hosting) - działa tylko zakup ręczny bez tworzenia serwerów.');
   }
 
-  // Komendy rejestrujemy od razu — nie mogą czekać na pobieranie członków i zaproszeń (na dużym serwerze to trwa).
+  // Komendy rejestrujemy od razu - nie mogą czekać na pobieranie członków i zaproszeń (na dużym serwerze to trwa).
   let guildId = GUILD_ID;
   if (guildId === ready.user.id) {
     console.warn('⚠️ guildId to ID bota, a nie serwera. Kliknij PPM na ikonę serwera → „Kopiuj ID serwera”.');
@@ -7727,7 +7727,7 @@ async function onReady(ready) {
     console.error('Rejestracja komend nie powiodła się:', err.message),
   );
 
-  // Zaproszenia i lista członków ładują się w tle — bot w tym czasie normalnie działa.
+  // Zaproszenia i lista członków ładują się w tle - bot w tym czasie normalnie działa.
   for (const g of ready.guilds.cache.values()) prepareGuild(g).catch((err) => console.warn(`⚠️ ${g.name}: ${err.message}`));
 }
 
@@ -7735,13 +7735,13 @@ async function onReady(ready) {
 async function prepareGuild(g) {
   const t0 = Date.now();
   const secs = () => ((Date.now() - t0) / 1000).toFixed(1);
-  if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań — ustaw: /setup kanaly powitania:#kanał`);
-  if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń — ustaw: /setup kanaly zaproszenia:#kanał`);
-  if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów — podziękowania za boosty są wyłączone (/setup kanaly boosty:#kanał).`);
+  if (!guild(g.id).settings.welcomeChannelId) console.warn(`⚠️ ${g.name}: brak kanału powitań - ustaw: /setup kanaly powitania:#kanał`);
+  if (!guild(g.id).settings.invitesChannelId) console.warn(`⚠️ ${g.name}: brak kanału zaproszeń - ustaw: /setup kanaly zaproszenia:#kanał`);
+  if (!guild(g.id).settings.boostChannelId) console.warn(`⚠️ ${g.name}: brak kanału boostów - podziękowania za boosty są wyłączone (/setup kanaly boosty:#kanał).`);
   const invites = await cacheInvites(g);
   if (invites) console.log(`📩 ${g.name}: zaproszenia wczytane (${invites.size}) w ${secs()} s`);
   else console.warn(`⚠️ ${g.name}: bot nie ma uprawnienia „Zarządzanie serwerem”, więc nie ustali, kto kogo zaprosił.`);
-  // Pełna lista członków w pamięci — dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
+  // Pełna lista członków w pamięci - dzięki temu bot widzi moment, w którym ktoś zaczyna boostować.
   if (membersIntentOn) {
     const members = await g.members.fetch({ time: 60_000 }).catch((err) => (console.warn(`⚠️ ${g.name}: nie pobrano listy członków (${err.message}).`), null));
     if (members) console.log(`👥 ${g.name}: lista członków wczytana (${members.size}) w ${secs()} s`);
@@ -7814,7 +7814,7 @@ function start(attempt = 0) {
   const fallback = () => {
     if (switched || attempt + 1 >= intentAttempts.length) return;
     switched = true;
-    console.warn('⚠️ Część uprzywilejowanych intentów nie jest włączona w Developer Portal — próbuję uruchomić bota bez nich.');
+    console.warn('⚠️ Część uprzywilejowanych intentów nie jest włączona w Developer Portal - próbuję uruchomić bota bez nich.');
     botClient.destroy();
     start(attempt + 1);
   };

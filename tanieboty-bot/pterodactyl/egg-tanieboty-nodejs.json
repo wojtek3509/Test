@@ -24,7 +24,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\n# Bot wgrywasz sam przez Files — biblioteki instalują się przy starcie (npm install).\nmkdir -p /mnt/server\necho \"Instalacja zakończona — wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
+            "script": "#!/bin/bash\n# Bot wgrywasz sam przez Files - biblioteki instalują się przy starcie (npm install).\nmkdir -p /mnt/server\necho \"Instalacja zakończona - wgraj pliki bota w zakładce Files i kliknij Start.\"\nexit 0\n",
             "container": "node:18-bookworm-slim",
             "entrypoint": "bash"
         }
