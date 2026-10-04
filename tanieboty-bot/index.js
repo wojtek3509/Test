@@ -90,13 +90,27 @@ const hostingLanguages = {
 
 // Kryptowaluty do automatycznego zakupu. Bot sam sprawdza blockchain i czeka na potwierdzenia.
 // decimals = miejsca po przecinku w sieci, shown = w kwocie dla klienta, step = zaokrąglenie ceny w górę.
+// Emoji płatności (własne emoji serwera TanieBoty). Zmień tutaj, a zmienią się wszędzie: w formularzach, ticketach, cenniku i logach.
+const payEmoji = {
+  usdc: '<:usdc:1556271345174839327>',
+  usdt: '<:Logo_USDT:1556029972563628162>',
+  ltc: '<:emojigg_ltc:1556024763967602749>',
+  blik: '<:BLIK:1556023711252095019>',
+  kodblik: '<:BLIK:1556023711252095019>',
+  eth: '<:ethereum:1556024790752690176>',
+  sol: '<:SOLANA:1556024823249903667>',
+  psc: '<:PSC:1556024746225705121>',
+  paypal: '<:PAYPAL:1556024707667730462>',
+  btc: '<:emojigg_btc:1556025431314931802>',
+};
+
 const cryptoCoins = {
-  ltc: { label: 'LTC', network: 'Litecoin', emoji: '💠', chain: 'ltc', decimals: 8, shown: 8, step: 0.00001, gecko: 'litecoin', rep: 'ltc' },
-  eth: { label: 'ETH', network: 'Ethereum', emoji: '💎', chain: 'eth', decimals: 18, shown: 8, step: 0.00001, gecko: 'ethereum', rep: 'eth' },
+  ltc: { label: 'LTC', network: 'Litecoin', emoji: payEmoji.ltc, chain: 'ltc', decimals: 8, shown: 8, step: 0.00001, gecko: 'litecoin', rep: 'ltc' },
+  eth: { label: 'ETH', network: 'Ethereum', emoji: payEmoji.eth, chain: 'eth', decimals: 18, shown: 8, step: 0.00001, gecko: 'ethereum', rep: 'eth' },
   usdc_eth: {
     label: 'USDC',
     network: 'Ethereum (ERC-20)',
-    emoji: '💵',
+    emoji: payEmoji.usdc,
     chain: 'eth',
     token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
     decimals: 6,
@@ -105,11 +119,11 @@ const cryptoCoins = {
     gecko: 'usd-coin',
     rep: 'usdc',
   },
-  sol: { label: 'SOL', network: 'Solana', emoji: '🟣', chain: 'sol', decimals: 9, shown: 8, step: 0.00001, gecko: 'solana', rep: 'sol' },
+  sol: { label: 'SOL', network: 'Solana', emoji: payEmoji.sol, chain: 'sol', decimals: 9, shown: 8, step: 0.00001, gecko: 'solana', rep: 'sol' },
   usdc_sol: {
     label: 'USDC',
     network: 'Solana',
-    emoji: '💵',
+    emoji: payEmoji.usdc,
     chain: 'sol',
     token: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     decimals: 6,
@@ -123,12 +137,12 @@ const cryptoCoins = {
 // Metody płatności przy zakupie hostingu. Krypto działa automatycznie i ręcznie, reszta tylko ręcznie.
 // BLIK: numer telefonu podaje właściciel w tickecie (za każdym razem może być inny). Krypto: adres z config.json → hosting.wallets.
 const hostingPayments = {
-  ltc: { label: 'LTC (Litecoin)', emoji: '💠' },
-  eth: { label: 'ETH (Ethereum)', emoji: '💎' },
-  usdc_eth: { label: 'USDC (sieć Ethereum)', emoji: '💵' },
-  sol: { label: 'SOL (Solana)', emoji: '🟣' },
-  usdc_sol: { label: 'USDC (sieć Solana)', emoji: '💵' },
-  blik: { label: 'BLIK', emoji: '📱', rep: 'blik' },
+  ltc: { label: 'LTC (Litecoin)', emoji: payEmoji.ltc },
+  eth: { label: 'ETH (Ethereum)', emoji: payEmoji.eth },
+  usdc_eth: { label: 'USDC (sieć Ethereum)', emoji: payEmoji.usdc },
+  sol: { label: 'SOL (Solana)', emoji: payEmoji.sol },
+  usdc_sol: { label: 'USDC (sieć Solana)', emoji: payEmoji.usdc },
+  blik: { label: 'BLIK', emoji: payEmoji.blik, rep: 'blik' },
 };
 
 const hostingTimes = {
@@ -170,7 +184,7 @@ const ticketTypes = {
           ['⏳ Ręczny — czekasz na właściciela', 'manual'],
         ],
       },
-      { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]) },
+      { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [p.label, id, p.emoji]) },
       // Nazwę serwera klient ustawia po zakupie: „✏️ Zmień nazwę” w DM i w /moj-hosting.
       { id: 'email', label: 'E-mail (login do panelu hostingu)', placeholder: 'np. jan.kowalski@gmail.com' },
     ],
@@ -331,21 +345,32 @@ const rules = [
 
 // Metody płatności w formularzu „Zrealizowane” (maks. 25). Emoji może być własne: '<:ltc:123…>'.
 const payments = {
-  blik: { label: 'BLIK', emoji: '📱' },
-  kodblik: { label: 'KOD BLIK', emoji: '🔢' },
-  ltc: { label: 'LTC', emoji: '💠' },
-  btc: { label: 'BTC', emoji: '🪙' },
-  eth: { label: 'ETH', emoji: '💎' },
-  usdt: { label: 'USDT', emoji: '💵' },
-  paypal: { label: 'PayPal', emoji: '🅿️' },
-  psc: { label: 'PSC', emoji: '🎫' },
-  sol: { label: 'SOL', emoji: '🟣' },
-  usdc: { label: 'USDC', emoji: '💵' },
+  blik: { label: 'BLIK', emoji: payEmoji.blik },
+  kodblik: { label: 'KOD BLIK', emoji: payEmoji.kodblik },
+  ltc: { label: 'LTC', emoji: payEmoji.ltc },
+  btc: { label: 'BTC', emoji: payEmoji.btc },
+  eth: { label: 'ETH', emoji: payEmoji.eth },
+  usdt: { label: 'USDT', emoji: payEmoji.usdt },
+  paypal: { label: 'PayPal', emoji: payEmoji.paypal },
+  psc: { label: 'PSC', emoji: payEmoji.psc },
+  sol: { label: 'SOL', emoji: payEmoji.sol },
+  usdc: { label: 'USDC', emoji: payEmoji.usdc },
 };
+/**
+ * Emoji do menu wyboru: Discord nie pokazuje własnych emoji wpisanych w tekst opcji,
+ * więc idą osobno jako { id, name } (zwykłe emoji jako { name }).
+ */
+function selectEmoji(emoji) {
+  if (!emoji) return undefined;
+  const m = /^<(a?):(\w+):(\d+)>$/.exec(emoji);
+  return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : { name: emoji };
+}
+/** Opcja menu z [nazwa, wartość, emoji?]. */
+const selectOption = ([label, value, emoji]) => ({ label, value, ...(emoji ? { emoji: selectEmoji(emoji) } : {}) });
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 /** Płatność w zamówieniu bota: wszystkie z listy + „Inna” (klient wpisuje ją sam). */
 const OTHER_PAYMENT = 'inne';
-const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [`${p.emoji} ${p.label}`, id]), ['✏️ Inna — wpiszesz ją za chwilę', OTHER_PAYMENT]];
+const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [p.label, id, p.emoji]), ['Inna — wpiszesz ją za chwilę', OTHER_PAYMENT, '✏️']];
 /** Opcje pola wyboru (lista albo nazwa listy liczonej później, np. 'orderPayments'). */
 const selectOptions = (f) => (f.select === 'orderPayments' ? orderPaymentOptions() : f.select);
 /** Płatność z formularza do pokazania: wybrana z listy albo wpisana przez klienta. */
@@ -1028,7 +1053,7 @@ function ticketModal(type) {
             new StringSelectMenuBuilder()
               .setCustomId(f.id)
               .setPlaceholder('Wybierz…')
-              .addOptions(selectOptions(f).map(([name, value]) => ({ label: name, value }))),
+              .addOptions(selectOptions(f).map(selectOption)),
           );
         }
         const input = new TextInputBuilder()
@@ -1062,7 +1087,7 @@ function ticketMessage(ticket, user) {
         f.select === 'orderPayments'
           ? formPaymentLabel(ticket.form)
           : f.select
-            ? (f.select.find(([, v]) => v === ticket.form[f.id])?.[0] ?? ticket.form[f.id])
+            ? ((([name, , emoji] = []) => (name ? `${emoji ? `${emoji} ` : ''}${name}` : ticket.form[f.id]))(f.select.find(([, v]) => v === ticket.form[f.id])))
             : ticket.form[f.id];
       return f.style === 'long' ? `${point(`**${f.label}:**`)}\n${codeBlock(value)}` : row(f.label, `\`${value}\``);
     });
@@ -1345,7 +1370,7 @@ function closeReasonModal() {
 function doneModal(ticket = null) {
   const chosen = ticket?.form?.payment;
   const other = chosen === OTHER_PAYMENT && ticket.form.paymentOther ? ticket.form.paymentOther : null;
-  const options = Object.entries(payments).map(([value, m]) => ({ label: m.label, value, emoji: m.emoji, default: value === chosen }));
+  const options = Object.entries(payments).map(([value, m]) => ({ label: m.label, value, emoji: selectEmoji(m.emoji), default: value === chosen }));
   if (other) options.push({ label: other.slice(0, 100), value: OTHER_PAYMENT, emoji: '✏️', default: true });
   return new ModalBuilder()
     .setCustomId('tk:donesubmit')
@@ -2382,7 +2407,7 @@ function renewModal(guildId, serverId) {
             new StringSelectMenuBuilder()
               .setCustomId(id)
               .setPlaceholder('Wybierz…')
-              .addOptions(f.select.map(([label, value]) => ({ label, value }))),
+              .addOptions(f.select.map(selectOption)),
           );
       }),
     );
@@ -2975,7 +3000,7 @@ function reviewModal(guildId) {
           new StringSelectMenuBuilder()
             .setCustomId('product')
             .setPlaceholder('Wybierz produkt…')
-            .addOptions(Object.entries(reviewProducts).map(([value, p]) => ({ label: p.label, value, emoji: p.emoji }))),
+            .addOptions(Object.entries(reviewProducts).map(([value, p]) => ({ label: p.label, value, emoji: selectEmoji(p.emoji) }))),
         ),
       ...reviewCriteria.map((cr) =>
         new LabelBuilder()
@@ -6943,6 +6968,12 @@ async function botPaymentTest() {
   const modal = JSON.stringify(ticketModal('bot').toJSON());
   assert(modal.includes('Płatność') && modal.includes('BLIK') && modal.includes('PayPal') && modal.includes('"value":"inne"'), 'pole płatności z „Inna”');
   assert(ticketTypes.bot.fields.length <= 5, 'maks. 5 pól w formularzu');
+  // Własne emoji płatności: w menu jako { id, name } (nie jako tekst w nazwie), w tekście jako <:nazwa:id>.
+  assert(modal.includes('"emoji":{"id":"1556023711252095019","name":"BLIK"') && !modal.includes('"label":"<:'), 'emoji BLIK w menu formularza bota');
+  const hostingModal = JSON.stringify(ticketModal('hosting').toJSON());
+  assert(hostingModal.includes('"id":"1556271345174839327"') && hostingModal.includes('"id":"1556024763967602749"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
+  assert(paymentName('paypal') === '<:PAYPAL:1556024707667730462> PayPal' && payLabel('sol').startsWith('<:SOLANA:'), 'emoji w tekście');
+  assert(Object.values(payments).every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
 
   // 2. Zwykła płatność → ticket od razu, płatność na karcie.
   values.payment = 'blik';
