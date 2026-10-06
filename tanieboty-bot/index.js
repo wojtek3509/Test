@@ -4325,19 +4325,62 @@ async function findUsedInvite(discordGuild) {
 }
 
 /** Wysyła wiadomość na kanał. Zwraca null albo opis problemu (brak kanału, brak uprawnień…). */
-async function sendTo(discordGuild, channelId, payload) {
+async function sendTo(discordGuild, channelId, payload, onSent = null) {
   if (!channelId) return 'kanał nie jest ustawiony';
   const channel = await discordGuild.channels.fetch(channelId).catch(() => null);
   if (!channel) return 'kanał nie istnieje albo bot go nie widzi';
   const error = await channel
     .send(payload)
-    .then(() => null)
+    .then((message) => (onSent?.(channel, message), null))
     .catch((err) => err.message);
   if (error) console.error(`Powitania/zaproszenia (#${channel.name}):`, error);
   return error;
 }
 
+// ─── Podwójne powitania ────────────────────────────────────────────────
+// 1. Discord czasem wysyła to samo wejście dwa razy - drugie w ciągu 2 minut jest pomijane.
+// 2. Gdy ten sam bot (ten sam token) działa w dwóch miejscach naraz, każde wysyła swoje powitanie.
+//    Po kilku sekundach bot sprawdza kanał: jeśli jest starsza wiadomość bota o tej samej osobie, usuwa swoją
+//    (zostaje zawsze najstarsza, więc nawet dwie kopie bota zostawią dokładnie jedną) i ostrzega w konsoli.
+const recentJoins = new Map();
+const JOIN_DEDUPE_MS = 120_000;
+let joinDedupeDelay = 4000;
+let duplicateWarned = false;
+
+function isRepeatedJoin(member) {
+  const key = `${member.guild.id}:${member.id}`;
+  const last = recentJoins.get(key);
+  recentJoins.set(key, Date.now());
+  for (const [k, at] of recentJoins) if (Date.now() - at > JOIN_DEDUPE_MS) recentJoins.delete(k);
+  return last !== undefined && Date.now() - last < JOIN_DEDUPE_MS;
+}
+
+/** Usuwa naszą wiadomość o wejściu, jeśli na kanale jest już starsza wiadomość bota o tej samej osobie. */
+async function removeDuplicateJoinMessage(channel, own, memberId) {
+  await new Promise((r) => setTimeout(r, joinDedupeDelay));
+  const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+  if (!recent) return false;
+  const mention = `<@${memberId}>`;
+  const older = [...recent.values()].find(
+    (m) =>
+      m.id !== own.id &&
+      m.author?.id === own.author?.id &&
+      BigInt(m.id) < BigInt(own.id) &&
+      own.createdTimestamp - m.createdTimestamp < JOIN_DEDUPE_MS &&
+      JSON.stringify(m.components ?? []).includes(mention),
+  );
+  if (!older) return false;
+  await own.delete().catch(() => {});
+  if (!duplicateWarned) {
+    duplicateWarned = true;
+    console.warn('⚠️ Powitanie wysłane dwa razy - wygląda na to, że bot z tym samym tokenem działa w DWÓCH miejscach (np. drugi serwer w panelu, komputer albo inny hosting). Wyłącz drugą kopię. Duplikaty są usuwane automatycznie.');
+  }
+  return true;
+}
+const dedupeAfterSend = (memberId) => (channel, message) => removeDuplicateJoinMessage(channel, message, memberId).catch(() => {});
+
 async function onMemberAdd(member) {
+  if (isRepeatedJoin(member)) return { welcome: 'pominięte (to samo wejście drugi raz)', invites: 'pominięte' };
   // Powitanie wychodzi od razu - ustalanie zaproszenia (pobieranie linków z Discorda) idzie równolegle i go nie wstrzymuje.
   const welcome = sendWelcome(member, guild(member.guild.id));
   // Błąd przy ustalaniu zaproszenia nie może zablokować powitania.
@@ -4360,27 +4403,28 @@ async function onMemberAdd(member) {
   return res;
 }
 
-function sendWelcome(member, g) {
-  return sendTo(member.guild, g.settings.welcomeChannelId, {
-    components: [welcomeView(member, g)],
-    files: bannerAttachments(g, 'witamy'),
-    flags: V2,
-    allowedMentions: { users: [member.id] },
-  });
+function sendWelcome(member, g, dedupe = true) {
+  return sendTo(
+    member.guild,
+    g.settings.welcomeChannelId,
+    { components: [welcomeView(member, g)], files: bannerAttachments(g, 'witamy'), flags: V2, allowedMentions: { users: [member.id] } },
+    dedupe ? dedupeAfterSend(member.id) : null,
+  );
 }
 
-function sendInviteLog(member, g, found) {
-  return sendTo(member.guild, g.settings.invitesChannelId, {
-    components: [inviteLogView(member, g, found)],
-    files: bannerAttachments(g, 'zaproszenia'),
-    flags: V2,
-    allowedMentions: { parse: [] },
-  });
+function sendInviteLog(member, g, found, dedupe = true) {
+  return sendTo(
+    member.guild,
+    g.settings.invitesChannelId,
+    { components: [inviteLogView(member, g, found)], files: bannerAttachments(g, 'zaproszenia'), flags: V2, allowedMentions: { parse: [] } },
+    dedupe ? dedupeAfterSend(member.id) : null,
+  );
 }
 
 /** Powitanie i informacja o zaproszeniu. Zwraca { welcome, invites } - null = wysłane, tekst = problem. */
 async function sendJoinMessages(member, g, found) {
-  const [welcome, invites] = await Promise.all([sendWelcome(member, g), sendInviteLog(member, g, found)]);
+  // Próbne powitanie (/test-powitanie) można wysyłać wiele razy - bez usuwania duplikatów.
+  const [welcome, invites] = await Promise.all([sendWelcome(member, g, false), sendInviteLog(member, g, found, false)]);
   return { welcome, invites };
 }
 
@@ -6185,6 +6229,8 @@ async function welcomeTest() {
   const assert = (cond, msg) => {
     if (!cond) throw new Error(`Test powitań nie przeszedł: ${msg}`);
   };
+  joinDedupeDelay = 0;
+  recentJoins.clear();
   const GID = 'welcome-guild';
   const sent = { welcome: [], invites: [] };
   const invites = new Map([['abc', { code: 'abc', uses: 1, inviter: { id: 'inviter1' } }]]);
@@ -6247,12 +6293,38 @@ async function welcomeTest() {
   assert(sent.invites.length === 4, 'zaproszenie wysłane po ustaleniu');
   fakeGuild.invites.fetch = slowFetch;
 
+  // 7. To samo wejście drugi raz (Discord wysłał zdarzenie podwójnie) - bez drugiego powitania.
+  const welcomesNow = sent.welcome.length;
+  await onMemberAdd(mkMember('new4', 365));
+  assert(sent.welcome.length === welcomesNow, 'powtórzone wejście pominięte');
+
+  // 8. Dwie kopie bota: każda wysłała powitanie - zostaje najstarsze, nasze (nowsze) jest usuwane.
+  joinDedupeDelay = 0;
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const deleted = [];
+    const msg = (id, memberId, t) => ({ id, author: { id: 'bot' }, createdTimestamp: t, components: [{ toJSON: () => ({ c: `<@${memberId}>` }) }], delete: async () => deleted.push(id) });
+    const now = Date.now();
+    const other = { ...msg('100', 'm9', now - 500), components: [{ type: 17, content: '<@m9>' }] };
+    const mine = msg('200', 'm9', now);
+    const ch = { messages: { fetch: async () => new Map([['200', mine], ['100', other]]) } };
+    assert((await removeDuplicateJoinMessage(ch, mine, 'm9')) && deleted.includes('200'), 'nowszy duplikat usunięty');
+    assert(!(await removeDuplicateJoinMessage(ch, other, 'm9')) && !deleted.includes('100'), 'najstarsze zostaje');
+    const otherPerson = { ...msg('150', 'x1', now - 100), components: [{ content: '<@x1>' }] };
+    const ch2 = { messages: { fetch: async () => new Map([['200', mine], ['150', otherPerson]]) } };
+    deleted.length = 0;
+    assert(!(await removeDuplicateJoinMessage(ch2, mine, 'm9')) && !deleted.length, 'powitanie innej osoby to nie duplikat');
+  } finally {
+    console.warn = warn;
+  }
+
   // 5. Widoki komendy /zaproszenia.
   invitesView({ displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/1.png', toString: () => '<@inviter1>' }, g.invites.inviter1).toJSON();
   invitesRanking(g).toJSON();
 
   delete store.guilds[GID];
-  console.log('✅ Test powitań i zaproszeń: 6 scenariuszy OK');
+  console.log('✅ Test powitań i zaproszeń: 8 scenariuszy (w tym podwójne powitania) OK');
 }
 
 // ─── Test auto LC i spójności bazy (symulacja) ─────────────────────────
