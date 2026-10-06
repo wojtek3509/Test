@@ -376,8 +376,9 @@ const selectOptions = (f) => (f.select === 'orderPayments' ? orderPaymentOptions
 /** Płatność z formularza do pokazania: wybrana z listy albo wpisana przez klienta. */
 const formPaymentLabel = (form) => (form.payment === OTHER_PAYMENT ? `✏️ ${form.paymentOther ?? 'inna'}` : paymentName(form.payment));
 
-// Przykładowe vouche pokazywane na kanale legit checków (panel „Jak napisać voucha?”).
-const vouchExamples = ['+rep @sprzedawca Bot discord [ 30 PLN ] [ BLIK ]', '+rep @sprzedawca Hosting 3 miesiące [ 14 PLN ] [ PAYPAL ]'];
+// Panel „Jak napisać legit checka?” na kanale legit checków: wzór i przykład.
+const vouchFormat = '+rep @sprzedawca nazwa produktu cena PLN płatność';
+const vouchExample = '+rep @dymiarz Bot pod exch 100.00 PLN BLIK';
 
 // Oceny w opiniach.
 const reviewCriteria = [
@@ -1409,8 +1410,16 @@ function notDoneModal() {
 }
 
 /** Wzór wiadomości, którą klient wysyła na kanał legit checków. */
-const repTemplate = (ticket) =>
-  `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} [ ${ticket.deal.price} ] [ ${upper(payments[ticket.deal.payment]?.label ?? ticket.deal.payment)} ]`;
+/** Cena do voucha: „50”, „50 zł”, „49,9 PLN” → „50.00 PLN” (bez liczby zostaje tekst admina). */
+function repPrice(price) {
+  const m = /(\d+(?:[.,]\d+)?)/.exec(String(price ?? ''));
+  return m ? `${Number(m[1].replace(',', '.')).toFixed(2)} PLN` : String(price ?? '');
+}
+const repPayment = (deal) => upper(payments[deal.payment]?.label ?? deal.payment);
+/** Wzór wiadomości, którą klient wysyła na kanał legit checków, np. „+rep @dymiarz Bot pod exch 100.00 PLN BLIK”. */
+const repTemplate = (ticket) => `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} ${repPrice(ticket.deal.price)} ${repPayment(ticket.deal)}`;
+/** Stary wzór (z nawiasami) - przyjmowany dalej od klientów, którzy dostali go w tickecie przed zmianą. */
+const legacyRepTemplate = (ticket) => `+rep <@${ticket.deal.sellerId}> ${ticket.deal.product} [ ${ticket.deal.price} ] [ ${repPayment(ticket.deal)} ]`;
 
 function repRequestView(ticket, lcChannelId) {
   const b = box(colors.success);
@@ -1455,31 +1464,16 @@ function vouchPanel(g, logo) {
   header(
     b,
     [
-      title('Jak napisać voucha?', '✅'),
-      '>>> ' +
-        [
-          point('Po zrealizowanym zamówieniu dostaniesz w **tickecie** gotowy wzór voucha (przycisk **📋 Skopiuj wzór**). Wklej go tutaj **bez zmian**:'),
-          codeBlock('+rep @sprzedawca Co zakupiłeś [ Kwota PLN ] [ Forma płatności ]'),
-        ].join('\n'),
+      title('Jak napisać legit checka?', '✅'),
+      `> ${point('Wystaw legit checka **tylko za zrealizowany zakup** na tym kanale.')}`,
+      `**📋 ${x} WZÓR:**`,
+      codeBlock(vouchFormat),
+      `**📝 ${x} Przykład:**`,
+      codeBlock(vouchExample),
     ].join('\n'),
     logo,
   );
-  sep(b);
-  text(b, [`### 📝 ${x} Przykładowe vouche`, ...vouchExamples.map(codeBlock)].join('\n'));
-  sep(b);
-  text(
-    b,
-    [
-      point('Gdy wyślesz voucha z ticketu, bot doda ✅, a Twój **ticket zamknie się automatycznie**.'),
-      point('⚠️ Na tym kanale można wysłać **tylko voucha z ticketu** - inne wiadomości są automatycznie usuwane.'),
-      g.settings.reviewChannelId ? point(`Zostaw też opinię na <#${g.settings.reviewChannelId}> ⭐`) : null,
-      point(`Zrealizowaliśmy już **${g.stats.done}** zamówień - dziękujemy za zaufanie! 💙`),
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  );
   banner(b, bannerUrl(g, 'vouch'));
-  sep(b);
   footer(b);
   return b;
 }
@@ -1494,11 +1488,12 @@ async function onDoneSubmit(i) {
     payment: i.fields.getStringSelectValues('payment')[0],
     sellerId: i.user.id,
   };
-  // Wpisana przez klienta „inna” płatność trafia do voucha jako tekst (np. [ REVOLUT ]).
+  // Wpisana przez klienta „inna” płatność trafia do voucha jako tekst (np. REVOLUT).
   if (deal.payment === OTHER_PAYMENT) deal.payment = getTicket(i.guildId, i.channelId)?.form?.paymentOther ?? 'inna';
   if (!g.settings.lcChannelId) return replyV2(i, fail('Najpierw ustaw kanał legit checków: `/setup kanaly legitcheck:#kanał`.'));
   updateGuild(i.guildId, (gg) => Object.assign(gg.tickets[i.channelId], { deal, awaitingRep: true, decidedBy: i.user.id }));
   const updated = getTicket(i.guildId, i.channelId);
+  await giveClientRole(i.client, i.guildId, updated.userId, 'Zamówienie zrealizowane').catch(() => false);
 
   // Karta ticketu zmienia kolor na zielony (zamówienie zrealizowane).
   const user = await i.client.users.fetch(updated.userId);
@@ -1521,7 +1516,8 @@ const normalizeRep = (text) =>
 /** Czy wiadomość to vouch z ticketu. Bez „Message Content Intent” bot nie widzi treści - wtedy wystarczy oznaczenie sprzedawcy. */
 function matchesTicketRep(message, ticket) {
   if (!messageContentOn) return message.mentions.users.has(ticket.deal.sellerId);
-  return normalizeRep(message.content) === normalizeRep(repTemplate(ticket));
+  const sent = normalizeRep(message.content);
+  return sent === normalizeRep(repTemplate(ticket)) || sent === normalizeRep(legacyRepTemplate(ticket));
 }
 
 /** Usuwa wiadomość i na chwilę pokazuje autorowi, dlaczego. */
@@ -1853,12 +1849,25 @@ async function startPanelServer(rec) {
     .catch((err) => (console.warn(`Hosting: nie udało się uruchomić serwera ${rec.id}:`, err.message), false));
 }
 
-async function giveClientRole(client, guildId, userId) {
-  const discordGuild = client.guilds?.cache?.get(guildId);
-  const role = discordGuild?.roles?.cache?.find((r) => r.name === serverLayout.roles.client.name);
-  if (!role) return;
+/** Ranga Klient: z /setup podstawowe rola-klient, a bez ustawienia - rola o nazwie „💎 Klient” (z /generuj). */
+function clientRoleOf(discordGuild) {
+  const id = guild(discordGuild?.id).settings.clientRoleId;
+  if (id) return discordGuild?.roles?.cache?.get?.(id) ?? { id };
+  return discordGuild?.roles?.cache?.find((r) => r.name === serverLayout.roles.client.name) ?? null;
+}
+
+/** Nadaje rangę Klient (po „Zrealizowane” i po zakupie hostingu). Bot musi mieć rolę wyżej niż Klient. */
+async function giveClientRole(client, guildId, userId, reason = 'Zakup hostingu') {
+  const discordGuild = client.guilds?.cache?.get?.(guildId);
+  const role = clientRoleOf(discordGuild);
+  if (!role) return false;
   const member = await discordGuild.members.fetch(userId).catch(() => null);
-  await member?.roles.add(role, 'Zakup hostingu').catch(() => {});
+  if (!member) return false;
+  if (member.roles.cache?.has?.(role.id)) return true;
+  return member.roles
+    .add(role.id, reason)
+    .then(() => true)
+    .catch((err) => (console.warn(`Ranga Klient: nie nadano (${err.message}) - przesuń rolę bota wyżej niż Klient.`), false));
 }
 
 async function sendHostingDm(client, userId, container) {
@@ -3019,9 +3028,21 @@ function reviewModal(guildId) {
     );
 }
 
+/** Opinie wystawiają tylko klienci (ranga Klient) i admini. Działa też z przycisku w DM po zamknięciu ticketu. */
+async function canReview(i, guildId) {
+  const discordGuild = i.client.guilds?.cache?.get?.(guildId) ?? i.guild;
+  const role = clientRoleOf(discordGuild);
+  if (!role) return { ok: true };
+  const member = i.member?.roles?.cache ? i.member : await discordGuild?.members?.fetch(i.user.id).catch(() => null);
+  if (member?.roles?.cache?.has(role.id) || isStaff(member, guild(guildId).settings)) return { ok: true };
+  return { ok: false, roleId: role.id };
+}
+
 async function onReviewOpen(i, guildId) {
   const g = guild(guildId);
   if (!g.settings.reviewChannelId) return replyV2(i, fail('Kanał opinii nie jest ustawiony. Administrator musi użyć `/setup kanaly opinie:#kanał`.'));
+  const access = await canReview(i, guildId);
+  if (!access.ok) return replyV2(i, fail(`Opinie mogą wystawiać tylko **klienci** (<@&${access.roleId}>). Rangę dostajesz automatycznie po zrealizowanym zamówieniu.`));
   const last = [...g.reviews].reverse().find((r) => r.userId === i.user.id);
   if (last && Date.now() - last.at < reviewCooldownMinutes * 60_000) {
     return replyV2(i, fail(`Możesz dodać kolejną opinię ${ts(last.at + reviewCooldownMinutes * 60_000)}.`));
@@ -4131,7 +4152,7 @@ async function generateServer(client, discordGuild, invokerId) {
     .catch((err) => report.errors.push(`Nie nadano roli Administracja: ${err.message}`));
 
   // 3. Kategorie i kanały.
-  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, counters: true, ticketCategories: {}, ticketLogs: {}, serverLogs: {} };
+  const settings = { staffRoleId: roles.staff.id, rulesRoleId: roles.verified.id, clientRoleId: roles.client.id, counters: true, ticketCategories: {}, ticketLogs: {}, serverLogs: {} };
   const panels = [];
   let reportChannel = null;
   for (const cat of serverLayout.categories) {
@@ -4603,6 +4624,7 @@ function setupView(g, heading = 'Konfiguracja') {
       row('🛡️ Rola admina', role(s.staffRoleId)),
       row('📜 Logi ticketów (ogólne)', ch(s.logChannelId)),
       row('✅ Rola za regulamin', role(s.rulesRoleId)),
+      row('💎 Ranga Klient', s.clientRoleId ? role(s.clientRoleId) : '`💎 Klient` (po nazwie)'),
       row('🔢 Liczniki w nazwach', s.counters ? '`włączone`' : '`wyłączone`'),
       row('🎫 Limit ticketów na osobę', `\`${s.maxOpen}\``),
     ].join('\n'),
@@ -4657,6 +4679,7 @@ command(
         .addRoleOption((o) => o.setName('admin').setDescription('Rola adminów obsługujących tickety'))
         .addChannelOption(textChannel('logi', 'Kanał logów ticketów, transcriptów i antyspamu'))
         .addRoleOption((o) => o.setName('rola-regulamin').setDescription('Rola nadawana po akceptacji regulaminu'))
+        .addRoleOption((o) => o.setName('rola-klient').setDescription('Ranga Klient: nadawana po zakupie, tylko ona może wystawiać opinie'))
         .addBooleanOption((o) => o.setName('liczniki').setDescription('Liczniki w nazwach kanałów (opinie→9, czy-legit→404)'))
         .addIntegerOption((o) => o.setName('limit').setDescription('Maks. otwartych ticketów na osobę').setMinValue(1).setMaxValue(10)),
     )
@@ -4711,6 +4734,7 @@ command(
         st.staffRoleId = i.options.getRole('admin')?.id ?? st.staffRoleId ?? null;
         st.logChannelId = opt('logi') ?? st.logChannelId ?? null;
         st.rulesRoleId = i.options.getRole('rola-regulamin')?.id ?? st.rulesRoleId ?? null;
+        st.clientRoleId = i.options.getRole('rola-klient')?.id ?? st.clientRoleId ?? null;
         st.counters = i.options.getBoolean('liczniki') ?? st.counters ?? true;
         st.maxOpen = i.options.getInteger('limit') ?? st.maxOpen;
       });
@@ -4775,7 +4799,7 @@ command(
           { name: '⭐ Opinie', value: 'opinie' },
           { name: '🤔 Czy legit?', value: 'legit' },
           { name: '💰 Cennik', value: 'cennik' },
-          { name: '✅ Jak napisać voucha (kanał legit checków)', value: 'vouch' },
+          { name: '✅ Jak napisać legit checka (kanał legit checków)', value: 'vouch' },
         ),
     )
     .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
@@ -5820,7 +5844,7 @@ async function flowTest() {
   // 5. „Skopiuj wzór” nie zamyka ticketu.
   i = interaction(CLIENT, { customId: 'tk:copyrep', isChatInputCommand: () => false, inGuild: () => true, inCachedGuild: () => true, isRepliable: () => true, isButton: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false });
   await route(i);
-  assert(i.replies[0]?.content === `+rep <@${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]`, `wzór repa do skopiowania (${i.replies[0]?.content})`);
+  assert(i.replies[0]?.content === `+rep <@${STAFF}> Bot do exchange 50.00 PLN LTC`, `wzór repa do skopiowania (${i.replies[0]?.content})`);
   assert(!getTicket(GID, TICKET_CH).closedAt, 'kopiowanie nie zamyka ticketu');
 
   const lcMessage = (authorId, content, mentions) => ({
@@ -5860,7 +5884,7 @@ async function flowTest() {
   assert(!getTicket(GID, TICKET_CH).closedAt, 'rep z inną ceną nie zamyka ticketu');
   assert(lcDeleted().filter(([, id]) => id === CLIENT).length === 3, 'wiadomości inne niż wzór z ticketu są usuwane');
   const wrongWarn = JSON.stringify(lcWarnings().at(-1)[2].components[0].toJSON());
-  assert(wrongWarn.includes('TO NIE JEST POPRAWNY VOUCH') && wrongWarn.includes('Bot do exchange [ 50 PLN ] [ LTC ]'), 'bot pokazuje poprawny wzór z ticketu');
+  assert(wrongWarn.includes('TO NIE JEST POPRAWNY VOUCH') && wrongWarn.includes('Bot do exchange 50.00 PLN LTC'), 'bot pokazuje poprawny wzór z ticketu');
   // Admin też nie może pisać niczego poza vouchem - wiadomość jest usuwana i nie jest liczona.
   const deletedBefore = lcDeleted().length;
   await onLegitCheckMessage(lcMessage(STAFF, '+', []));
@@ -5868,7 +5892,7 @@ async function flowTest() {
 
   // 8. Poprawny rep → reakcja, karta LC, zamknięcie, logi, DM.
   const before = log.length;
-  await onLegitCheckMessage(lcMessage(CLIENT, `  +REP   <@!${STAFF}> Bot do exchange [ 50 PLN ] [ LTC ]  `, [STAFF]));
+  await onLegitCheckMessage(lcMessage(CLIENT, `  +REP   <@!${STAFF}> Bot do exchange 50.00 pln ltc  `, [STAFF]));
   await panelQueues.get(GID);
   t = getTicket(GID, TICKET_CH);
   assert(t.closedAt && t.result === 'done' && !t.awaitingRep && t.lcUrl, 'poprawny rep zamyka ticket jako zrealizowany');
@@ -5878,7 +5902,7 @@ async function flowTest() {
   assert(after.some(([type, id]) => type === 'dm' && id === CLIENT), 'transcript do klienta w DM');
   assert(g.stats.done === 1, 'statystyki zrealizowanych');
   const lcSends = after.filter(([type, id]) => type === 'send' && id === LC_CH).map(([, , p]) => JSON.stringify(p.components[0].toJSON()));
-  assert(lcSends.some((j) => j.includes('JAK NAPISAĆ VOUCHA')), 'panel „Jak napisać voucha?” pod vouchem');
+  assert(lcSends.some((j) => j.includes('JAK NAPISAĆ LEGIT CHECKA')), 'panel „Jak napisać legit checka?” pod vouchem');
   assert(!JSON.stringify(after).includes('LEGIT CHECK #'), 'bez karty LEGIT CHECK #');
   assert(g.panels.vouch?.channelId === LC_CH, 'panel voucha zapisany');
   const doneLog = JSON.stringify(closedView(t, 'x', false).toJSON());
@@ -6375,11 +6399,11 @@ async function autoLcTest() {
   assert(res.done.length === 2 && !res.failed.length, 'auto LC dla 2 czekających ticketów');
   assert(createdHooks === 1, 'jeden webhook dla wszystkich');
   assert(hookSends[0].username === 'wojtek3509 [AUTO LC]', `nazwa webhooka (${hookSends[0].username})`);
-  assert(hookSends[0].content === '+rep <@staff> Bot do exchange [ 50 zł ] [ LTC ]' && hookSends[0].avatarURL, 'treść repa i avatar klienta');
+  assert(hookSends[0].content === '+rep <@staff> Bot do exchange 50.00 PLN LTC' && hookSends[0].avatarURL, 'treść repa i avatar klienta');
   assert(g.tickets.t1.closedAt && g.tickets.t1.result === 'done' && g.tickets.t1.autoLc, 'ticket zamknięty jako zrealizowany (auto LC)');
   assert(!g.tickets.t3.closedAt, 'ticket bez „Zrealizowane” nietknięty');
   assert(g.stats.done === 2, 'licznik zrealizowanych = 2');
-  assert(sent.some(([id, p]) => id === 'lc' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('JAK NAPISAĆ VOUCHA')), 'panel voucha na dole po auto LC');
+  assert(sent.some(([id, p]) => id === 'lc' && JSON.stringify(p.components?.[0]?.toJSON?.() ?? '').includes('JAK NAPISAĆ LEGIT CHECKA')), 'panel voucha na dole po auto LC');
   const logSend = sent.find(([id, p]) => id === 'log' && p.components);
   assert(logSend && JSON.stringify(logSend[1].components[0].toJSON()).includes('[AUTO LC]'), 'log z oznaczeniem AUTO LC');
   assert(counterTargets(g).some(([id, , n]) => id === 'lc' && n === 2), 'nazwa kanału LC = liczba zrealizowanych');
@@ -7079,7 +7103,34 @@ async function botPaymentTest() {
   const blikTicket = { form: { payment: 'blik' } };
   assert(/"value":"blik"[^}]*"default":true|"default":true[^}]*"value":"blik"/.test(JSON.stringify(doneModal(blikTicket).toJSON())), 'BLIK zaznaczony');
   t.deal = { sellerId: 'staff', product: 'Bot', price: '50 PLN', payment: 'Revolut' };
-  assert(repTemplate(t).endsWith('[ REVOLUT ]'), 'vouch z wpisaną płatnością');
+  assert(repTemplate(t) === '+rep <@staff> Bot 50.00 PLN REVOLUT', `vouch z wpisaną płatnością (${repTemplate(t)})`);
+  // Stary wzór z nawiasami (wysłany w tickecie przed zmianą) dalej przechodzi.
+  assert(matchesTicketRep({ content: '+rep <@staff> Bot [ 50 PLN ] [ REVOLUT ]', mentions: { users: new Map() } }, t), 'stary wzór z nawiasami przyjmowany');
+  assert(repPrice('49,9 zł') === '49.90 PLN' && repPrice('100') === '100.00 PLN' && repPrice('do ustalenia') === 'do ustalenia', 'cena w formacie 100.00 PLN');
+  assert(JSON.stringify(vouchPanel(guild(GID), null).toJSON()).includes('+rep @dymiarz Bot pod exch 100.00 PLN BLIK'), 'panel z nowym przykładem');
+
+  // 5. Ranga Klient: opinie tylko dla klientów (i adminów), rola z /setup.
+  g.settings.clientRoleId = 'klient';
+  g.settings.reviewChannelId = 'rev';
+  const memberWith = (roles, admin = false) => ({ roles: { cache: new Set(roles) }, permissions: { has: () => admin } });
+  const reviewI = (member) => mk({ member, client: { guilds: { cache: new Map() } }, isButton: () => true, isModalSubmit: () => false });
+  let r = reviewI(memberWith([]));
+  await onReviewOpen(r, GID);
+  assert(!r.modal && J(r.replies.at(-1)).includes('tylko **klienci**') && J(r.replies.at(-1)).includes('<@&klient>'), 'bez rangi Klient - brak opinii');
+  r = reviewI(memberWith(['klient']));
+  await onReviewOpen(r, GID);
+  assert(r.modal, 'klient może wystawić opinię');
+  r = reviewI(memberWith([], true));
+  await onReviewOpen(r, GID);
+  assert(r.modal, 'admin może wystawić opinię');
+  // Z DM (bez member): bot sprawdza rangę na serwerze.
+  r = mk({ member: null, client: { guilds: { cache: new Map([[GID, { id: GID, roles: { cache: new Map() }, members: { fetch: async () => memberWith(['klient']) } }]]) } }, isButton: () => true, isModalSubmit: () => false });
+  await onReviewOpen(r, GID);
+  assert(r.modal, 'opinia z DM - ranga sprawdzona na serwerze');
+  // „Zrealizowane” nadaje rangę Klient.
+  const added = [];
+  const fakeG = { id: GID, roles: { cache: new Map() }, members: { fetch: async (id) => ({ roles: { cache: new Set(), add: async (role) => added.push([id, role]) } }) } };
+  assert((await giveClientRole({ guilds: { cache: new Map([[GID, fakeG]]) } }, GID, 'k1', 'test')) && added[0][0] === 'k1' && added[0][1] === 'klient', 'ranga Klient nadana');
 
   delete store.guilds[GID];
   console.log('✅ Test płatności w zamówieniu bota: lista, „Inna” z okienkiem, Zrealizowane OK');
@@ -7286,7 +7337,7 @@ async function hostingTest() {
   const fakeGuild = {
     id: GID,
     roles: { cache: { find: (fn) => [{ id: 'role-client', name: serverLayout.roles.client.name }].find(fn) } },
-    members: { fetch: async (id) => ({ id, roles: { add: async (r) => roleAdds.push([id, r.id]) } }) },
+    members: { fetch: async (id) => ({ id, roles: { add: async (r) => roleAdds.push([id, r.id ?? r]) } }) },
   };
   const ticketChannel = {
     id: 'hticket',
