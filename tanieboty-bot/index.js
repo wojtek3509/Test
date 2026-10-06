@@ -1461,9 +1461,9 @@ function repRequestView(ticket, lcChannelId) {
 /** Panel na kanale legit checków - zawsze na dole, pod ostatnim vouchem. */
 function vouchPanel(g, logo) {
   const b = box(colors.success);
-  header(b, [title('Jak napisać legit checka?', '✅'), `> ${point('Wystaw legit checka **tylko za zrealizowany zakup** na tym kanale.')}`].join('\n'), logo);
+  header(b, title('Jak napisać legit checka?', '✅'), logo);
   sep(b);
-  text(b, [`**📋 ${x} WZÓR:**`, codeBlock(vouchFormat), `**📝 ${x} Przykład:**`, codeBlock(vouchExample)].join('\n'));
+  text(b, [`> ${point('Wystaw legit checka **tylko za zrealizowany zakup** na tym kanale.')}`, `**📋 ${x} WZÓR:**`, codeBlock(vouchFormat), `**📝 ${x} Przykład:**`, codeBlock(vouchExample)].join('\n'));
   sep(b);
   banner(b, bannerUrl(g, 'vouch'));
   sep(b);
