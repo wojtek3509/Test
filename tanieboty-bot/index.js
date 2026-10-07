@@ -15,6 +15,7 @@ import {
   ButtonStyle,
   ChannelType,
   ComponentType,
+  OverwriteType,
   Client,
   ContainerBuilder,
   Events,
@@ -1265,6 +1266,19 @@ async function openTicketFromForm(i, type, form) {
   await i.editReply({ components: [ok(`Ticket utworzony: ${channel}`)], flags: V2 });
 }
 
+const missingRoleWarned = new Set();
+/** ID roli, jeśli nadal istnieje na serwerze. Usunięta rola z ustawień = ostrzeżenie w konsoli (raz) zamiast błędu tworzenia kanału. */
+function existingRole(discordGuild, roleId, label) {
+  if (!roleId) return null;
+  const cache = discordGuild.roles?.cache;
+  if (!cache?.has || cache.has(roleId) || !cache.size) return roleId;
+  if (!missingRoleWarned.has(roleId)) {
+    missingRoleWarned.add(roleId);
+    console.warn(`⚠️ ${label}: rola ${roleId} nie istnieje na serwerze - ustaw ją ponownie. Do tego czasu tickety tworzą się bez niej.`);
+  }
+  return null;
+}
+
 /** Tworzy kanał ticketu z kartą (używane przez formularz i przez przedłużenie hostingu z DM). */
 async function createTicket(client, discordGuild, user, type, form) {
   const { settings } = guild(discordGuild.id);
@@ -1278,11 +1292,13 @@ async function createTicket(client, discordGuild, user, type, form) {
     PermissionFlagsBits.ReadMessageHistory,
   ];
   const overwrites = [
-    { id: discordGuild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: user.id, allow: allowUser },
-    { id: client.user.id, allow: [...allowUser, PermissionFlagsBits.ManageChannels] },
+    // Typ (rola/osoba) podany wprost - bez niego discord.js odrzuca ID, którego nie ma w pamięci podręcznej.
+    { id: discordGuild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: user.id, type: OverwriteType.Member, allow: allowUser },
+    { id: client.user.id, type: OverwriteType.Member, allow: [...allowUser, PermissionFlagsBits.ManageChannels] },
   ];
-  if (settings.staffRoleId) overwrites.push({ id: settings.staffRoleId, allow: [...allowUser, PermissionFlagsBits.ManageMessages] });
+  const staffRole = existingRole(discordGuild, settings.staffRoleId, 'rola admina (/setup podstawowe admin)');
+  if (staffRole) overwrites.push({ id: staffRole, type: OverwriteType.Role, allow: [...allowUser, PermissionFlagsBits.ManageMessages] });
 
   let channel;
   try {
@@ -4000,9 +4016,11 @@ async function createServerLogChannels(discordGuild, categoryId) {
   const g = guild(discordGuild.id);
   const botId = discordGuild.client.user.id;
   const overwrites = [
-    { id: discordGuild.id, deny: [F.ViewChannel] },
-    { id: botId, allow: [F.ViewChannel, F.SendMessages, F.EmbedLinks, F.AttachFiles, F.ReadMessageHistory] },
-    ...(g.settings.staffRoleId ? [{ id: g.settings.staffRoleId, allow: [F.ViewChannel, F.ReadMessageHistory], deny: [F.SendMessages] }] : []),
+    { id: discordGuild.id, type: OverwriteType.Role, deny: [F.ViewChannel] },
+    { id: botId, type: OverwriteType.Member, allow: [F.ViewChannel, F.SendMessages, F.EmbedLinks, F.AttachFiles, F.ReadMessageHistory] },
+    ...(existingRole(discordGuild, g.settings.staffRoleId, 'rola admina (/setup podstawowe admin)')
+      ? [{ id: g.settings.staffRoleId, type: OverwriteType.Role, allow: [F.ViewChannel, F.ReadMessageHistory], deny: [F.SendMessages] }]
+      : []),
   ];
   let parent = categoryId;
   if (!parent) {
@@ -4380,10 +4398,12 @@ async function removeDuplicateJoinMessage(channel, own, memberId, delays = [join
     await new Promise((r) => setTimeout(r, delay));
     const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
     if (!recent) continue;
+    const kind = joinMessageKind(own);
     const copies = [...recent.values()]
       .filter(
         (m) =>
           m.author?.id === own.author?.id &&
+          joinMessageKind(m) === kind &&
           Math.abs(own.createdTimestamp - m.createdTimestamp) < JOIN_DEDUPE_MS &&
           JSON.stringify(m.components ?? []).includes(mention),
       )
@@ -4397,6 +4417,10 @@ async function removeDuplicateJoinMessage(channel, own, memberId, delays = [join
     console.warn('⚠️ Powitanie wysłane dwa razy - bot z tym samym tokenem działa w DWÓCH miejscach (np. drugi serwer w panelu, komputer albo inny hosting). Wyłącz drugą kopię. Duplikaty są usuwane automatycznie.');
   }
   return removed > 0;
+}
+/** Rodzaj wiadomości (tytuł, np. „NOWA OSOBA” albo „ZAPROSZENIA”) - powitanie i zaproszenie na tym samym kanale to nie duplikaty. */
+function joinMessageKind(message) {
+  return /TanieBoty × ([^`\n]+)/.exec(JSON.stringify(message.components ?? []))?.[1] ?? '';
 }
 const dedupeAfterSend = (memberId) => (channel, message) => removeDuplicateJoinMessage(channel, message, memberId).catch(() => {});
 
@@ -6341,6 +6365,12 @@ async function welcomeTest() {
     const ch2 = { messages: { fetch: async () => new Map([['200', mine], ['150', otherPerson]]) } };
     deleted.length = 0;
     assert(!(await removeDuplicateJoinMessage(ch2, mine, 'm9', [0])) && !deleted.length, 'powitanie innej osoby to nie duplikat');
+    // Powitanie i zaproszenie tej samej osoby na jednym kanale - to nie duplikaty.
+    const welcomeMsg = { ...msg('300', 'm7', now - 200), components: [{ c: '## ```👋 TanieBoty × NOWA OSOBA``` <@m7>' }] };
+    const inviteMsg = { ...msg('310', 'm7', now), components: [{ c: '## ```📩 TanieBoty × ZAPROSZENIA``` <@m7>' }] };
+    const ch3 = { messages: { fetch: async () => new Map([['300', welcomeMsg], ['310', inviteMsg]]) } };
+    deleted.length = 0;
+    assert(!(await removeDuplicateJoinMessage(ch3, inviteMsg, 'm7', [0])) && !deleted.length, 'powitanie + zaproszenie na jednym kanale zostają');
   } finally {
     console.warn = warn;
   }
@@ -7039,7 +7069,9 @@ async function botPaymentTest() {
   Object.assign(g.settings, { categoryId: 'cat', staffRoleId: 'staff', maxOpen: 2 });
   const sent = [];
   const fakeChannel = { id: 'tch', toString: () => '<#tch>', send: async (p) => (sent.push(p), { id: `m${sent.length}`, pin: async () => {}, delete: async () => {} }) };
-  const fakeGuild = { id: GID, roles: { everyone: { id: GID } }, channels: { create: async () => fakeChannel } };
+  let createdWith = null;
+  missingRoleWarned.add('staff'); // bez ostrzeżenia w wyniku testu
+  const fakeGuild = { id: GID, roles: { everyone: { id: GID }, cache: new Map([[GID, {}], ['other', {}]]) }, channels: { create: async (o) => ((createdWith = o), fakeChannel) } };
   const user = { id: 'k1', username: 'klient', tag: 'klient', displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png' };
   const J = (p) => JSON.stringify(p?.components?.map((c) => c.toJSON?.() ?? c) ?? p?.toJSON?.() ?? p);
   const mk = (extra) => {
@@ -7079,6 +7111,8 @@ async function botPaymentTest() {
   await onTicketForm(i, 'bot');
   const card = J(sent.find((p) => p.components)).toString();
   assert(J(i.replies.at(-1)).includes('Ticket utworzony') && card.includes('BLIK'), 'zwykła płatność → ticket od razu');
+  // Usunięta rola admina z ustawień nie blokuje ticketu, a każde uprawnienie ma podany typ (rola/osoba).
+  assert(!createdWith.permissionOverwrites.some((o) => o.id === 'staff') && createdWith.permissionOverwrites.every((o) => o.type !== undefined), 'ticket bez usuniętej roli, z typami uprawnień');
 
   // 3. „Inna” → najpierw prośba o wpisanie (bez ticketu), przycisk otwiera okienko, potem ticket.
   values.payment = 'inne';
