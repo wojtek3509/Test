@@ -4369,27 +4369,34 @@ function isRepeatedJoin(member) {
   return last !== undefined && Date.now() - last < JOIN_DEDUPE_MS;
 }
 
-/** Usuwa naszą wiadomość o wejściu, jeśli na kanale jest już starsza wiadomość bota o tej samej osobie. */
-async function removeDuplicateJoinMessage(channel, own, memberId) {
-  await new Promise((r) => setTimeout(r, joinDedupeDelay));
-  const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
-  if (!recent) return false;
+/**
+ * Zostawia jedną wiadomość bota o wejściu tej osoby (najstarszą), a nowsze kopie usuwa - także te wysłane przez
+ * drugą kopię bota (to to samo konto bota, więc może je usunąć), nawet jeśli tamta kopia ma stary kod bez tej ochrony.
+ */
+async function removeDuplicateJoinMessage(channel, own, memberId, delays = [joinDedupeDelay, joinDedupeDelay * 4]) {
   const mention = `<@${memberId}>`;
-  const older = [...recent.values()].find(
-    (m) =>
-      m.id !== own.id &&
-      m.author?.id === own.author?.id &&
-      BigInt(m.id) < BigInt(own.id) &&
-      own.createdTimestamp - m.createdTimestamp < JOIN_DEDUPE_MS &&
-      JSON.stringify(m.components ?? []).includes(mention),
-  );
-  if (!older) return false;
-  await own.delete().catch(() => {});
-  if (!duplicateWarned) {
-    duplicateWarned = true;
-    console.warn('⚠️ Powitanie wysłane dwa razy - wygląda na to, że bot z tym samym tokenem działa w DWÓCH miejscach (np. drugi serwer w panelu, komputer albo inny hosting). Wyłącz drugą kopię. Duplikaty są usuwane automatycznie.');
+  let removed = 0;
+  for (const delay of delays) {
+    await new Promise((r) => setTimeout(r, delay));
+    const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+    if (!recent) continue;
+    const copies = [...recent.values()]
+      .filter(
+        (m) =>
+          m.author?.id === own.author?.id &&
+          Math.abs(own.createdTimestamp - m.createdTimestamp) < JOIN_DEDUPE_MS &&
+          JSON.stringify(m.components ?? []).includes(mention),
+      )
+      .sort((x, y) => (BigInt(x.id) < BigInt(y.id) ? -1 : 1));
+    for (const extra of copies.slice(1)) {
+      if (await extra.delete().then(() => true, () => false)) removed++;
+    }
   }
-  return true;
+  if (removed && !duplicateWarned) {
+    duplicateWarned = true;
+    console.warn('⚠️ Powitanie wysłane dwa razy - bot z tym samym tokenem działa w DWÓCH miejscach (np. drugi serwer w panelu, komputer albo inny hosting). Wyłącz drugą kopię. Duplikaty są usuwane automatycznie.');
+  }
+  return removed > 0;
 }
 const dedupeAfterSend = (memberId) => (channel, message) => removeDuplicateJoinMessage(channel, message, memberId).catch(() => {});
 
@@ -6326,12 +6333,14 @@ async function welcomeTest() {
     const other = { ...msg('100', 'm9', now - 500), components: [{ type: 17, content: '<@m9>' }] };
     const mine = msg('200', 'm9', now);
     const ch = { messages: { fetch: async () => new Map([['200', mine], ['100', other]]) } };
-    assert((await removeDuplicateJoinMessage(ch, mine, 'm9')) && deleted.includes('200'), 'nowszy duplikat usunięty');
-    assert(!(await removeDuplicateJoinMessage(ch, other, 'm9')) && !deleted.includes('100'), 'najstarsze zostaje');
+    assert((await removeDuplicateJoinMessage(ch, mine, 'm9', [0])) && deleted.includes('200') && !deleted.includes('100'), 'nowsza kopia usunięta, najstarsza zostaje');
+    // Druga kopia bota ze starym kodem wysłała później - nasza (starsza) usuwa jej wiadomość.
+    deleted.length = 0;
+    assert((await removeDuplicateJoinMessage(ch, other, 'm9', [0])) && deleted.includes('200') && !deleted.includes('100'), 'nowsza kopia drugiego bota usunięta przez nas');
     const otherPerson = { ...msg('150', 'x1', now - 100), components: [{ content: '<@x1>' }] };
     const ch2 = { messages: { fetch: async () => new Map([['200', mine], ['150', otherPerson]]) } };
     deleted.length = 0;
-    assert(!(await removeDuplicateJoinMessage(ch2, mine, 'm9')) && !deleted.length, 'powitanie innej osoby to nie duplikat');
+    assert(!(await removeDuplicateJoinMessage(ch2, mine, 'm9', [0])) && !deleted.length, 'powitanie innej osoby to nie duplikat');
   } finally {
     console.warn = warn;
   }
