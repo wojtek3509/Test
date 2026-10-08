@@ -4429,7 +4429,9 @@ async function onMemberAdd(member) {
   // Powitanie wychodzi od razu - ustalanie zaproszenia (pobieranie linków z Discorda) idzie równolegle i go nie wstrzymuje.
   const welcome = sendWelcome(member, guild(member.guild.id));
   // Błąd przy ustalaniu zaproszenia nie może zablokować powitania.
+  const t0 = Date.now();
   const found = await findUsedInvite(member.guild).catch((err) => (console.warn('Zaproszenia:', err.message), {}));
+  const inviteFetchSecs = ((Date.now() - t0) / 1000).toFixed(1);
   const fake = Date.now() - member.user.createdTimestamp < fakeAccountDays * 86_400_000;
   const g = updateGuild(member.guild.id, (gg) => {
     gg.joins[member.id] = { inviterId: found.inviterId ?? null, fake, at: Date.now() };
@@ -4442,9 +4444,13 @@ async function onMemberAdd(member) {
   });
   const invites = sendInviteLog(member, g, found);
   logMemberJoin(member, found).catch(console.error);
-  const res = { welcome: await welcome, invites: await invites };
-  const secs = ((Date.now() - (member.joinedTimestamp ?? Date.now())) / 1000).toFixed(1);
-  console.log(`👋 ${member.user.tag ?? member.id}: powitanie i zaproszenie wysłane ${secs} s po wejściu`);
+  // Czas liczony osobno: powitanie (od razu) i zaproszenie (czeka na listę zaproszeń z Discorda).
+  const joined = member.joinedTimestamp ?? Date.now();
+  const since = () => ((Date.now() - joined) / 1000).toFixed(1);
+  let welcomeAt = null;
+  const welcomeResult = await welcome.then((r) => ((welcomeAt = since()), r));
+  const res = { welcome: welcomeResult, invites: await invites };
+  console.log(`👋 ${member.user.tag ?? member.id}: powitanie ${welcomeAt} s, zaproszenie ${since()} s po wejściu (zaproszenia z Discorda: ${inviteFetchSecs} s)`);
   return res;
 }
 
