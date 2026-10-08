@@ -3673,7 +3673,7 @@ function guardUploads(rest) {
 
 // ─── Własne emoji w wysyłanych wiadomościach ───────────────────────────
 // Podmiana dzieje się tuż przed wysłaniem do Discorda: w tekście (poza blokami kodu), w przyciskach i w opcjach menu.
-// Tytuł w ramce „## ```🎫 TanieBoty × X```” zamienia się na „## <:bilet:…> ```TanieBoty × X```” (w kodzie emoji się nie wyświetla).
+// Tytuły i nagłówki (## ```🎫 TanieBoty × X```, ### …) zostają ze zwykłymi emoji.
 const swapKeys = Object.keys(emojiSwap).sort((a, b) => b.length - a.length);
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const swapRe = swapKeys.length ? new RegExp(swapKeys.map((k) => `${escapeRe(k.replace(/️/g, ''))}\\uFE0F?`).join('|'), 'gu') : null;
@@ -3682,14 +3682,9 @@ const swapOne = (m) => swapLookup[m.replace(/️/g, '')] ?? m;
 
 function swapEmojiText(text) {
   if (!swapRe || typeof text !== 'string') return text;
-  // Tytuł w ramce: emoji wychodzi przed ramkę.
-  let out = text.replace(/(^|\n)(#{1,3} )```(\S+) /g, (all, nl, hashes, emoji) => {
-    const custom = swapOne(emoji);
-    return custom !== emoji ? `${nl}${hashes}${custom} \`\`\`` : all;
-  });
-  // Reszta tekstu - bez bloków kodu i `kodu` (tam zostaje, jak było).
-  return out
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+  // Bez zmian zostają: tytuły i nagłówki (linie od #), bloki kodu i `kod`.
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`|(?:^|\n)#{1,3} [^\n]*)/)
     .map((part, i) => (i % 2 ? part : part.replace(swapRe, swapOne)))
     .join('');
 }
@@ -7281,7 +7276,8 @@ async function botPaymentTest() {
     ],
   });
   const sj = JSON.stringify(swapped);
-  assert(sj.includes('## <:bilet:1557668143755698186> ```TanieBoty × TICKETY```'), 'tytuł w ramce z własnym emoji przed ramką');
+  assert(sj.includes('## ```🎫 TanieBoty × TICKETY```'), 'tytuł ze zwykłym emoji');
+  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<:tak:1557667110803738675> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
   assert(sj.includes('<:tak:1557667110803738675> Gotowe <:ostrzeenie:1557667562978938933> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
   assert(sj.includes('"emoji":{"id":"1557667714552565781","name":"kdka"') && sj.includes('"emoji":{"id":"1557668143755698186","name":"bilet"'), 'przyciski i menu z własnym emoji');
   const modalBody = { type: 9, data: { custom_id: 'm', title: '🎫 Bot', components: [{ type: 18, label: '✅ Pole' }] } };
