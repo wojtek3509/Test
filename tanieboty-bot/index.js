@@ -310,7 +310,7 @@ const rulesSectionWord = 'Rozdział';
 const rules = [
   {
     title: 'Postanowienia ogólne',
-    emoji: '📘',
+    emoji: tbEmoji.regulamin,
     points: [
       `Dołączenie do ${brand.invite ? `[serwera ${brand.name}](${brand.invite})` : `serwera **${brand.name}**`} i korzystanie z niego oznacza pełną akceptację niniejszego regulaminu.`,
       'Każdy użytkownik ma obowiązek zachowywać kulturę osobistą i szacunek wobec innych - w szczególności wobec klientów i właścicieli serwera.',
@@ -875,7 +875,7 @@ function rulesPanel(g, logo) {
         .setCustomId('rules:show')
         .setPlaceholder(placeholderNone)
         .addOptions(
-          rules.map((rule, idx) => ({ label: `${rulesSectionWord} ${idx + 1}. ${rule.title}`, value: String(idx), description: 'Kliknij, aby wyświetlić ten rozdział regulaminu.', emoji: rule.emoji })),
+          rules.map((rule, idx) => ({ label: `${rulesSectionWord} ${idx + 1}. ${rule.title}`, value: String(idx), description: 'Kliknij, aby wyświetlić ten rozdział regulaminu.', emoji: selectEmoji(rule.emoji) })),
         ),
     ),
   );
@@ -3696,6 +3696,13 @@ function swapEmojiObject(emoji) {
   return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : emoji;
 }
 
+const buttonSwap = { '✅': legitEmojis.yes, '❌': legitEmojis.no };
+function buttonEmoji(emoji) {
+  const custom = emoji?.name && !emoji.id ? buttonSwap[emoji.name.replace(/\uFE0F/g, '')] : null;
+  const m = custom && /^<(a?):(\w+):(\d+)>$/.exec(custom);
+  return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : emoji;
+}
+
 /** Przechodzi po treści wiadomości (content, komponenty, dane odpowiedzi na interakcję) i podmienia emoji. */
 function swapEmojiPayload(node) {
   if (Array.isArray(node)) return node.map(swapEmojiPayload);
@@ -3705,7 +3712,8 @@ function swapEmojiPayload(node) {
   const out = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === 'content' && typeof value === 'string') out[key] = swapEmojiText(value);
-    else if (key === 'emoji') out[key] = swapEmojiObject(value);
+    // Przyciski: ✅ / ❌ (Zrealizowane, Niezrealizowane…) dostają zielone TAK i czerwone NIE jak na panelu „czy legit”, reszta zostaje.
+    else if (key === 'emoji') out[key] = node.type === 2 ? buttonEmoji(value) : swapEmojiObject(value);
     else if (key === 'components' || key === 'data' || key === 'options' || key === 'accessory') out[key] = swapEmojiPayload(value);
     else out[key] = value;
   }
@@ -7279,7 +7287,9 @@ async function botPaymentTest() {
   assert(sj.includes('## ```🎫 TanieBoty × TICKETY```'), 'tytuł ze zwykłym emoji');
   assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<:tak:1557667110803738675> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
   assert(sj.includes('<:tak:1557667110803738675> Gotowe <:ostrzeenie:1557667562978938933> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
-  assert(sj.includes('"emoji":{"id":"1557667714552565781","name":"kdka"') && sj.includes('"emoji":{"id":"1557668143755698186","name":"bilet"'), 'przyciski i menu z własnym emoji');
+  assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1557668143755698186","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
+  const doneBtn = JSON.stringify(swapEmojiPayload({ components: [{ type: 1, components: [{ type: 2, custom_id: 'tk:done', label: 'Zrealizowane', emoji: { name: '✅' } }, { type: 2, custom_id: 'tk:notdone', label: 'Niezrealizowane', emoji: { name: '❌' } }] }] }));
+  assert(doneBtn.includes('"id":"1554504948211785778"') && doneBtn.includes('"id":"1554505001492021248"'), 'Zrealizowane/Niezrealizowane z zielonym TAK i czerwonym NIE');
   const modalBody = { type: 9, data: { custom_id: 'm', title: '🎫 Bot', components: [{ type: 18, label: '✅ Pole' }] } };
   assert(JSON.stringify(swapEmojiPayload(modalBody)) === JSON.stringify(modalBody), 'formularz bez zmian');
   const swapCalls = [];
