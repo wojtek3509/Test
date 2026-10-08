@@ -1072,7 +1072,7 @@ function giveawayView(gw, memberCount) {
     `📋 ${x} **Wymagania:** ${gw.requirements || 'Bez wymagań!'}`,
   ];
   text(b, [title(gw.ended ? 'Konkurs zakończony' : 'Konkurs', '🎉'), '', '>>> ' + lines.join('\n')].join('\n'));
-  banner(b, gw.image || (gw.builtinBanner ? `attachment://${bannerFiles.konkurs}` : null));
+  banner(b, gw.image || (gw.builtinBanner ? `attachment://${builtinBanner('konkurs') ?? bannerFiles.konkurs}` : null));
   sep(b);
   b.addActionRowComponents((r) =>
     r.setComponents(
