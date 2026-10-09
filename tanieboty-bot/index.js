@@ -8179,6 +8179,34 @@ function start(attempt = 0) {
   });
 }
 
+// ─── Ochrona przed wyłączeniem bota ────────────────────────────────────
+// Bez tego jeden nieobsłużony błąd (np. Discord chwilowo nie odpowie) zamyka cały proces, a Pterodactyl pokazuje Offline.
+// Błąd trafia do konsoli z godziną, a bot działa dalej.
+const crashLog = (kind) => (err) => console.error(`⚠️ [${new Date().toLocaleString('pl-PL')}] ${kind} - bot działa dalej:`, err?.stack ?? err);
+process.on('unhandledRejection', crashLog('Nieobsłużony błąd (Promise)'));
+process.on('uncaughtException', crashLog('Nieobsłużony wyjątek'));
+
+// Pamięć: limit kontenera z panelu i zużycie co 30 minut - gdy bot znika bez błędu w konsoli, to zwykle brak RAM-u.
+function memoryLimitMb() {
+  for (const file of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const raw = readFileSync(file, 'utf8').trim();
+      const bytes = Number(raw);
+      if (raw !== 'max' && bytes > 0 && bytes < 2 ** 50) return Math.round(bytes / 1048576);
+    } catch {}
+  }
+  return null;
+}
+const ramLimit = memoryLimitMb();
+function logMemory(prefix = '🧠 RAM') {
+  const used = Math.round(process.memoryUsage().rss / 1048576);
+  const part = ramLimit ? ` z ${ramLimit} MB (${Math.round((used / ramLimit) * 100)}%)` : '';
+  const warn = ramLimit && used / ramLimit > 0.85 ? ' ⚠️ blisko limitu - zwiększ Memory w panelu (Build Configuration)' : '';
+  console.log(`${prefix}: ${used} MB${part}${warn}`);
+}
+setInterval(() => logMemory(), 30 * 60_000).unref();
+logMemory('🧠 RAM na starcie');
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     flush();
