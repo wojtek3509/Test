@@ -3678,7 +3678,16 @@ const swapKeys = Object.keys(emojiSwap).sort((a, b) => b.length - a.length);
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const swapRe = swapKeys.length ? new RegExp(swapKeys.map((k) => `${escapeRe(k.replace(/️/g, ''))}\\uFE0F?`).join('|'), 'gu') : null;
 const swapLookup = Object.fromEntries(swapKeys.map((k) => [k.replace(/️/g, ''), emojiSwap[k]]));
-const swapOne = (m) => swapLookup[m.replace(/️/g, '')] ?? m;
+const swapOne = (m) => {
+  const custom = swapLookup[m.replace(/️/g, '')];
+  return custom && emojiUsable(customIdOf(custom)) ? custom : m;
+};
+
+// Emoji, do których bot ma dostęp (z serwerów, na których jest). Puste = jeszcze nie wiadomo (przed startem, w testach).
+// Emoji spoza listy (usunięte albo z innego serwera) bot pomija, zamiast wysyłać je jako tekst <:nazwa:id>.
+let availableEmojiIds = new Set();
+const emojiUsable = (id) => !availableEmojiIds.size || availableEmojiIds.has(id);
+const customIdOf = (text) => /^<a?:\w+:(\d+)>$/.exec(text ?? '')?.[1] ?? null;
 
 function swapEmojiText(text) {
   if (!swapRe || typeof text !== 'string') return text;
@@ -3686,11 +3695,13 @@ function swapEmojiText(text) {
   return text
     .split(/(```[\s\S]*?```|`[^`\n]*`|(?:^|\n)#{1,3} [^\n]*)/)
     .map((part, i) => (i % 2 ? part : part.replace(swapRe, swapOne)))
-    .join('');
+    .join('')
+    .replace(/<a?:\w+:(\d+)> ?/g, (all, id) => (emojiUsable(id) ? all : ''));
 }
 
 function swapEmojiObject(emoji) {
-  if (!emoji?.name || emoji.id) return emoji;
+  if (emoji?.id) return emojiUsable(emoji.id) ? emoji : undefined;
+  if (!emoji?.name) return emoji;
   const custom = swapOne(emoji.name);
   const m = /^<(a?):(\w+):(\d+)>$/.exec(custom);
   return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : emoji;
@@ -3700,7 +3711,8 @@ const buttonSwap = { '✅': legitEmojis.yes, '❌': legitEmojis.no };
 function buttonEmoji(emoji) {
   const custom = emoji?.name && !emoji.id ? buttonSwap[emoji.name.replace(/\uFE0F/g, '')] : null;
   const m = custom && /^<(a?):(\w+):(\d+)>$/.exec(custom);
-  return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : emoji;
+  if (m && emojiUsable(m[3])) return { id: m[3], name: m[2], animated: Boolean(m[1]) };
+  return emoji?.id && !emojiUsable(emoji.id) ? undefined : emoji;
 }
 
 function stripCustomEmoji(node) {
@@ -7307,6 +7319,11 @@ async function botPaymentTest() {
   // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
   assert(!realModal.includes('"emoji":{"id"') && realModal.includes('"value":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz bez własnych emoji w menu');
+  // Niedostępne emoji (usunięte albo z innego serwera) - bot je pomija zamiast wysyłać tekst <:nazwa:id>.
+  availableEmojiIds = new Set(['1557667110803738675']); // tylko „tak”
+  const partial = JSON.stringify(swapEmojiPayload({ components: [{ type: 10, content: '✅ ok ⚠️ uwaga <:paypal:1557667290298851368> PayPal' }, { type: 3, options: [{ label: 'BLIK', value: 'b', emoji: { id: '1557667222867157052', name: 'blik' } }] }] }));
+  availableEmojiIds = new Set();
+  assert(partial.includes('<:tak:1557667110803738675> ok') && partial.includes('⚠️ uwaga') && partial.includes('PayPal') && !partial.includes('<:paypal:') && !partial.includes('"emoji"'), 'niedostępne emoji pomijane');
   const swapCalls = [];
   const fakeRest = customEmojiRequests({ request: async (o) => swapCalls.push(o) });
   await fakeRest.request({ fullRoute: '/channels/1/messages', method: 'POST', body: { content: '✅ ok' } });
@@ -8059,8 +8076,27 @@ if (!DISCORD_TOKEN || DISCORD_TOKEN === 'TUTAJ_WKLEJ_TOKEN') {
 }
 
 
+/** Wszystkie własne emoji z ustawień bota (do sprawdzenia, czy bot ma do nich dostęp). */
+function configuredEmojis() {
+  const list = [];
+  for (const [name, e] of Object.entries(tbEmoji)) list.push([`tbEmoji.${name}`, e]);
+  for (const [name, e] of Object.entries(payEmoji)) list.push([`payEmoji.${name}`, e]);
+  for (const [name, e] of Object.entries(legitEmojis)) list.push([`legitEmojis.${name}`, e]);
+  return list.filter(([, e]) => customIdOf(e));
+}
+
+function refreshAvailableEmojis(client) {
+  availableEmojiIds = new Set(client.emojis.cache.keys());
+  const missing = configuredEmojis().filter(([, e]) => !availableEmojiIds.has(customIdOf(e)));
+  if (missing.length) {
+    console.warn(`⚠️ Emoji niedostępne dla bota (usunięte albo z serwera, na którym bota nie ma) - bot je pomija: ${missing.map(([n, e]) => `${n} ${e}`).join(', ')}`);
+  } else console.log(`😀 Własne emoji: wszystkie ${configuredEmojis().length} dostępne`);
+  return missing;
+}
+
 async function onReady(ready) {
   console.log(`✅ Zalogowano jako ${ready.user.tag}`);
+  refreshAvailableEmojis(ready);
   console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
   console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak - zaproś bota linkiem powyżej'}`);
   if (!messageContentOn) {
@@ -8137,6 +8173,8 @@ function start(attempt = 0) {
     // Logi: dziennik zdarzeń (bany, mute, role, zmiany na serwerze) i kanały głosowe. Nie wymagają włączania w Developer Portal.
     GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildVoiceStates,
+    // Emoji serwera - bot wie, które własne emoji może wysłać.
+    GatewayIntentBits.GuildExpressions,
   ];
   if (content) intents.push(GatewayIntentBits.MessageContent);
   if (members) intents.push(GatewayIntentBits.GuildMembers);
@@ -8166,6 +8204,8 @@ function start(attempt = 0) {
   botClient.on(Events.InviteCreate, (inv) => inviteCache.get(inv.guild?.id)?.set(inv.code, inv.uses ?? 0));
   botClient.on(Events.InviteDelete, (inv) => inviteCache.get(inv.guild?.id)?.delete(inv.code));
   botClient.on(Events.GuildCreate, (g) => cacheInvites(g));
+  // Dodane albo usunięte emoji na serwerze - odświeżamy listę dostępnych.
+  for (const ev of [Events.GuildEmojiCreate, Events.GuildEmojiDelete, Events.GuildEmojiUpdate]) botClient.on(ev, () => (availableEmojiIds = new Set(botClient.emojis.cache.keys())));
   if (members) {
     botClient.on(Events.GuildMemberAdd, (m) => onMemberAdd(m).catch(console.error));
     botClient.on(Events.GuildMemberRemove, (m) => {
