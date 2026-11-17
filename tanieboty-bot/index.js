@@ -3703,12 +3703,24 @@ function buttonEmoji(emoji) {
   return m ? { id: m[3], name: m[2], animated: Boolean(m[1]) } : emoji;
 }
 
+function stripCustomEmoji(node) {
+  if (Array.isArray(node)) return node.map(stripCustomEmoji);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'emoji' && value?.id) continue;
+    out[key] = stripCustomEmoji(value);
+  }
+  return out;
+}
+
 /** Przechodzi po treści wiadomości (content, komponenty, dane odpowiedzi na interakcję) i podmienia emoji. */
 function swapEmojiPayload(node) {
   if (Array.isArray(node)) return node.map(swapEmojiPayload);
   if (!node || typeof node !== 'object') return node;
-  // Formularz (modal): tytuły i etykiety nie pokazują własnych emoji - zostawiamy bez zmian.
-  if (typeof node.custom_id === 'string' && typeof node.title === 'string' && Array.isArray(node.components)) return node;
+  // Formularz (modal): Discord odrzuca w nim własne emoji serwera (COMPONENT_INVALID_EMOJI) - usuwamy je z opcji menu,
+  // zwykłe emoji zostają. Reszta formularza bez zmian.
+  if (typeof node.custom_id === 'string' && typeof node.title === 'string' && Array.isArray(node.components)) return stripCustomEmoji(node);
   const out = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === 'content' && typeof value === 'string') out[key] = swapEmojiText(value);
@@ -7292,6 +7304,9 @@ async function botPaymentTest() {
   assert(doneBtn.includes('"id":"1554504948211785778"') && doneBtn.includes('"id":"1554505001492021248"'), 'Zrealizowane/Niezrealizowane z zielonym TAK i czerwonym NIE');
   const modalBody = { type: 9, data: { custom_id: 'm', title: '🎫 Bot', components: [{ type: 18, label: '✅ Pole' }] } };
   assert(JSON.stringify(swapEmojiPayload(modalBody)) === JSON.stringify(modalBody), 'formularz bez zmian');
+  // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
+  const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
+  assert(!realModal.includes('"emoji":{"id"') && realModal.includes('"value":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz bez własnych emoji w menu');
   const swapCalls = [];
   const fakeRest = customEmojiRequests({ request: async (o) => swapCalls.push(o) });
   await fakeRest.request({ fullRoute: '/channels/1/messages', method: 'POST', body: { content: '✅ ok' } });
