@@ -826,7 +826,9 @@ function title(text, emoji = brand.emoji) {
   return emoji.startsWith('<') ? `## ${emoji} \`\`\`${body}\`\`\`` : `## \`\`\`${emoji} ${body}\`\`\``;
 }
 /** Linia „» × Etykieta: wartość”. */
-const row = (label, value) => `${c} ${x} **${label}:** ${value}`;
+/** Dwukropek tylko wtedy, gdy etykieta nie kończy się już znakiem (np. „Na kiedy?” → bez „?:”). */
+const withColon = (label) => (/[?:!]$/.test(String(label)) ? label : `${label}:`);
+const row = (label, value) => `${c} ${x} **${withColon(label)}** ${value}`;
 /** Punkt „» × tekst”. */
 const point = (text) => `${c} ${x} ${text}`;
 const stars = (n) => `${'⭐'.repeat(n)}${'✩'.repeat(5 - n)}`;
@@ -1263,7 +1265,10 @@ function ticketMessage(ticket, user) {
           : f.select
             ? ((([name, , emoji] = []) => (name ? `${emoji ? `${emoji} ` : ''}${name}` : ticket.form[f.id]))(f.select.find(([, v]) => v === ticket.form[f.id])))
             : ticket.form[f.id];
-      return f.style === 'long' ? `${point(`**${f.label}:**`)}\n${codeBlock(value)}` : row(f.label, `\`${value}\``);
+      if (f.style === 'long') return `${point(`**${withColon(f.label)}**`)}\n${codeBlock(value)}`;
+      // Emoji na początku (np. płatność „<:blik:…> BLIK”) poza `kodem` - w kodzie wyświetliłoby się jako tekst.
+      const [, emoji = '', rest = value] = /^(<a?:\w+:\d+>|\p{Extended_Pictographic}\uFE0F?)\s+(.+)$/su.exec(String(value)) ?? [];
+      return row(f.label, `${emoji ? `${emoji} ` : ''}\`${rest}\``);
     });
   const renew = ticket.form.renew && ticket.guildId ? guild(ticket.guildId).hosting.servers[ticket.form.renew] : null;
   if (ticket.form.renew) answers.unshift(row('🔁 Przedłużenie serwera', `\`${renew?.name ?? '?'}\` (ID \`${ticket.form.renew}\`)`));
@@ -7497,6 +7502,9 @@ async function botPaymentTest() {
   // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
   assert(realModal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz z własnymi emoji w menu');
+  // Karta ticketu: emoji płatności poza `kodem`, bez „?:” przy „Na kiedy?”.
+  const cardJson = JSON.stringify(ticketMessage({ type: 'bot', userId: 'k1', openedAt: Date.now(), form: { desc: 'Z', budget: '50', deadline: 'jutro', payment: 'blik' } }, user).toJSON());
+  assert(cardJson.includes('<:blik:1572559823323791572> `BLIK`') && cardJson.includes('**Na kiedy?**') && !cardJson.includes('?:**'), 'karta ticketu: emoji płatności i etykiety');
   // Konkurs: procent = szansa na wygraną (zwycięzcy / uczestnicy).
   const gwLabel = (entrants, winners) => JSON.stringify(giveawayView({ prize: 'x', winners, entrants, endsAt: Date.now() + 1000, hostId: 'h', channelId: 'c' }, 1500).toJSON());
   assert(gwLabel(['a'], 1).includes('1 osoba | 100.00%') && gwLabel(['a', 'b', 'c', 'd'], 1).includes('4 osoby | 25.00%') && gwLabel(['a', 'b'], 3).includes('100.00%') && gwLabel([], 1).includes('0.00%'), 'procent szansy w konkursie');
@@ -7547,7 +7555,7 @@ async function botPaymentTest() {
   await onOtherPayment(i, 'bot');
   const t = Object.values(g.tickets).at(-1);
   assert(t.form.payment === 'inne' && t.form.paymentOther === 'Revolut' && J(i.replies.at(-1)).includes('Ticket utworzony'), 'ticket z wpisaną płatnością');
-  assert(J({ components: [ticketMessage(t, user)] }).includes('✏️ Revolut'), 'karta ticketu pokazuje wpisaną płatność');
+  assert(J({ components: [ticketMessage(t, user)] }).includes('✏️ `Revolut`'), 'karta ticketu pokazuje wpisaną płatność');
   // Drugie wysłanie tego samego okienka nie tworzy drugiego ticketu.
   i = mk({ fields: { getTextInputValue: () => 'Revolut' } });
   await onOtherPayment(i, 'bot');
