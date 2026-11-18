@@ -3370,6 +3370,81 @@ async function adoptPanels(client, discordGuild) {
   return Object.keys(found);
 }
 
+/** Ostatnie wiadomości kanału (do `max`, po 100 na zapytanie), od najnowszej. */
+async function fetchHistory(channel, max = 1000) {
+  const all = [];
+  let before;
+  while (all.length < max) {
+    const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) }).catch(() => null);
+    if (!batch?.size) break;
+    all.push(...batch.values());
+    before = [...batch.keys()].pop();
+    if (batch.size < 100) break;
+  }
+  return all;
+}
+
+/** Odczytuje opinię z karty „TanieBoty × OPINIA” (gdy bazy nie ma, np. po przeniesieniu bota). */
+function parseReviewCard(message) {
+  const texts = [];
+  const walk = (n) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (!n || typeof n !== 'object') return;
+    const data = typeof n.toJSON === 'function' ? n.toJSON() : n;
+    if (typeof data.content === 'string') texts.push(data.content);
+    walk(data.components);
+  };
+  walk(message.components ?? []);
+  const all = texts.join('\n');
+  if (!all.includes('× OPINIA```')) return null;
+  const userId = /Twórca opinii:\*\*\s*<@!?(\d+)>/.exec(all)?.[1] ?? null;
+  const productLine = /Produkt:\*\*\s*([^\n]+)/.exec(all)?.[1] ?? '';
+  const product = Object.entries(reviewProducts).find(([, p]) => productLine.includes(p.label))?.[0] ?? 'other';
+  const content = /Treść opinii:\*\*\s*\n```\n?([\s\S]*?)\n?```/.exec(all)?.[1] ?? '';
+  const ratings = {};
+  for (const cr of reviewCriteria) {
+    const line = all.split('\n').find((l) => l.includes(`${cr.label}:**`)) ?? '';
+    ratings[cr.id] = Math.max(1, Math.min(5, (line.match(/⭐/g) ?? []).length || 5));
+  }
+  return { userId, product, content, ratings, at: message.createdTimestamp, messageId: message.id };
+}
+
+/**
+ * Odbudowuje bazę z wiadomości na kanałach: opinie z kanału opinii i liczbę vouchy (+rep) z kanału legit checków.
+ * Liczniki tylko rosną - nic, co już jest w bazie, nie jest zmniejszane. Zwraca, ile dodano.
+ */
+async function rebuildFromChannels(client, guildId) {
+  const g = guild(guildId);
+  const result = { opinie: 0, vouche: null };
+  const reviewChannel = g.settings.reviewChannelId ? await client.channels.fetch(g.settings.reviewChannelId).catch(() => null) : null;
+  if (reviewChannel?.messages) {
+    const known = new Set(g.reviews.map((r) => r.messageId));
+    const found = (await fetchHistory(reviewChannel))
+      .filter((m) => m.author?.id === client.user.id && !known.has(m.id))
+      .map(parseReviewCard)
+      .filter(Boolean)
+      .sort((a, b) => a.at - b.at);
+    if (found.length) {
+      updateGuild(guildId, (gg) => {
+        gg.reviews.push(...found);
+        gg.reviews.sort((a, b) => a.at - b.at).forEach((r, idx) => (r.number = idx + 1));
+      });
+      result.opinie = found.length;
+      await refreshPanel(client, guildId, 'opinie');
+    }
+  }
+  const lcChannel = g.settings.lcChannelId ? await client.channels.fetch(g.settings.lcChannelId).catch(() => null) : null;
+  if (lcChannel?.messages) {
+    const vouches = (await fetchHistory(lcChannel)).filter((m) => /^\s*\+rep\b/i.test(m.content ?? '')).length;
+    result.vouche = vouches;
+    updateGuild(guildId, (gg) => {
+      gg.stats.done = Math.max(gg.stats.done, vouches);
+      gg.stats.lc = Math.max(gg.stats.lc, vouches);
+    });
+  }
+  return result;
+}
+
 /**
  * Odświeża wszystkie wiadomości bota zapisane w bazie: panele, trwające konkursy i karty otwartych ticketów.
  * Dzięki temu zmiany wyglądu (np. nowe emoji) trafiają też do starych wiadomości. Zwraca liczby odświeżonych.
@@ -5460,12 +5535,18 @@ command(
   async (i) => {
     await i.deferReply({ flags: V2_EPHEMERAL });
     const adopted = await adoptPanels(i.client, i.guild);
+    const rebuilt = await rebuildFromChannels(i.client, i.guildId).catch((err) => (console.warn('Odbudowa z kanałów:', err.message), { opinie: 0, vouche: null }));
     const done = await refreshAllMessages(i.client, i.guildId);
+    updateCounters(i.client).catch(() => {});
+    const gNow = guild(i.guildId);
     return i.editReply({
       components: [
         ok(
           `Odświeżono: panele **${done.panele}**, konkursy **${done.konkursy}**, karty ticketów **${done.tickety}**.` +
             (adopted.length ? `\nZnalezione na kanałach i dodane do bazy: ${adopted.map((t) => `\`${t}\``).join(', ')}.` : '') +
+            (rebuilt.opinie ? `\nOdczytane opinie z kanału: **${rebuilt.opinie}** (razem w bazie: **${gNow.reviews.length}**).` : '') +
+            (rebuilt.vouche !== null ? `\nLegit checki na kanale: **${rebuilt.vouche}** (licznik: **${gNow.stats.done}**).` : '') +
+            `\n-# Nazwy kanałów z licznikiem zmienią się w ciągu kilku minut (limit Discorda).` +
             `\n-# Panel, którego bot nie znalazł (starszy niż 50 ostatnich wiadomości na kanale), wyślij od nowa przez \`/panel\`.`,
         ),
       ],
@@ -7611,6 +7692,23 @@ async function botPaymentTest() {
   };
   const adopted = await adoptPanels({ user: { id: 'bot' } }, scanGuild);
   assert(adopted.length === 2 && g.panels.tickety.messageId === 'm2' && g.panels.vouch.channelId === 'c2', 'panele znalezione po tytule (najnowszy)');
+
+  // 5c. Opinie i vouche odczytane z kanałów (po przeniesieniu bota bez bazy).
+  const oldReview = { userId: '123456789012345678', product: 'bot', content: 'My i pomocny sprzedawca', ratings: { quality: 4, time: 4, service: 5 }, at: 1000 };
+  const parsed = parseReviewCard({ id: 'r1', createdTimestamp: 1000, components: [reviewCard(oldReview, user).toJSON()] });
+  assert(parsed && parsed.userId === '123456789012345678' && parsed.product === 'bot' && parsed.content === 'My i pomocny sprzedawca' && parsed.ratings.quality === 4 && parsed.ratings.service === 5, 'opinia odczytana z karty');
+  g.reviews = [];
+  g.stats.done = 0;
+  g.stats.lc = 0;
+  Object.assign(g.settings, { reviewChannelId: 'rev', lcChannelId: 'lcc' });
+  const hist = {
+    rev: [{ id: 'r1', author: { id: 'bot' }, createdTimestamp: 1000, components: [reviewCard(oldReview, user).toJSON()] }, { id: 'r0', author: { id: 'bot' }, components: [{ content: 'panel' }] }],
+    lcc: [{ id: 'v1', content: '+rep <@1> Bot 50.00 PLN BLIK' }, { id: 'v2', content: '+REP <@1> X' }, { id: 'v3', content: 'hej' }],
+  };
+  const histClient = { user: { id: 'bot' }, channels: { fetch: async (id) => (hist[id] ? { id, messages: { fetch: async ({ before }) => (before ? new Map() : new Map(hist[id].map((m) => [m.id, m]))) } } : null) } };
+  const rebuilt = await rebuildFromChannels(histClient, GID);
+  assert(rebuilt.opinie === 1 && g.reviews.length === 1 && rebuilt.vouche === 2 && g.stats.done === 2 && g.stats.lc === 2, 'odbudowa opinii i liczby vouchy');
+  assert((await rebuildFromChannels(histClient, GID)).opinie === 0 && g.reviews.length === 1, 'drugi raz bez duplikatów');
 
   // 6. /odswiez: panele, trwające konkursy i karty otwartych ticketów są edytowane (zakończone pomijane).
   const edits = [];
