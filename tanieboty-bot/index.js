@@ -101,7 +101,7 @@ const payEmoji = {
   eth: '<:eth:1572559131150123028>',
   sol: '<:sol:1563130849497448511>',
   psc: '<:paysafecard:1563131449484513312>',
-  paypal: '🅿️', // brak kodu nowego emoji PayPal - wklej tu <:paypal:ID>
+  paypal: '<:paypal:1572528895503241246>',
   btc: '<:bitcoin:1572560615963238500>',
 };
 
@@ -138,7 +138,8 @@ const tbEmoji = {
   notatki: '<:notatki:1572559285945245746>',
   kartka: '<:kartka:1572528692406779954>',
   zegar: '<:zegar:1562878783583948960>',
-  strzalka: '<:dwiestrzalkiwprawo:1562879541993672764>',
+  strzalka: '<:strzalkawprawo:1562879594049044510>',
+  dwieStrzalki: '<:dwiestrzalkiwprawo:1562879541993672764>',
   ustawienia: '<:ustawienia:1562879266314653847>',
   uzytkownik: '<:uzytkownik:1572560989218406512>',
   paczka: '<:paczka:1572559716842868746>',
@@ -175,8 +176,7 @@ const tbEmoji = {
   miejsce1: '<:1_:1572560843311161415>',
   miejsce2: '<:2_:1572560722431582318>',
   miejsce3: '<:3_:1572560688507920434>',
-  // Brak kodów - wklej tu <:nazwa:ID>, a podmiana zacznie działać (dopisz też linijkę w emojiSwap).
-  // powitanie: '<:powitanie:ID>',
+  powitanie: '<:powitanie:1562879157073874944>',
 };
 // Które zwykłe emoji zamieniać na które własne.
 const emojiSwap = {
@@ -272,6 +272,8 @@ const emojiSwap = {
   '🥇': tbEmoji.miejsce1,
   '🥈': tbEmoji.miejsce2,
   '🥉': tbEmoji.miejsce3,
+  '👋': tbEmoji.powitanie,
+  '⏩': tbEmoji.dwieStrzalki,
 };
 
 const cryptoCoins = {
@@ -7363,7 +7365,7 @@ async function botPaymentTest() {
   const hostingModal = JSON.stringify(ticketModal('hosting').toJSON());
   assert(hostingModal.includes('"id":"1556271345174839327"') && hostingModal.includes('"id":"1572545884976062491"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
   assert(paymentName('blik') === '<:blik:1572559823323791572> BLIK' && payLabel('sol').startsWith('<:sol:'), 'emoji w tekście');
-  assert(Object.values(payments).filter((pm) => pm.label !== 'PayPal').every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
+  assert(Object.values(payments).every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
   // Podmiana emoji przy wysyłce: tekst, tytuł w ramce, przyciski i menu; bloki kodu i formularze bez zmian.
   const swapped = swapEmojiPayload({
     flags: 32768,
