@@ -93,8 +93,8 @@ const hostingLanguages = {
 // decimals = miejsca po przecinku w sieci, shown = w kwocie dla klienta, step = zaokrąglenie ceny w górę.
 // Emoji płatności (własne emoji serwera TanieBoty). Zmień tutaj, a zmienią się wszędzie: w formularzach, ticketach, cenniku i logach.
 const payEmoji = {
-  usdc: '<:usdc:1556271345174839327>',
-  usdt: '<:Logo_USDT:1556029972563628162>',
+  usdc: '<:usdc:1572602967943549242>',
+  usdt: '<:usdt:1572602933663629322>',
   ltc: '<:litecoin:1572545884976062491>',
   blik: '<:blik:1572559823323791572>',
   kodblik: '<:blik:1572559823323791572>',
@@ -7472,7 +7472,7 @@ async function botPaymentTest() {
   // Własne emoji płatności: w menu jako { id, name } (nie jako tekst w nazwie), w tekście jako <:nazwa:id>.
   assert(modal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && !modal.includes('"label":"<:'), 'emoji BLIK w menu formularza bota');
   const hostingModal = JSON.stringify(ticketModal('hosting').toJSON());
-  assert(hostingModal.includes('"id":"1556271345174839327"') && hostingModal.includes('"id":"1572545884976062491"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
+  assert(hostingModal.includes('"id":"1572602967943549242"') && hostingModal.includes('"id":"1572545884976062491"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
   assert(paymentName('blik') === '<:blik:1572559823323791572> BLIK' && payLabel('sol').startsWith('<:sol:'), 'emoji w tekście');
   assert(Object.values(payments).every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
   // Podmiana emoji przy wysyłce: tekst, tytuł w ramce, przyciski i menu; bloki kodu i formularze bez zmian.
