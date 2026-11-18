@@ -3847,7 +3847,8 @@ function buttonEmoji(emoji) {
   const custom = emoji?.name && !emoji.id ? buttonSwap[emoji.name.replace(/\uFE0F/g, '')] : null;
   const m = custom && /^<(a?):(\w+):(\d+)>$/.exec(custom);
   if (m && emojiUsable(m[3])) return { id: m[3], name: m[2], animated: Boolean(m[1]) };
-  return emoji?.id && !emojiUsable(emoji.id) ? undefined : emoji;
+  // Pozostałe przyciski (Dołącz 🎉, Lista uczestników 👥, Zamknij 🔒…) - te same własne emoji co w tekście.
+  return swapEmojiObject(emoji);
 }
 
 function dropUnusableEmoji(node) {
@@ -3882,7 +3883,7 @@ function swapEmojiPayload(node) {
   const out = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === 'content' && typeof value === 'string') out[key] = swapEmojiText(value);
-    // Przyciski: ✅ / ❌ (Zrealizowane, Niezrealizowane…) dostają zielone TAK i czerwone NIE jak na panelu „czy legit”, reszta zostaje.
+    // Przyciski: ✅ / ❌ (Zrealizowane, Niezrealizowane…) dostają zielone TAK i czerwone NIE jak na panelu „czy legit”, reszta własne emoji.
     else if (key === 'emoji') out[key] = node.type === 2 ? buttonEmoji(value) : swapEmojiObject(value);
     else if (key === 'components' || key === 'data' || key === 'options' || key === 'accessory') out[key] = swapEmojiPayload(value);
     else out[key] = value;
@@ -7487,7 +7488,7 @@ async function botPaymentTest() {
   assert(swapEmojiText('### 📊 × Nasze oceny\n✅ ok') === '### <:wykres:1562879059036217344> × Nasze oceny\n<a:TAK:1554504948211785778> ok', 'nagłówek ### i tekst z własnymi emoji');
   assert(swapEmojiText('## ```🎫 TanieBoty × X```') === '## ```🎫 TanieBoty × X```', 'tytuł w ramce bez zmian');
   assert(sj.includes('<a:TAK:1554504948211785778> Gotowe <:zagroenie:1572529172734148649> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
-  assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1562879421893968062","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
+  assert(sj.includes('"emoji":{"id":"1572561074778017853","name":"klodka"') && sj.includes('"emoji":{"id":"1562879421893968062","name":"bilet"'), 'przyciski i menu z własnymi emoji');
   const doneBtn = JSON.stringify(swapEmojiPayload({ components: [{ type: 1, components: [{ type: 2, custom_id: 'tk:done', label: 'Zrealizowane', emoji: { name: '✅' } }, { type: 2, custom_id: 'tk:notdone', label: 'Niezrealizowane', emoji: { name: '❌' } }] }] }));
   assert(doneBtn.includes('"id":"1554504948211785778"') && doneBtn.includes('"id":"1554505001492021248"'), 'Zrealizowane/Niezrealizowane z zielonym TAK i czerwonym NIE');
   const modalBody = { type: 9, data: { custom_id: 'm', title: '🎫 Bot', components: [{ type: 18, label: '✅ Pole' }] } };
