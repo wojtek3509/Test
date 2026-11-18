@@ -3788,6 +3788,17 @@ function buttonEmoji(emoji) {
   return emoji?.id && !emojiUsable(emoji.id) ? undefined : emoji;
 }
 
+function dropUnusableEmoji(node) {
+  if (Array.isArray(node)) return node.map(dropUnusableEmoji);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'emoji' && value?.id && !emojiUsable(value.id)) continue;
+    out[key] = dropUnusableEmoji(value);
+  }
+  return out;
+}
+
 function stripCustomEmoji(node) {
   if (Array.isArray(node)) return node.map(stripCustomEmoji);
   if (!node || typeof node !== 'object') return node;
@@ -3803,9 +3814,9 @@ function stripCustomEmoji(node) {
 function swapEmojiPayload(node) {
   if (Array.isArray(node)) return node.map(swapEmojiPayload);
   if (!node || typeof node !== 'object') return node;
-  // Formularz (modal): Discord odrzuca w nim własne emoji serwera (COMPONENT_INVALID_EMOJI) - usuwamy je z opcji menu,
-  // zwykłe emoji zostają. Reszta formularza bez zmian.
-  if (typeof node.custom_id === 'string' && typeof node.title === 'string' && Array.isArray(node.components)) return stripCustomEmoji(node);
+  // Formularz (modal): tytuły i etykiety bez zmian; w menu zostają tylko emoji, do których bot ma dostęp.
+  // Gdyby Discord i tak je odrzucił, customEmojiRequests wyśle formularz jeszcze raz bez własnych emoji.
+  if (typeof node.custom_id === 'string' && typeof node.title === 'string' && Array.isArray(node.components)) return dropUnusableEmoji(node);
   const out = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === 'content' && typeof value === 'string') out[key] = swapEmojiText(value);
@@ -3824,7 +3835,13 @@ function customEmojiRequests(rest) {
     const route = options?.fullRoute ?? '';
     const isMessage = /\/messages(\/\d+)?$|\/interactions\/\d+\/[^/]+\/callback$|\/webhooks\/\d+\/[^/]+(\/messages\/[^/]+)?$/.test(route);
     if (!isMessage || !options.body || options.method === 'GET') return original(options);
-    return original({ ...options, body: swapEmojiPayload(options.body) });
+    const body = swapEmojiPayload(options.body);
+    return original({ ...options, body }).catch((err) => {
+      // Discord nie przyjął któregoś własnego emoji (np. usuniętego) - ta sama wiadomość jeszcze raz, bez własnych emoji w menu i przyciskach.
+      if (err?.code !== 50035 || !/EMOJI/i.test(String(err?.message))) throw err;
+      console.warn('⚠️ Discord odrzucił własne emoji w wiadomości - wysyłam bez nich:', String(err.message).split('\n')[1] ?? '');
+      return original({ ...options, body: stripCustomEmoji(body) });
+    });
   };
   return rest;
 }
@@ -7391,7 +7408,21 @@ async function botPaymentTest() {
   assert(JSON.stringify(swapEmojiPayload(modalBody)) === JSON.stringify(modalBody), 'formularz bez zmian');
   // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
-  assert(!realModal.includes('"emoji":{"id"') && realModal.includes('"value":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz bez własnych emoji w menu');
+  assert(realModal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz z własnymi emoji w menu');
+  // Discord odrzuca emoji → ta sama wiadomość jeszcze raz, bez własnych emoji.
+  const tries = [];
+  const rejecting = customEmojiRequests({
+    request: async (o) => {
+      tries.push(JSON.stringify(o.body));
+      if (tries.length === 1) throw Object.assign(new Error('Invalid Form Body\ndata.components[3].component.options[0].emoji.id[COMPONENT_INVALID_EMOJI]: Invalid emoji'), { code: 50035 });
+      return { ok: true };
+    },
+  });
+  const warnBefore = console.warn;
+  console.warn = () => {};
+  await rejecting.request({ fullRoute: '/interactions/1/t/callback', method: 'POST', body: { type: 9, data: ticketModal('bot').toJSON() } });
+  console.warn = warnBefore;
+  assert(tries.length === 2 && tries[0].includes('"emoji":{"id"') && !tries[1].includes('"emoji":{"id"') && tries[1].includes('"value":"blik"'), 'odrzucone emoji → ponowienie bez nich');
   // Niedostępne emoji (usunięte albo z innego serwera) - bot je pomija zamiast wysyłać tekst <:nazwa:id>.
   availableEmojiIds = new Set(['1554504948211785778']); // tylko „TAK”
   const partial = JSON.stringify(swapEmojiPayload({ components: [{ type: 10, content: '✅ ok ⚠️ uwaga <:blik:1572559823323791572> BLIK' }, { type: 3, options: [{ label: 'BLIK', value: 'b', emoji: { id: '1557667222867157052', name: 'blik' } }] }] }));
