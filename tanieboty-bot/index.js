@@ -3330,6 +3330,40 @@ async function refreshPanel(client, guildId, type) {
     .catch((err) => console.error(`Panel ${type}:`, err.message));
 }
 
+// Rozpoznawanie paneli po tytule - dla paneli, których nie ma w bazie (np. wysłanych przed przeniesieniem bota).
+const panelTitleMarkers = {
+  tickety: ['× TICKETY```'],
+  regulamin: ['× REGULAMIN```'],
+  opinie: ['× WYSTAW NAM OPINIĘ```'],
+  legit: ['× CZY LEGIT?```'],
+  cennik: ['× CENNIK HOSTINGU```'],
+  vouch: ['× JAK NAPISAĆ LEGIT CHECKA?```', '× JAK NAPISAĆ VOUCHA?```'],
+};
+
+/** Szuka na kanałach (ostatnie 50 wiadomości) paneli bota spoza bazy i zapisuje najnowszy panel każdego rodzaju. */
+async function adoptPanels(client, discordGuild) {
+  const g = guild(discordGuild.id);
+  const missing = Object.keys(panelTitleMarkers).filter((type) => !g.panels[type]);
+  if (!missing.length) return [];
+  const found = {};
+  const channels = [...(await discordGuild.channels.fetch().catch(() => new Map())).values()].filter((c) => c?.isTextBased?.() && c.messages);
+  for (const channel of channels) {
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    for (const m of recent?.values() ?? []) {
+      if (m.author?.id !== client.user.id) continue;
+      const json = JSON.stringify(m.components ?? []);
+      for (const type of missing) {
+        if (!panelTitleMarkers[type].some((t) => json.includes(t))) continue;
+        if (!found[type] || m.createdTimestamp > found[type].at) found[type] = { channelId: channel.id, messageId: m.id, at: m.createdTimestamp };
+      }
+    }
+  }
+  updateGuild(discordGuild.id, (gg) => {
+    for (const [type, f] of Object.entries(found)) gg.panels[type] = { channelId: f.channelId, messageId: f.messageId };
+  });
+  return Object.keys(found);
+}
+
 /**
  * Odświeża wszystkie wiadomości bota zapisane w bazie: panele, trwające konkursy i karty otwartych ticketów.
  * Dzięki temu zmiany wyglądu (np. nowe emoji) trafiają też do starych wiadomości. Zwraca liczby odświeżonych.
@@ -5418,9 +5452,16 @@ command(
     .setDMPermission(false),
   async (i) => {
     await i.deferReply({ flags: V2_EPHEMERAL });
+    const adopted = await adoptPanels(i.client, i.guild);
     const done = await refreshAllMessages(i.client, i.guildId);
     return i.editReply({
-      components: [ok(`Odświeżono: panele **${done.panele}**, konkursy **${done.konkursy}**, karty ticketów **${done.tickety}**.\n-# Panele, których nie ma w bazie (np. sprzed przeniesienia bota), wyślij od nowa przez \`/panel\`.`)],
+      components: [
+        ok(
+          `Odświeżono: panele **${done.panele}**, konkursy **${done.konkursy}**, karty ticketów **${done.tickety}**.` +
+            (adopted.length ? `\nZnalezione na kanałach i dodane do bazy: ${adopted.map((t) => `\`${t}\``).join(', ')}.` : '') +
+            `\n-# Panel, którego bot nie znalazł (starszy niż 50 ostatnich wiadomości na kanale), wyślij od nowa przez \`/panel\`.`,
+        ),
+      ],
       flags: V2,
     });
   },
@@ -7541,6 +7582,22 @@ async function botPaymentTest() {
   const fakeG = { id: GID, roles: { cache: new Map() }, members: { fetch: async (id) => ({ roles: { cache: new Set(), add: async (role) => added.push([id, role]) } }) } };
   assert((await giveClientRole({ guilds: { cache: new Map([[GID, fakeG]]) } }, GID, 'k1', 'test')) && added[0][0] === 'k1' && added[0][1] === 'klient', 'ranga Klient nadana');
 
+  // 5b. Panele spoza bazy są odnajdywane na kanałach po tytule (najnowszy każdego rodzaju).
+  g.panels = {};
+  const botMsg = (id, title, at) => ({ id, author: { id: 'bot' }, createdTimestamp: at, components: [{ c: `## \`\`\`🎫 TanieBoty × ${title}\`\`\`` }] });
+  const scanGuild = {
+    id: GID,
+    channels: {
+      fetch: async () =>
+        new Map([
+          ['c1', { id: 'c1', isTextBased: () => true, messages: { fetch: async () => new Map([['m1', botMsg('m1', 'TICKETY', 1)], ['m2', botMsg('m2', 'TICKETY', 5)], ['x', { id: 'x', author: { id: 'human' }, components: [] }]]) } }],
+          ['c2', { id: 'c2', isTextBased: () => true, messages: { fetch: async () => new Map([['m3', botMsg('m3', 'JAK NAPISAĆ VOUCHA?', 2)]]) } }],
+        ]),
+    },
+  };
+  const adopted = await adoptPanels({ user: { id: 'bot' } }, scanGuild);
+  assert(adopted.length === 2 && g.panels.tickety.messageId === 'm2' && g.panels.vouch.channelId === 'c2', 'panele znalezione po tytule (najnowszy)');
+
   // 6. /odswiez: panele, trwające konkursy i karty otwartych ticketów są edytowane (zakończone pomijane).
   const edits = [];
   const msgFor = (id) => ({ edit: async (p) => (edits.push([id, JSON.stringify(p.components[0].toJSON())]), {}) });
@@ -8294,7 +8351,9 @@ async function onReady(ready) {
   // Nowy wygląd (np. emoji) od razu we wszystkich zapisanych panelach, konkursach i kartach ticketów.
   for (const g of ready.guilds.cache.values()) {
     if (!store.guilds[g.id]) continue;
-    refreshAllMessages(ready, g.id)
+    adoptPanels(ready, g)
+      .catch(() => [])
+      .then(() => refreshAllMessages(ready, g.id))
       .then((d) => console.log(`🔄 ${g.name}: odświeżono panele ${d.panele}, konkursy ${d.konkursy}, karty ticketów ${d.tickety}`))
       .catch((err) => console.warn('Odświeżanie wiadomości:', err.message));
   }
