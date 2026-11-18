@@ -109,8 +109,9 @@ const payEmoji = {
 // (tekst, przyciski, menu). Nie rusza tytułów, nagłówków, nazw kanałów, formularzy i reakcji.
 // Żeby zmienić emoji: podmień kod po prawej. Żeby wyłączyć podmianę jednego emoji: usuń jego linijkę w emojiSwap.
 const tbEmoji = {
-  tak: '<:takk:1572561216071794729>',
-  nie: '<:niee:1572560953956896788>',
+  // ✅ / ❌ - animowane TAK i NIE (te same co na panelu „czy legit”).
+  tak: '<a:TAK:1554504948211785778>',
+  nie: '<a:NIE:1554505001492021248>',
   bilet: '<:bilet:1562879421893968062>',
   boost: '<:boost:1563131206248435742>',
   like: '<:like:1572557659691942008>',
@@ -7357,8 +7358,8 @@ async function botPaymentTest() {
   });
   const sj = JSON.stringify(swapped);
   assert(sj.includes('## ```🎫 TanieBoty × TICKETY```'), 'tytuł ze zwykłym emoji');
-  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<:takk:1572561216071794729> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
-  assert(sj.includes('<:takk:1572561216071794729> Gotowe <:zagroenie:1572529172734148649> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
+  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<a:TAK:1554504948211785778> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
+  assert(sj.includes('<a:TAK:1554504948211785778> Gotowe <:zagroenie:1572529172734148649> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
   assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1562879421893968062","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
   const doneBtn = JSON.stringify(swapEmojiPayload({ components: [{ type: 1, components: [{ type: 2, custom_id: 'tk:done', label: 'Zrealizowane', emoji: { name: '✅' } }, { type: 2, custom_id: 'tk:notdone', label: 'Niezrealizowane', emoji: { name: '❌' } }] }] }));
   assert(doneBtn.includes('"id":"1554504948211785778"') && doneBtn.includes('"id":"1554505001492021248"'), 'Zrealizowane/Niezrealizowane z zielonym TAK i czerwonym NIE');
@@ -7368,15 +7369,15 @@ async function botPaymentTest() {
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
   assert(!realModal.includes('"emoji":{"id"') && realModal.includes('"value":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz bez własnych emoji w menu');
   // Niedostępne emoji (usunięte albo z innego serwera) - bot je pomija zamiast wysyłać tekst <:nazwa:id>.
-  availableEmojiIds = new Set(['1572561216071794729']); // tylko „tak”
+  availableEmojiIds = new Set(['1554504948211785778']); // tylko „TAK”
   const partial = JSON.stringify(swapEmojiPayload({ components: [{ type: 10, content: '✅ ok ⚠️ uwaga <:blik:1572559823323791572> BLIK' }, { type: 3, options: [{ label: 'BLIK', value: 'b', emoji: { id: '1557667222867157052', name: 'blik' } }] }] }));
   availableEmojiIds = new Set();
-  assert(partial.includes('<:takk:1572561216071794729> ok') && partial.includes('⚠️ uwaga') && partial.includes('BLIK') && !partial.includes('<:blik:') && !partial.includes('"emoji"'), 'niedostępne emoji pomijane');
+  assert(partial.includes('<a:TAK:1554504948211785778> ok') && partial.includes('⚠️ uwaga') && partial.includes('BLIK') && !partial.includes('<:blik:') && !partial.includes('"emoji"'), 'niedostępne emoji pomijane');
   const swapCalls = [];
   const fakeRest = customEmojiRequests({ request: async (o) => swapCalls.push(o) });
   await fakeRest.request({ fullRoute: '/channels/1/messages', method: 'POST', body: { content: '✅ ok' } });
   await fakeRest.request({ fullRoute: '/applications/1/guilds/2/commands', method: 'PUT', body: [{ name: 'x', description: '✅ opis' }] });
-  assert(swapCalls[0].body.content.startsWith('<:takk:') && swapCalls[1].body[0].description === '✅ opis', 'tylko wiadomości (bez komend)');
+  assert(swapCalls[0].body.content.startsWith('<a:TAK:') && swapCalls[1].body[0].description === '✅ opis', 'tylko wiadomości (bez komend)');
 
   // 2. Zwykła płatność → ticket od razu, płatność na karcie.
   values.payment = 'blik';
