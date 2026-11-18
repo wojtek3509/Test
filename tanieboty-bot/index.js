@@ -166,6 +166,17 @@ const tbEmoji = {
   diament: '<:diament:1572559406032359455>',
   wymiana: '<:wymiana:1562878955508203660>',
   ogien: '<:ogie:1572545583195881553>',
+  kredka: '<:kredka:1572545399573581844>',
+  paragon: '<:kartka:1563131255334375495>',
+  profil: '<:profil:1572558510464573460>',
+  email: '<:pocztav2:1572546048067371068>',
+  zamiana: '<:exch:1572558951634043053>',
+  otwartyFolder: '<:otwartyfolder:1572558740912209990>',
+  miejsce1: '<:1_:1572560843311161415>',
+  miejsce2: '<:2_:1572560722431582318>',
+  miejsce3: '<:3_:1572560688507920434>',
+  // Brak kodów - wklej tu <:nazwa:ID>, a podmiana zacznie działać (dopisz też linijkę w emojiSwap).
+  // powitanie: '<:powitanie:ID>',
 };
 // Które zwykłe emoji zamieniać na które własne.
 const emojiSwap = {
@@ -250,6 +261,17 @@ const emojiSwap = {
   '🔄': tbEmoji.wymiana,
   '🔁': tbEmoji.wymiana,
   '🔥': tbEmoji.ogien,
+  '✏️': tbEmoji.kredka,
+  '🧾': tbEmoji.paragon,
+  '🆔': tbEmoji.profil,
+  '📧': tbEmoji.email,
+  '📬': tbEmoji.poczta,
+  '🔀': tbEmoji.zamiana,
+  '📂': tbEmoji.otwartyFolder,
+  '🌐': tbEmoji.link,
+  '🥇': tbEmoji.miejsce1,
+  '🥈': tbEmoji.miejsce2,
+  '🥉': tbEmoji.miejsce3,
 };
 
 const cryptoCoins = {
