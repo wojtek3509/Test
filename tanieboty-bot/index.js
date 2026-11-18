@@ -1133,7 +1133,8 @@ function pricingPanel(g, logo) {
 
 function giveawayView(gw, memberCount) {
   const n = gw.entrants.length;
-  const pct = memberCount ? ((n / memberCount) * 100).toFixed(2) : '0.00';
+  // Szansa na wygraną jednego uczestnika: zwycięzcy / uczestnicy (1 osoba i 1 nagroda = 100%).
+  const pct = n ? Math.min(100, ((gw.winners || 1) / n) * 100).toFixed(2) : '0.00';
   const b = box(gw.ended ? colors.neutral : colors.gold);
   const lines = [
     `🎁 ${x} **Nagroda:** \`${gw.prize}\``,
@@ -1151,7 +1152,7 @@ function giveawayView(gw, memberCount) {
     r.setComponents(
       new ButtonBuilder()
         .setCustomId('gw:join')
-        .setLabel(`Dołącz [ ${n} ${n === 1 ? 'osoba' : 'osób'} | ${pct}% ]`)
+        .setLabel(`Dołącz [ ${n} ${n === 1 ? 'osoba' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'osoby' : 'osób'} | ${pct}% ]`)
         .setEmoji('🎉')
         .setStyle(gw.ended ? ButtonStyle.Secondary : ButtonStyle.Primary)
         .setDisabled(Boolean(gw.ended)),
@@ -7496,6 +7497,9 @@ async function botPaymentTest() {
   // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
   assert(realModal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz z własnymi emoji w menu');
+  // Konkurs: procent = szansa na wygraną (zwycięzcy / uczestnicy).
+  const gwLabel = (entrants, winners) => JSON.stringify(giveawayView({ prize: 'x', winners, entrants, endsAt: Date.now() + 1000, hostId: 'h', channelId: 'c' }, 1500).toJSON());
+  assert(gwLabel(['a'], 1).includes('1 osoba | 100.00%') && gwLabel(['a', 'b', 'c', 'd'], 1).includes('4 osoby | 25.00%') && gwLabel(['a', 'b'], 3).includes('100.00%') && gwLabel([], 1).includes('0.00%'), 'procent szansy w konkursie');
   // Discord odrzuca emoji → ta sama wiadomość jeszcze raz, bez własnych emoji.
   const tries = [];
   const rejecting = customEmojiRequests({
