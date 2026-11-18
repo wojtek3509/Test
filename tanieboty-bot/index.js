@@ -3330,6 +3330,34 @@ async function refreshPanel(client, guildId, type) {
     .catch((err) => console.error(`Panel ${type}:`, err.message));
 }
 
+/**
+ * Odświeża wszystkie wiadomości bota zapisane w bazie: panele, trwające konkursy i karty otwartych ticketów.
+ * Dzięki temu zmiany wyglądu (np. nowe emoji) trafiają też do starych wiadomości. Zwraca liczby odświeżonych.
+ */
+async function refreshAllMessages(client, guildId) {
+  const g = guild(guildId);
+  const done = { panele: 0, konkursy: 0, tickety: 0 };
+  for (const type of Object.keys(g.panels)) {
+    if (!panelBuilders[type]) continue;
+    await refreshPanel(client, guildId, type);
+    done.panele++;
+  }
+  for (const [messageId, gw] of Object.entries(g.giveaways)) {
+    if (gw.ended || gw.cancelled) continue;
+    const channel = await client.channels.fetch(gw.channelId).catch(() => null);
+    const message = await channel?.messages.fetch(messageId).catch(() => null);
+    if (await message?.edit({ components: [giveawayView(gw, channel.guild.memberCount)], flags: V2, allowedMentions: { parse: [] } }).then(() => true, () => false)) done.konkursy++;
+  }
+  for (const ticket of Object.values(g.tickets)) {
+    if (ticket.closedAt || !ticket.messageId) continue;
+    const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
+    const message = await channel?.messages.fetch(ticket.messageId).catch(() => null);
+    const user = await client.users.fetch(ticket.userId).catch(() => null);
+    if (message && user && (await message.edit({ components: [ticketMessage(ticket, user)], flags: V2 }).then(() => true, () => false))) done.tickety++;
+  }
+  return done;
+}
+
 // ─── Liczniki w nazwach kanałów (np. ⭐┃opinie→9) ───────────────────────
 // Liczby są od razu zapisywane w bazie. Discord pozwala zmienić nazwę kanału tylko 2 razy na 10 minut,
 // więc nazwy kanałów aktualizujemy co 10 minut (i raz przy starcie bota) - tylko gdy liczba się zmieniła.
@@ -5377,6 +5405,22 @@ command(
     updateCounters(i.client).catch(() => {});
     return i.editReply({
       components: [ok(`${label}\n\`${before}\` → **\`${value}\`**\n-# Nazwy kanałów z licznikiem zmienią się w ciągu kilku minut (limit Discorda).`)],
+      flags: V2,
+    });
+  },
+);
+
+command(
+  new SlashCommandBuilder()
+    .setName('odswiez')
+    .setDescription('Odśwież wygląd wszystkich paneli, konkursów i kart ticketów (np. po zmianie emoji)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false),
+  async (i) => {
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const done = await refreshAllMessages(i.client, i.guildId);
+    return i.editReply({
+      components: [ok(`Odświeżono: panele **${done.panele}**, konkursy **${done.konkursy}**, karty ticketów **${done.tickety}**.\n-# Panele, których nie ma w bazie (np. sprzed przeniesienia bota), wyślij od nowa przez \`/panel\`.`)],
       flags: V2,
     });
   },
@@ -7497,6 +7541,19 @@ async function botPaymentTest() {
   const fakeG = { id: GID, roles: { cache: new Map() }, members: { fetch: async (id) => ({ roles: { cache: new Set(), add: async (role) => added.push([id, role]) } }) } };
   assert((await giveClientRole({ guilds: { cache: new Map([[GID, fakeG]]) } }, GID, 'k1', 'test')) && added[0][0] === 'k1' && added[0][1] === 'klient', 'ranga Klient nadana');
 
+  // 6. /odswiez: panele, trwające konkursy i karty otwartych ticketów są edytowane (zakończone pomijane).
+  const edits = [];
+  const msgFor = (id) => ({ edit: async (p) => (edits.push([id, JSON.stringify(p.components[0].toJSON())]), {}) });
+  const refreshClient = {
+    user: { id: 'bot' },
+    users: { fetch: async () => user },
+    channels: { fetch: async (id) => ({ id, guild: { id: GID, memberCount: 10, iconURL: () => null }, messages: { fetch: async (mid) => msgFor(mid) } }) },
+  };
+  g.panels = { vouch: { channelId: 'lc', messageId: 'p1' } };
+  g.giveaways = { gwA: { channelId: 'k', prize: 'Nitro', winners: 1, entrants: [], endsAt: Date.now() + 60000, hostId: 'h' }, gwB: { channelId: 'k', ended: true, entrants: [] } };
+  const refreshed = await refreshAllMessages(refreshClient, GID);
+  assert(refreshed.panele === 1 && refreshed.konkursy === 1 && refreshed.tickety >= 1 && edits.some(([id, j]) => id === 'p1' && j.includes('LEGIT CHECKA')) && !edits.some(([id]) => id === 'gwB'), '/odswiez odświeża panele, konkursy i tickety');
+
   delete store.guilds[GID];
   console.log('✅ Test płatności w zamówieniu bota: lista, „Inna” z okienkiem, Zrealizowane OK');
 }
@@ -8234,6 +8291,13 @@ async function onReady(ready) {
     console.error('Rejestracja komend nie powiodła się:', err.message),
   );
 
+  // Nowy wygląd (np. emoji) od razu we wszystkich zapisanych panelach, konkursach i kartach ticketów.
+  for (const g of ready.guilds.cache.values()) {
+    if (!store.guilds[g.id]) continue;
+    refreshAllMessages(ready, g.id)
+      .then((d) => console.log(`🔄 ${g.name}: odświeżono panele ${d.panele}, konkursy ${d.konkursy}, karty ticketów ${d.tickety}`))
+      .catch((err) => console.warn('Odświeżanie wiadomości:', err.message));
+  }
   // Zaproszenia i lista członków ładują się w tle - bot w tym czasie normalnie działa.
   for (const g of ready.guilds.cache.values()) prepareGuild(g).catch((err) => console.warn(`⚠️ ${g.name}: ${err.message}`));
 }
