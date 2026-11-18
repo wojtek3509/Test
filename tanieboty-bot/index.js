@@ -5535,6 +5535,7 @@ command(
   async (i) => {
     await i.deferReply({ flags: V2_EPHEMERAL });
     const adopted = await adoptPanels(i.client, i.guild);
+    await syncLegitVotes(i.client).catch(() => {});
     const rebuilt = await rebuildFromChannels(i.client, i.guildId).catch((err) => (console.warn('Odbudowa z kanałów:', err.message), { opinie: 0, vouche: null }));
     const done = await refreshAllMessages(i.client, i.guildId);
     updateCounters(i.client).catch(() => {});
@@ -5546,6 +5547,7 @@ command(
             (adopted.length ? `\nZnalezione na kanałach i dodane do bazy: ${adopted.map((t) => `\`${t}\``).join(', ')}.` : '') +
             (rebuilt.opinie ? `\nOdczytane opinie z kanału: **${rebuilt.opinie}** (razem w bazie: **${gNow.reviews.length}**).` : '') +
             (rebuilt.vouche !== null ? `\nLegit checki na kanale: **${rebuilt.vouche}** (licznik: **${gNow.stats.done}**).` : '') +
+            (gNow.panels.legit ? `\nCzy legit: **${gNow.legitVotes?.yes ?? 0}** × TAK.` : `\nPanel „czy legit” nie znaleziony - wyślij go przez \`/panel typ:legit\`, żeby licznik działał.`) +
             `\n-# Nazwy kanałów z licznikiem zmienią się w ciągu kilku minut (limit Discorda).` +
             `\n-# Panel, którego bot nie znalazł (starszy niż 50 ostatnich wiadomości na kanale), wyślij od nowa przez \`/panel\`.`,
         ),
@@ -8469,6 +8471,9 @@ async function onReady(ready) {
     if (!store.guilds[g.id]) continue;
     adoptPanels(ready, g)
       .catch(() => [])
+      // Znaleziony panel „czy legit” → od razu policz reakcje ✅ i zaktualizuj nazwę kanału.
+      .then(() => syncLegitVotes(ready).catch(() => {}))
+      .then(() => updateCounters(ready).catch(() => {}))
       .then(() => refreshAllMessages(ready, g.id))
       .then((d) => console.log(`🔄 ${g.name}: odświeżono panele ${d.panele}, konkursy ${d.konkursy}, karty ticketów ${d.tickety}`))
       .catch((err) => console.warn('Odświeżanie wiadomości:', err.message));
