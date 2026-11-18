@@ -95,112 +95,160 @@ const hostingLanguages = {
 const payEmoji = {
   usdc: '<:usdc:1556271345174839327>',
   usdt: '<:Logo_USDT:1556029972563628162>',
-  ltc: '<:litecoin:1557667187093807166>',
-  blik: '<:blik:1557667222867157052>',
-  kodblik: '<:blik:1557667222867157052>',
-  eth: '<:ethereum:1556024790752690176>',
-  sol: '<:SOLANA:1556024823249903667>',
-  psc: '<:paysafecard:1557667255959953559>',
-  paypal: '<:paypal:1557667290298851368>',
-  btc: '<:emojigg_btc:1556025431314931802>',
+  ltc: '<:litecoin:1572545884976062491>',
+  blik: '<:blik:1572559823323791572>',
+  kodblik: '<:blik:1572559823323791572>',
+  eth: '<:eth:1572559131150123028>',
+  sol: '<:sol:1563130849497448511>',
+  psc: '<:paysafecard:1563131449484513312>',
+  paypal: '🅿️', // brak kodu nowego emoji PayPal - wklej tu <:paypal:ID>
+  btc: '<:bitcoin:1572560615963238500>',
 };
 
 // Własne emoji serwera TanieBoty zamiast zwykłych. Bot podmienia je sam w każdej wysyłanej wiadomości
-// (tekst, przyciski, menu). Nie rusza nazw kanałów, tytułów formularzy i reakcji (tam Discord nie pokazuje własnych emoji).
-// Żeby zmienić emoji: podmień kod po prawej. Żeby wyłączyć podmianę jednego emoji: usuń jego linijkę.
+// (tekst, przyciski, menu). Nie rusza tytułów, nagłówków, nazw kanałów, formularzy i reakcji.
+// Żeby zmienić emoji: podmień kod po prawej. Żeby wyłączyć podmianę jednego emoji: usuń jego linijkę w emojiSwap.
 const tbEmoji = {
-  bilet: '<:bilet:1557668143755698186>',
-  boost: '<:boost:1557667601465745459>',
-  dislike: '<:dislike:1557667034219679765>',
-  informacje: '<:informacje:1557667977866780682>',
-  kalendarz: '<:kalendarz:1557667873139335239>',
-  kalkulator: '<:kalkulator:1557667801089445939>',
-  karta: '<:karta:1557666744573628446>',
-  klodka: '<:kdka:1557667714552565781>',
-  banknot: '<:klient:1557667445869649941>',
-  pieniadze: '<:klient:1557668014533509191>',
-  like: '<:like:1557667485405151272>',
-  lupa: '<:lupa:1557666878657269810>',
-  nie: '<:nie:1557667068248068096>',
-  ogloszenie: '<:ogoszenie:1557666986324926544>',
-  ostrzezenie: '<:ostrzeenie:1557667562978938933>',
-  otwartaKlodka: '<:otwartakdka:1557667680650268723>',
-  pomysl: '<:pomysl:1557666910781313084>',
-  powiadomienie: '<:powiadomienie:1557668045693001788>',
-  powitanie: '<:powitanie:1557667332195622942>',
-  prezent: '<:prezent:1557667756340543538>',
-  przyrost: '<:przyrost:1557666780539912273>',
-  regulamin: '<:regulamin:1557668110901973032>',
-  sklep: '<:sklep:1557666950291787806>',
-  stoper: '<:stoper:1557666834034065478>',
-  strzalka: '<:strzaka:1557667152427749467>',
-  tak: '<:tak:1557667110803738675>',
-  ustawienia: '<:ustawienia:1557667911597031434>',
-  uzytkownik: '<:uytkownik:1557496039681040465>',
-  woz: '<:wz:1557667839203348480>',
-  zakaz: '<:zakaz:1557667529361723502>',
-  zakupy: '<:zakupy:1557667368946245714>',
-  znizka: '<:znika:1557667638677872650>',
+  tak: '<:takk:1572561216071794729>',
+  nie: '<:niee:1572560953956896788>',
+  bilet: '<:bilet:1562879421893968062>',
+  boost: '<:boost:1563131206248435742>',
+  like: '<:like:1572557659691942008>',
+  dislike: '<:dislike:1572559366136004670>',
+  informacja: '<:informacja:1572558451119226941>',
+  kalendarz: '<:kalendarz:1572559454493343754>',
+  kalkulator: '<:kalkulator:1572558388099809384>',
+  karta: '<:karta:1572561150917345290>',
+  klodka: '<:klodka:1572561074778017853>',
+  klodkaZKluczem: '<:klodkazkluczem:1572558127042269315>',
+  otwartaKlodka: '<:otwartaklodka:1572558181983453276>',
+  klucz: '<:klucz:1572558061728440410>',
+  banknot: '<:pienidze:1572561115651510272>',
+  pieniadze: '<:pienidze:1562879026799054848>',
+  lupa: '<:lupa:1572545955696222369>',
+  ogloszenie: '<:ogloszenie:1572545834095083680>',
+  ostrzezenie: '<:zagroenie:1572529172734148649>',
+  wazne: '<:wazne:1563131171217342534>',
+  powiadomienie: '<:powiadomienie:1572559238318923855>',
+  prezent: '<:prezent:1563131532036669501>',
+  konkurs: '<:konkurs:1572557950118002739>',
+  wykres: '<:wykres:1562879059036217344>',
+  regulamin: '<:regulamin:1563131665964998776>',
+  notatki: '<:notatki:1572559285945245746>',
+  kartka: '<:kartka:1572528692406779954>',
+  zegar: '<:zegar:1562878783583948960>',
+  strzalka: '<:dwiestrzalkiwprawo:1562879541993672764>',
+  ustawienia: '<:ustawienia:1562879266314653847>',
+  uzytkownik: '<:uzytkownik:1572560989218406512>',
+  paczka: '<:paczka:1572559716842868746>',
+  zakaz: '<:zakaz:1572560546102911027>',
+  koszyk: '<:koszyk:1562879197406568478>',
+  znizka: '<:znizka:1572559676241870849>',
+  gwiazda: '<:gwiazda:1572558693306736720>',
+  gwiazdki: '<:gwiazdki:1572561177467293756>',
+  link: '<:link:1572546112789811271>',
+  pinezka: '<:pinezka:1572528760463556688>',
+  korona: '<:korona:1572557770622898227>',
+  poczta: '<:poczta:1572557858866860083>',
+  czat: '<:czat:1572561246014668900>',
+  pytanie: '<:pytanie:1563131369645932635>',
+  bot: '<:bot:1572559765224300624>',
+  administracja: '<:administracja:1562879470027804682>',
+  wspolpraca: '<:wspolpracarece:1562879098379042946>',
+  serce: '<:serce:1563131028774850610>',
+  puchar: '<:puchar:1562879338771390474>',
+  piorun: '<:piorun:1572561288683589663>',
+  folder: '<:folder:1572558900514000936>',
+  komputer: '<:komputer:1572558015553470515>',
+  laptop: '<:laptop:1572546160877637713>',
+  telefon: '<:telefon:1562879505234919536>',
+  diament: '<:diament:1572559406032359455>',
+  wymiana: '<:wymiana:1562878955508203660>',
+  ogien: '<:ogie:1572545583195881553>',
 };
 // Które zwykłe emoji zamieniać na które własne.
 const emojiSwap = {
+  '✅': tbEmoji.tak,
+  '✔️': tbEmoji.tak,
+  '☑️': tbEmoji.tak,
+  '❌': tbEmoji.nie,
+  '✖️': tbEmoji.nie,
   '🎫': tbEmoji.bilet,
   '🎟️': tbEmoji.bilet,
   '🚀': tbEmoji.boost,
+  '👍': tbEmoji.like,
   '👎': tbEmoji.dislike,
-  'ℹ️': tbEmoji.informacje,
+  'ℹ️': tbEmoji.informacja,
   '📅': tbEmoji.kalendarz,
   '📆': tbEmoji.kalendarz,
   '🗓️': tbEmoji.kalendarz,
   '🧮': tbEmoji.kalkulator,
   '💳': tbEmoji.karta,
   '🔒': tbEmoji.klodka,
-  '🔐': tbEmoji.klodka,
+  '🔐': tbEmoji.klodkaZKluczem,
   '🔓': tbEmoji.otwartaKlodka,
+  '🔑': tbEmoji.klucz,
   '💵': tbEmoji.banknot,
   '💰': tbEmoji.pieniadze,
   '💸': tbEmoji.pieniadze,
-  '👍': tbEmoji.like,
   '🔍': tbEmoji.lupa,
   '🔎': tbEmoji.lupa,
-  '❌': tbEmoji.nie,
-  '✖️': tbEmoji.nie,
   '📢': tbEmoji.ogloszenie,
   '📣': tbEmoji.ogloszenie,
   '⚠️': tbEmoji.ostrzezenie,
-  '❗': tbEmoji.ostrzezenie,
-  '💡': tbEmoji.pomysl,
+  '❗': tbEmoji.wazne,
   '🔔': tbEmoji.powiadomienie,
-  '👋': tbEmoji.powitanie,
   '🎁': tbEmoji.prezent,
-  '🎉': tbEmoji.prezent,
-  '📈': tbEmoji.przyrost,
-  '📊': tbEmoji.przyrost,
+  '🎉': tbEmoji.konkurs,
+  '📈': tbEmoji.wykres,
+  '📊': tbEmoji.wykres,
   '📜': tbEmoji.regulamin,
-  '📄': tbEmoji.regulamin,
-  '📝': tbEmoji.regulamin,
   '📋': tbEmoji.regulamin,
-  '🏪': tbEmoji.sklep,
-  '🛍️': tbEmoji.sklep,
-  '⏱️': tbEmoji.stoper,
-  '⏳': tbEmoji.stoper,
-  '⌛': tbEmoji.stoper,
-  '⏰': tbEmoji.stoper,
-  '🕒': tbEmoji.stoper,
+  '📝': tbEmoji.notatki,
+  '📄': tbEmoji.kartka,
+  '⏱️': tbEmoji.zegar,
+  '⏳': tbEmoji.zegar,
+  '⌛': tbEmoji.zegar,
+  '⏰': tbEmoji.zegar,
+  '🕒': tbEmoji.zegar,
   '➡️': tbEmoji.strzalka,
   '▶️': tbEmoji.strzalka,
-  '✅': tbEmoji.tak,
-  '✔️': tbEmoji.tak,
-  '☑️': tbEmoji.tak,
   '⚙️': tbEmoji.ustawienia,
   '👤': tbEmoji.uzytkownik,
   '👥': tbEmoji.uzytkownik,
-  '🚚': tbEmoji.woz,
-  '📦': tbEmoji.woz,
+  '📦': tbEmoji.paczka,
+  '🚚': tbEmoji.paczka,
   '🚫': tbEmoji.zakaz,
   '⛔': tbEmoji.zakaz,
-  '🛒': tbEmoji.zakupy,
+  '🛒': tbEmoji.koszyk,
+  '🛍️': tbEmoji.koszyk,
   '🏷️': tbEmoji.znizka,
+  '⭐': tbEmoji.gwiazda,
+  '✨': tbEmoji.gwiazdki,
+  '🔗': tbEmoji.link,
+  '📌': tbEmoji.pinezka,
+  '👑': tbEmoji.korona,
+  '📩': tbEmoji.poczta,
+  '✉️': tbEmoji.poczta,
+  '📨': tbEmoji.poczta,
+  '💬': tbEmoji.czat,
+  '❓': tbEmoji.pytanie,
+  '❔': tbEmoji.pytanie,
+  '🤖': tbEmoji.bot,
+  '🛡️': tbEmoji.administracja,
+  '🤝': tbEmoji.wspolpraca,
+  '💙': tbEmoji.serce,
+  '🏆': tbEmoji.puchar,
+  '⚡': tbEmoji.piorun,
+  '📁': tbEmoji.folder,
+  '🗂️': tbEmoji.folder,
+  '🖥️': tbEmoji.komputer,
+  '💻': tbEmoji.laptop,
+  '📱': tbEmoji.telefon,
+  '💎': tbEmoji.diament,
+  '🔄': tbEmoji.wymiana,
+  '🔁': tbEmoji.wymiana,
+  '🔥': tbEmoji.ogien,
 };
 
 const cryptoCoins = {
@@ -7288,11 +7336,11 @@ async function botPaymentTest() {
   assert(modal.includes('Płatność') && modal.includes('BLIK') && modal.includes('PayPal') && modal.includes('"value":"inne"'), 'pole płatności z „Inna”');
   assert(ticketTypes.bot.fields.length <= 5, 'maks. 5 pól w formularzu');
   // Własne emoji płatności: w menu jako { id, name } (nie jako tekst w nazwie), w tekście jako <:nazwa:id>.
-  assert(modal.includes('"emoji":{"id":"1557667222867157052","name":"blik"') && !modal.includes('"label":"<:'), 'emoji BLIK w menu formularza bota');
+  assert(modal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && !modal.includes('"label":"<:'), 'emoji BLIK w menu formularza bota');
   const hostingModal = JSON.stringify(ticketModal('hosting').toJSON());
-  assert(hostingModal.includes('"id":"1556271345174839327"') && hostingModal.includes('"id":"1557667187093807166"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
-  assert(paymentName('paypal') === '<:paypal:1557667290298851368> PayPal' && payLabel('sol').startsWith('<:SOLANA:'), 'emoji w tekście');
-  assert(Object.values(payments).every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
+  assert(hostingModal.includes('"id":"1556271345174839327"') && hostingModal.includes('"id":"1572545884976062491"') && !hostingModal.includes('"label":"<:'), 'emoji USDC i LTC w menu hostingu');
+  assert(paymentName('blik') === '<:blik:1572559823323791572> BLIK' && payLabel('sol').startsWith('<:sol:'), 'emoji w tekście');
+  assert(Object.values(payments).filter((pm) => pm.label !== 'PayPal').every((pm) => pm.emoji.startsWith('<:')) && Object.values(hostingPayments).every((pm) => pm.emoji.startsWith('<:')), 'wszystkie płatności mają nowe emoji');
   // Podmiana emoji przy wysyłce: tekst, tytuł w ramce, przyciski i menu; bloki kodu i formularze bez zmian.
   const swapped = swapEmojiPayload({
     flags: 32768,
@@ -7309,9 +7357,9 @@ async function botPaymentTest() {
   });
   const sj = JSON.stringify(swapped);
   assert(sj.includes('## ```🎫 TanieBoty × TICKETY```'), 'tytuł ze zwykłym emoji');
-  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<:tak:1557667110803738675> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
-  assert(sj.includes('<:tak:1557667110803738675> Gotowe <:ostrzeenie:1557667562978938933> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
-  assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1557668143755698186","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
+  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<:takk:1572561216071794729> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
+  assert(sj.includes('<:takk:1572561216071794729> Gotowe <:zagroenie:1572529172734148649> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
+  assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1562879421893968062","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
   const doneBtn = JSON.stringify(swapEmojiPayload({ components: [{ type: 1, components: [{ type: 2, custom_id: 'tk:done', label: 'Zrealizowane', emoji: { name: '✅' } }, { type: 2, custom_id: 'tk:notdone', label: 'Niezrealizowane', emoji: { name: '❌' } }] }] }));
   assert(doneBtn.includes('"id":"1554504948211785778"') && doneBtn.includes('"id":"1554505001492021248"'), 'Zrealizowane/Niezrealizowane z zielonym TAK i czerwonym NIE');
   const modalBody = { type: 9, data: { custom_id: 'm', title: '🎫 Bot', components: [{ type: 18, label: '✅ Pole' }] } };
@@ -7320,15 +7368,15 @@ async function botPaymentTest() {
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
   assert(!realModal.includes('"emoji":{"id"') && realModal.includes('"value":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz bez własnych emoji w menu');
   // Niedostępne emoji (usunięte albo z innego serwera) - bot je pomija zamiast wysyłać tekst <:nazwa:id>.
-  availableEmojiIds = new Set(['1557667110803738675']); // tylko „tak”
-  const partial = JSON.stringify(swapEmojiPayload({ components: [{ type: 10, content: '✅ ok ⚠️ uwaga <:paypal:1557667290298851368> PayPal' }, { type: 3, options: [{ label: 'BLIK', value: 'b', emoji: { id: '1557667222867157052', name: 'blik' } }] }] }));
+  availableEmojiIds = new Set(['1572561216071794729']); // tylko „tak”
+  const partial = JSON.stringify(swapEmojiPayload({ components: [{ type: 10, content: '✅ ok ⚠️ uwaga <:blik:1572559823323791572> BLIK' }, { type: 3, options: [{ label: 'BLIK', value: 'b', emoji: { id: '1557667222867157052', name: 'blik' } }] }] }));
   availableEmojiIds = new Set();
-  assert(partial.includes('<:tak:1557667110803738675> ok') && partial.includes('⚠️ uwaga') && partial.includes('PayPal') && !partial.includes('<:paypal:') && !partial.includes('"emoji"'), 'niedostępne emoji pomijane');
+  assert(partial.includes('<:takk:1572561216071794729> ok') && partial.includes('⚠️ uwaga') && partial.includes('BLIK') && !partial.includes('<:blik:') && !partial.includes('"emoji"'), 'niedostępne emoji pomijane');
   const swapCalls = [];
   const fakeRest = customEmojiRequests({ request: async (o) => swapCalls.push(o) });
   await fakeRest.request({ fullRoute: '/channels/1/messages', method: 'POST', body: { content: '✅ ok' } });
   await fakeRest.request({ fullRoute: '/applications/1/guilds/2/commands', method: 'PUT', body: [{ name: 'x', description: '✅ opis' }] });
-  assert(swapCalls[0].body.content.startsWith('<:tak:') && swapCalls[1].body[0].description === '✅ opis', 'tylko wiadomości (bez komend)');
+  assert(swapCalls[0].body.content.startsWith('<:takk:') && swapCalls[1].body[0].description === '✅ opis', 'tylko wiadomości (bez komend)');
 
   // 2. Zwykła płatność → ticket od razu, płatność na karcie.
   values.payment = 'blik';
