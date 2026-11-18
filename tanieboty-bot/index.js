@@ -1275,7 +1275,7 @@ function ticketMessage(ticket, user) {
   if (ticket.hostingServerId) answers.push(row('✅ Hosting', `serwer ID \`${ticket.hostingServerId}\` ${ticket.form.renew ? 'przedłużony' : 'utworzony'}`));
   text(b, [`### ${t.emoji} ${x} ${t.label}`, ...answers].join('\n'));
   sep(b);
-  const buttons = [new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij (admin)').setEmoji('🔒').setStyle(ButtonStyle.Danger)];
+  const buttons = [new ButtonBuilder().setCustomId('tk:close').setLabel('Zamknij (admin)').setEmoji('🔒').setStyle(ButtonStyle.Primary)];
   // Zakup ręczny hostingu: staff potwierdza płatność, a bot sam tworzy (albo przedłuża) serwer.
   if (ticket.type === 'hosting' && ticket.form.lang && !ticket.hostingServerId && !hostingLanguages[ticket.form.lang]?.manualOnly) {
     buttons.unshift(
@@ -1642,8 +1642,8 @@ function repRequestView(ticket, lcChannelId) {
   );
   b.addActionRowComponents((r) =>
     r.setComponents(
-      new ButtonBuilder().setCustomId('tk:copyrep').setLabel('Skopiuj wzór').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('tk:closenorep').setLabel('Zamknij bez repa (admin)').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tk:copyrep').setLabel('Skopiuj wzór').setEmoji('📋').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('tk:closenorep').setLabel('Zamknij bez repa (admin)').setEmoji('🔒').setStyle(ButtonStyle.Primary),
     ),
   );
   sep(b);
@@ -2155,9 +2155,9 @@ async function suspendHosting(guildId, rec) {
 // ─── Widoki hostingu ───────────────────────────────────────────────────
 
 const renameButton = (guildId, rec) =>
-  new ButtonBuilder().setCustomId(`hs:rename:${guildId}:${rec.id}`).setLabel('Zmień nazwę').setEmoji('✏️').setStyle(ButtonStyle.Secondary);
+  new ButtonBuilder().setCustomId(`hs:rename:${guildId}:${rec.id}`).setLabel('Zmień nazwę').setEmoji('✏️').setStyle(ButtonStyle.Primary);
 const renewButton = (guildId, rec) =>
-  new ButtonBuilder().setCustomId(`hs:renew:${guildId}:${rec.id}`).setLabel(`Przedłuż: ${rec.name}`.slice(0, 80)).setEmoji('🔁').setStyle(ButtonStyle.Success);
+  new ButtonBuilder().setCustomId(`hs:renew:${guildId}:${rec.id}`).setLabel(`Przedłuż: ${rec.name}`.slice(0, 80)).setEmoji('🔁').setStyle(ButtonStyle.Primary);
 
 function hostingReadyView(rec, account, guildId) {
   const b = box(colors.success);
@@ -2298,8 +2298,8 @@ function orderView(o, guildId) {
       ].join('\n'),
     );
     const buttons = [
-      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:addr`).setLabel('Skopiuj adres').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:amt`).setLabel('Skopiuj kwotę').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:addr`).setLabel('Skopiuj adres').setEmoji('📋').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`hs:copy:${guildId}:${o.id}:amt`).setLabel('Skopiuj kwotę').setEmoji('💰').setStyle(ButtonStyle.Primary),
     ];
     if (waiting) buttons.push(new ButtonBuilder().setCustomId(`hs:cancel:${guildId}:${o.id}`).setLabel('Anuluj').setEmoji('❌').setStyle(ButtonStyle.Danger));
     b.addActionRowComponents((r) => r.setComponents(...buttons));
