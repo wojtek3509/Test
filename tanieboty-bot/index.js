@@ -3808,7 +3808,7 @@ function guardUploads(rest) {
 
 // ─── Własne emoji w wysyłanych wiadomościach ───────────────────────────
 // Podmiana dzieje się tuż przed wysłaniem do Discorda: w tekście (poza blokami kodu), w przyciskach i w opcjach menu.
-// Tytuły i nagłówki (## ```🎫 TanieBoty × X```, ### …) zostają ze zwykłymi emoji.
+// Tytuły w ramce (## ```🎫 TanieBoty × X```) zostają ze zwykłymi emoji, nagłówki ### dostają własne.
 const swapKeys = Object.keys(emojiSwap).sort((a, b) => b.length - a.length);
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const swapRe = swapKeys.length ? new RegExp(swapKeys.map((k) => `${escapeRe(k.replace(/️/g, ''))}\\uFE0F?`).join('|'), 'gu') : null;
@@ -3826,9 +3826,9 @@ const customIdOf = (text) => /^<a?:\w+:(\d+)>$/.exec(text ?? '')?.[1] ?? null;
 
 function swapEmojiText(text) {
   if (!swapRe || typeof text !== 'string') return text;
-  // Bez zmian zostają: tytuły i nagłówki (linie od #), bloki kodu i `kod`.
+  // Bez zmian zostają: tytuły w ramce (## ```…```), bloki kodu i `kod`. Nagłówki ### dostają własne emoji.
   return text
-    .split(/(```[\s\S]*?```|`[^`\n]*`|(?:^|\n)#{1,3} [^\n]*)/)
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
     .map((part, i) => (i % 2 ? part : part.replace(swapRe, swapOne)))
     .join('')
     .replace(/<a?:\w+:(\d+)> ?/g, (all, id) => (emojiUsable(id) ? all : ''));
@@ -7484,7 +7484,8 @@ async function botPaymentTest() {
   });
   const sj = JSON.stringify(swapped);
   assert(sj.includes('## ```🎫 TanieBoty × TICKETY```'), 'tytuł ze zwykłym emoji');
-  assert(swapEmojiText('### ⚠️ × Uwaga\n✅ ok') === '### ⚠️ × Uwaga\n<a:TAK:1554504948211785778> ok', 'nagłówek ### bez zmian, tekst pod nim z własnym emoji');
+  assert(swapEmojiText('### 📊 × Nasze oceny\n✅ ok') === '### <:wykres:1562879059036217344> × Nasze oceny\n<a:TAK:1554504948211785778> ok', 'nagłówek ### i tekst z własnymi emoji');
+  assert(swapEmojiText('## ```🎫 TanieBoty × X```') === '## ```🎫 TanieBoty × X```', 'tytuł w ramce bez zmian');
   assert(sj.includes('<a:TAK:1554504948211785778> Gotowe <:zagroenie:1572529172734148649> uwaga') && sj.includes('```+rep ✅```'), 'emoji w tekście podmienione, w bloku kodu nie');
   assert(sj.includes('"emoji":{"name":"🔒"}') && sj.includes('"emoji":{"id":"1562879421893968062","name":"bilet"'), 'przyciski ze zwykłym emoji, menu z własnym');
   const doneBtn = JSON.stringify(swapEmojiPayload({ components: [{ type: 1, components: [{ type: 2, custom_id: 'tk:done', label: 'Zrealizowane', emoji: { name: '✅' } }, { type: 2, custom_id: 'tk:notdone', label: 'Niezrealizowane', emoji: { name: '❌' } }] }] }));
@@ -8315,6 +8316,10 @@ function refreshAvailableEmojis(client) {
 async function onReady(ready) {
   console.log(`✅ Zalogowano jako ${ready.user.tag}`);
   refreshAvailableEmojis(ready);
+  const missingBanners = Object.values(bannerFiles).filter((f) => !existsSync(join(bannerDir, f)) && !existsSync(join(bannerDir, f.replace(/\.jpg$/, '.png'))));
+  if (missingBanners.length) {
+    console.warn(`⚠️ Brak banerów w folderze grafiki (${bannerDir}): ${missingBanners.join(', ')} - panele będą bez zdjęć. Wgraj pliki baner-*.jpg do folderu „grafiki” obok index.js.`);
+  } else console.log('🖼️ Banery: wszystkie na miejscu');
   console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
   console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak - zaproś bota linkiem powyżej'}`);
   if (!messageContentOn) {
