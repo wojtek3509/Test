@@ -566,6 +566,17 @@ const reviewProducts = {
 // Jak często jedna osoba może dodać opinię (minuty).
 const reviewCooldownMinutes = 60;
 
+// Sklep z ekranem laptopa (/panel typ:sklep) - zakładka „Boty na zamówienie” (maks. 6 pozycji).
+// [nazwa, cena, opis, emoji]. Cena np. 'od 30 zł', a null = „Wycena w tickecie”.
+const shopBots = [
+  ['Bot ticketowy', null, 'Tickety z kategoriami, formularzami i transcriptami.', '🎫'],
+  ['Bot weryfikacyjny', null, 'Weryfikacja, regulamin i ochrona serwera.', '🛡️'],
+  ['Bot konkursowy', null, 'Konkursy, losowania i liczniki zaproszeń.', '🎁'],
+  ['Bot ekonomii', null, 'Waluta, sklep, poziomy i rankingi.', '💰'],
+  ['Bot moderacyjny', null, 'Logi, antyspam, wyciszenia i czyszczenie.', '⚙️'],
+  ['Twój pomysł', null, 'Masz inny pomysł? Zrobimy bota pod Ciebie.', '🤖'],
+];
+
 // „Czy legit?”: emoji reakcji. Własne emoji z serwera, na którym jest bot (animowane: '<a:nazwa:id>').
 // Gdy bot nie może ich użyć, dodaje zwykłe ✅ / ❌ - obie wersje są liczone tak samo.
 const legitEmojis = {
@@ -870,6 +881,8 @@ const bannerFiles = {
   witamy: 'baner-witamy.jpg',
   zaproszenia: 'baner-zaproszenia.jpg',
   boost: 'baner-boosty.jpg',
+  // Ekran startowy sklepu - bot rysuje go sam przy starcie (sklep z ekranem laptopa).
+  sklep: 'baner-sklep.png',
 };
 // JPG są kilka razy mniejsze od PNG, więc wiadomości z banerem wychodzą szybciej. Stare PNG działają jako zapas.
 const builtinBanner = (key) => {
@@ -3280,6 +3293,662 @@ function movePanelToBottom(client, guildId, type, channel, createIfMissing = typ
   return settled;
 }
 
+// ═══ SKLEP Z EKRANEM LAPTOPA ══════════════════════════════════════════
+// /panel typ:sklep wysyła panel z przyciskiem „Otwórz sklep”. Każdy klient dostaje własny (ukryty) widok:
+// obrazek laptopa z zakładką sklepu + menu zakładek i przyciski zakupu pod spodem.
+// Obrazek rysuje bot (@napi-rs/canvas, czcionki z grafiki/czcionki). Bez biblioteki sklep działa w wersji tekstowej.
+
+const shopTabs = {
+  start: { label: 'Start', emoji: '👋', heading: ['Witaj w', 'TanieBoty'], description: 'Wszystko, co oferujemy, w jednym miejscu.' },
+  boty: { label: 'Boty na zamówienie', short: 'Boty', emoji: '🤖', heading: ['Boty na', 'zamówienie'], description: 'Bot pod Twój serwer, zrobiony od zera.' },
+  hosting: { label: 'Hosting botów', short: 'Hosting', emoji: '🖥️', heading: ['Hosting', 'botów'], description: 'Twój bot online 24/7, pakiety i ceny.' },
+  opinie: { label: 'Opinie i statystyki', short: 'Opinie', emoji: '⭐', heading: ['Opinie', 'klientów'], description: 'Oceny klientów i liczba legit checków.' },
+  kontakt: { label: 'Kontakt i pomoc', short: 'Kontakt', emoji: '💬', heading: ['Kontakt i', 'pomoc'], description: 'Pytanie albo współpraca? Otwórz ticket.' },
+};
+const shopFontDir = join(bannerDir, 'czcionki');
+const shopFont = { regular: 'TB Regular', medium: 'TB Medium', semibold: 'TB SemiBold', bold: 'TB Bold' };
+
+let canvasLib;
+/** Ładuje bibliotekę do rysowania i czcionki. null = brak (sklep tekstowy). */
+async function loadCanvas() {
+  if (canvasLib !== undefined) return canvasLib;
+  try {
+    const lib = await import('@napi-rs/canvas');
+    const files = { regular: 'Poppins-Regular.ttf', medium: 'Poppins-Medium.ttf', semibold: 'Poppins-SemiBold.ttf', bold: 'Poppins-Bold.ttf' };
+    for (const [key, file] of Object.entries(files)) {
+      if (!existsSync(join(shopFontDir, file))) throw new Error(`brak czcionki grafiki/czcionki/${file}`);
+      lib.GlobalFonts.registerFromPath(join(shopFontDir, file), shopFont[key]);
+    }
+    canvasLib = lib;
+  } catch (err) {
+    console.warn(`⚠️ Sklep: obrazki wyłączone (${err.message}). Wgraj package.json i folder grafiki/czcionki, potem Restart - sklep działa na razie w wersji tekstowej.`);
+    canvasLib = null;
+  }
+  return canvasLib;
+}
+
+/** Obrazki własnych emoji (z CDN Discorda) do rysowania ikon. Pamiętane, żeby nie pobierać za każdym razem. */
+const shopIconCache = new Map();
+async function shopIcon(lib, emoji) {
+  const custom = emojiSwap[emoji] ?? (String(emoji).startsWith('<') ? emoji : null);
+  const id = customIdOf(custom);
+  if (!id || !emojiUsable(id)) return null;
+  if (!shopIconCache.has(id)) {
+    shopIconCache.set(
+      id,
+      httpFetch(`https://cdn.discordapp.com/emojis/${id}.png?size=96`, { signal: AbortSignal.timeout(5000) })
+        .then(async (res) => (res.ok ? lib.loadImage(Buffer.from(await res.arrayBuffer())) : null))
+        .catch(() => null),
+    );
+  }
+  const img = await shopIconCache.get(id);
+  if (!img) shopIconCache.delete(id);
+  return img;
+}
+
+const shopColors = {
+  bgTop: '#071521',
+  bgBottom: '#03070b',
+  brand: '#00b0f4',
+  brandSoft: 'rgba(0, 176, 244, 0.14)',
+  window: '#12161d',
+  panel: '#181d26',
+  panelLine: '#252c38',
+  text: '#f2f5f9',
+  muted: '#8a94a6',
+  dim: '#5b6475',
+  gold: '#f5c542',
+};
+
+const plnValue = (price) => parseFloat(String(price).replace(',', '.').replace(/[^\d.]/g, '')) || 0;
+const plnText = (n) => `${Number.isInteger(n) ? n : n.toFixed(2).replace('.', ',')} zł`;
+
+/** Dane zakładek liczone z bota (ceny, opinie, liczniki) - te same w obrazku i w wersji tekstowej. */
+function shopData(g) {
+  const s = reviewSummary(g.reviews);
+  const plans = hostingPlans.map(([name, price, id, days]) => {
+    const pln = plnValue(price);
+    const months = Math.max(1, Math.round(days / 31));
+    return { name, price, id, days, pln, monthly: months > 1 ? plnText(Math.ceil((pln / months) * 100) / 100) : null };
+  });
+  const cheapestDaily = Math.min(...plans.map((p) => p.pln / p.days));
+  for (const p of plans) p.best = plans.length > 1 && p.pln / p.days === cheapestDaily;
+  return {
+    reviews: s,
+    legitChecks: g.stats.done ?? 0,
+    legitYes: g.legitVotes?.yes ?? 0,
+    plans,
+    from: plans.length ? plans.reduce((a, p) => (p.pln < a.pln ? p : a)).price : null,
+    langs: Object.values(hostingLanguages).filter((l) => !l.manualOnly).map((l) => l.label.split(' (')[0]),
+    disk: hostingLimits.disk >= 1024 ? `${hostingLimits.disk / 1024} GB` : `${hostingLimits.disk} MB`,
+  };
+}
+
+// ─── Rysowanie ─────────────────────────────────────────────────────────
+
+function roundRect(ctx, x0, y0, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x0, y0, w, h, r);
+}
+function font(ctx, weight, size) {
+  ctx.font = `${size}px "${shopFont[weight]}"`;
+}
+/** Zawija tekst do szerokości; zwraca linie (maks. maxLines, ostatnia z „...”). */
+function wrapLines(ctx, content, width, maxLines = 2) {
+  const words = String(content).split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= width || !line) line = next;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+    let last = lines[maxLines - 1];
+    while (last && ctx.measureText(`${last}...`).width > width) last = last.slice(0, -1);
+    lines[maxLines - 1] = `${last.trimEnd()}...`;
+  }
+  return lines;
+}
+function drawText(ctx, content, x0, y0, { weight = 'regular', size = 20, color = shopColors.text, align = 'left' } = {}) {
+  font(ctx, weight, size);
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(content, x0, y0);
+  ctx.textAlign = 'left';
+  return ctx.measureText(content).width;
+}
+/** Ikona emoji albo kółko z pierwszą literą, gdy obrazka nie ma. */
+function drawIcon(ctx, img, x0, y0, size, fallback = '') {
+  if (img) return ctx.drawImage(img, x0, y0, size, size);
+  ctx.fillStyle = shopColors.brandSoft;
+  roundRect(ctx, x0, y0, size, size, size * 0.3);
+  ctx.fill();
+  if (fallback) drawText(ctx, fallback.slice(0, 1).toUpperCase(), x0 + size / 2, y0 + size * 0.68, { weight: 'bold', size: size * 0.5, color: shopColors.brand, align: 'center' });
+}
+function card(ctx, x0, y0, w, h, { active = false } = {}) {
+  ctx.fillStyle = shopColors.panel;
+  roundRect(ctx, x0, y0, w, h, 14);
+  ctx.fill();
+  ctx.strokeStyle = active ? shopColors.brand : shopColors.panelLine;
+  ctx.lineWidth = active ? 2 : 1.5;
+  ctx.stroke();
+}
+function pill(ctx, content, x0, y0, { color = shopColors.brand, bg = shopColors.brandSoft, size = 16, align = 'left' } = {}) {
+  font(ctx, 'semibold', size);
+  const w = ctx.measureText(content).width + size * 1.4;
+  const h = size * 1.9;
+  const left = align === 'right' ? x0 - w : x0;
+  ctx.fillStyle = bg;
+  roundRect(ctx, left, y0, w, h, h / 2);
+  ctx.fill();
+  drawText(ctx, content, left + w / 2, y0 + h * 0.67, { weight: 'semibold', size, color, align: 'center' });
+  return w;
+}
+function star(ctx, cx, cy, r, fill) {
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const rad = k % 2 ? r * 0.45 : r;
+    const a = -Math.PI / 2 + (k * Math.PI) / 5;
+    ctx[k ? 'lineTo' : 'moveTo'](cx + rad * Math.cos(a), cy + rad * Math.sin(a));
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+function starsRow(ctx, x0, cy, r, value) {
+  for (let k = 0; k < 5; k++) {
+    const cx = x0 + r + k * r * 2.5;
+    star(ctx, cx, cy, r, shopColors.panelLine);
+    const part = Math.max(0, Math.min(1, value - k));
+    if (part > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - r, cy - r, r * 2 * part, r * 2);
+      ctx.clip();
+      star(ctx, cx, cy, r, shopColors.gold);
+      ctx.restore();
+    }
+  }
+}
+/** Kropkowany łuk w tle (ozdoba). */
+function dotArc(ctx, cx, cy, radius, from, to, count, color) {
+  for (let k = 0; k <= count; k++) {
+    const a = from + ((to - from) * k) / count;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.15 + 0.6 * Math.sin((Math.PI * k) / count);
+    ctx.beginPath();
+    ctx.arc(cx + radius * Math.cos(a), cy + radius * Math.sin(a), 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── Zawartość zakładek (obszar treści okna) ───────────────────────────
+
+async function drawStart(ctx, lib, box, data) {
+  const tiles = ['boty', 'hosting', 'opinie', 'kontakt'];
+  const subtitle = {
+    boty: 'Bot pod Twój serwer: tickety, weryfikacja, konkursy i więcej.',
+    hosting: data.from ? `Twój bot online 24/7 już od ${data.from}.` : 'Twój bot online 24/7.',
+    opinie: 'Oceny klientów i liczba legit checków.',
+    kontakt: 'Pytanie albo współpraca? Otwórz ticket.',
+  };
+  const gap = 22;
+  const w = (box.w - gap) / 2;
+  const h = (box.h - gap) / 2;
+  for (const [k, tab] of tiles.entries()) {
+    const x0 = box.x + (k % 2) * (w + gap);
+    const y0 = box.y + Math.floor(k / 2) * (h + gap);
+    card(ctx, x0, y0, w, h);
+    drawIcon(ctx, await shopIcon(lib, shopTabs[tab].emoji), x0 + 24, y0 + 24, 46, shopTabs[tab].short);
+    drawText(ctx, shopTabs[tab].label, x0 + 24, y0 + 108, { weight: 'semibold', size: 24 });
+    font(ctx, 'regular', 17);
+    wrapLines(ctx, subtitle[tab], w - 48, 2).forEach((l, n) => drawText(ctx, l, x0 + 24, y0 + 140 + n * 25, { size: 17, color: shopColors.muted }));
+  }
+}
+
+async function drawBots(ctx, lib, box) {
+  const list = shopBots.slice(0, 6);
+  const cols = 3;
+  const rows = Math.max(1, Math.ceil(list.length / cols));
+  const gap = 18;
+  const w = (box.w - gap * (cols - 1)) / cols;
+  const h = (box.h - gap * (rows - 1)) / rows;
+  for (const [k, [name, price, desc, emoji]] of list.entries()) {
+    const x0 = box.x + (k % cols) * (w + gap);
+    const y0 = box.y + Math.floor(k / cols) * (h + gap);
+    card(ctx, x0, y0, w, h);
+    drawIcon(ctx, await shopIcon(lib, emoji), x0 + 20, y0 + 20, 40, name);
+    drawText(ctx, name, x0 + 20, y0 + 92, { weight: 'semibold', size: 21 });
+    font(ctx, 'regular', 15);
+    wrapLines(ctx, desc, w - 40, 2).forEach((l, n) => drawText(ctx, l, x0 + 20, y0 + 120 + n * 22, { size: 15, color: shopColors.muted }));
+    pill(ctx, price ?? 'Wycena w tickecie', x0 + 20, y0 + h - 50, price ? {} : { color: shopColors.muted, bg: 'rgba(255,255,255,0.06)' });
+  }
+}
+
+async function drawHosting(ctx, lib, box, data) {
+  const gap = 20;
+  const n = data.plans.length || 1;
+  const w = (box.w - gap * (n - 1)) / n;
+  const h = 210;
+  for (const [k, p] of data.plans.entries()) {
+    const x0 = box.x + k * (w + gap);
+    card(ctx, x0, box.y, w, h, { active: p.best });
+    drawText(ctx, p.name, x0 + 22, box.y + 42, { weight: 'medium', size: 20, color: shopColors.muted });
+    if (p.best) pill(ctx, 'Najtaniej', x0 + w - 18, box.y + 18, { size: 14, align: 'right' });
+    drawText(ctx, p.price, x0 + 22, box.y + 112, { weight: 'bold', size: 50, color: shopColors.brand });
+    drawText(ctx, `${p.days} dni`, x0 + 22, box.y + 152, { weight: 'medium', size: 18 });
+    if (p.monthly) drawText(ctx, `czyli ok. ${p.monthly} / miesiąc`, x0 + 22, box.y + 182, { size: 15, color: shopColors.muted });
+  }
+  const specs = [
+    ['RAM', `${hostingLimits.memory} MB`],
+    ['Dysk', data.disk],
+    ['CPU', `${hostingLimits.cpu}%`],
+    ['Działa', '24/7'],
+  ];
+  const sy = box.y + h + 24;
+  const sw = (box.w - gap * 3) / 4;
+  for (const [k, [label, value]] of specs.entries()) {
+    const x0 = box.x + k * (sw + gap);
+    card(ctx, x0, sy, sw, 92);
+    drawText(ctx, label, x0 + 20, sy + 36, { size: 16, color: shopColors.muted });
+    drawText(ctx, value, x0 + 20, sy + 70, { weight: 'semibold', size: 24 });
+  }
+  const ly = sy + 92 + 24;
+  card(ctx, box.x, ly, box.w, box.y + box.h - ly);
+  drawText(ctx, 'Języki', box.x + 22, ly + 38, { size: 16, color: shopColors.muted });
+  let lx = box.x + 22;
+  for (const lang of data.langs) lx += pill(ctx, lang, lx, ly + 54, { size: 15 }) + 10;
+  const px = box.x + box.w / 2 + 10;
+  drawText(ctx, 'Płatność', px, ly + 38, { size: 16, color: shopColors.muted });
+  let ix = px;
+  const seen = new Set();
+  for (const pay of Object.values(hostingPayments)) {
+    if (seen.has(pay.emoji)) continue;
+    seen.add(pay.emoji);
+    drawIcon(ctx, await shopIcon(lib, pay.emoji), ix, ly + 54, 32, pay.label);
+    ix += 44;
+  }
+}
+
+async function drawReviews(ctx, lib, box, data) {
+  const s = data.reviews;
+  const gap = 20;
+  const lw = box.w * 0.38;
+  const th = box.h - 132 - gap;
+  card(ctx, box.x, box.y, lw, th);
+  drawText(ctx, s.count ? s.avg.toFixed(2) : '-', box.x + lw / 2, box.y + 130, { weight: 'bold', size: 88, align: 'center' });
+  starsRow(ctx, box.x + lw / 2 - 73, box.y + 178, 15, s.count ? s.avg : 0);
+  drawText(ctx, s.count ? `średnia z ${s.count} opinii` : 'Brak opinii - bądź pierwszy!', box.x + lw / 2, box.y + 235, { size: 18, color: shopColors.muted, align: 'center' });
+  const rx = box.x + lw + gap;
+  const rw = box.w - lw - gap;
+  card(ctx, rx, box.y, rw, th);
+  const step = (th - 40) / reviewCriteria.length;
+  for (const [k, cr] of reviewCriteria.entries()) {
+    const y0 = box.y + 30 + k * step;
+    const value = s.count ? s.per[cr.id] : 0;
+    drawIcon(ctx, await shopIcon(lib, cr.emoji), rx + 24, y0, 30, cr.label);
+    drawText(ctx, cr.label, rx + 66, y0 + 23, { weight: 'medium', size: 19 });
+    drawText(ctx, s.count ? `${value.toFixed(1)}/5` : '-', rx + rw - 24, y0 + 23, { weight: 'semibold', size: 19, color: shopColors.brand, align: 'right' });
+    ctx.fillStyle = shopColors.panelLine;
+    roundRect(ctx, rx + 24, y0 + 44, rw - 48, 10, 5);
+    ctx.fill();
+    if (value > 0) {
+      ctx.fillStyle = shopColors.brand;
+      roundRect(ctx, rx + 24, y0 + 44, Math.max(10, ((rw - 48) * value) / 5), 10, 5);
+      ctx.fill();
+    }
+  }
+  const stats = [
+    ['⭐', 'Opinie', s.count],
+    ['✅', 'Legit checki', data.legitChecks],
+    ['👍', 'Czy legit - TAK', data.legitYes],
+  ];
+  const sy = box.y + th + gap;
+  const sw = (box.w - gap * 2) / 3;
+  for (const [k, [emoji, label, value]] of stats.entries()) {
+    const x0 = box.x + k * (sw + gap);
+    card(ctx, x0, sy, sw, 132);
+    drawIcon(ctx, await shopIcon(lib, emoji === '✅' ? legitEmojis.yes : emoji), x0 + 22, sy + 24, 34, label);
+    drawText(ctx, String(value), x0 + 22, sy + 104, { weight: 'bold', size: 36 });
+    drawText(ctx, label, x0 + 70, sy + 48, { size: 17, color: shopColors.muted });
+  }
+}
+
+async function drawContact(ctx, lib, box) {
+  const gap = 20;
+  const w = (box.w - gap) / 2;
+  const h = 190;
+  const items = [
+    [ticketTypes.question?.emoji ?? '❓', 'Pytanie', 'Masz pytanie przed zakupem? Otwórz ticket, odpowiemy najszybciej jak się da.'],
+    [ticketTypes.partner?.emoji ?? '🤝', 'Współpraca', 'Partnerstwo, reklama albo wspólny projekt. Napisz do nas.'],
+  ];
+  for (const [k, [emoji, name, desc]] of items.entries()) {
+    const x0 = box.x + k * (w + gap);
+    card(ctx, x0, box.y, w, h);
+    drawIcon(ctx, await shopIcon(lib, emoji), x0 + 24, box.y + 24, 44, name);
+    drawText(ctx, name, x0 + 84, box.y + 56, { weight: 'semibold', size: 24 });
+    font(ctx, 'regular', 17);
+    wrapLines(ctx, desc, w - 48, 3).forEach((l, n) => drawText(ctx, l, x0 + 24, box.y + 108 + n * 25, { size: 17, color: shopColors.muted }));
+  }
+  const sy = box.y + h + gap;
+  card(ctx, box.x, sy, box.w, box.y + box.h - sy);
+  drawText(ctx, 'Jak wygląda zamówienie bota?', box.x + 24, sy + 44, { weight: 'semibold', size: 22 });
+  const steps = ['Opisujesz bota w formularzu', 'Ustalamy cenę i termin', 'Płacisz wygodną metodą', 'Odbierasz gotowego bota'];
+  const stw = (box.w - 48 - gap * 3) / 4;
+  for (const [k, label] of steps.entries()) {
+    const x0 = box.x + 24 + k * (stw + gap);
+    const y0 = sy + 78;
+    ctx.fillStyle = shopColors.brandSoft;
+    ctx.beginPath();
+    ctx.arc(x0 + 22, y0 + 22, 22, 0, Math.PI * 2);
+    ctx.fill();
+    drawText(ctx, String(k + 1), x0 + 22, y0 + 31, { weight: 'bold', size: 22, color: shopColors.brand, align: 'center' });
+    font(ctx, 'medium', 17);
+    wrapLines(ctx, label, stw, 2).forEach((l, n) => drawText(ctx, l, x0, y0 + 78 + n * 24, { weight: 'medium', size: 17 }));
+  }
+}
+
+const shopDrawers = { start: drawStart, boty: drawBots, hosting: drawHosting, opinie: drawReviews, kontakt: drawContact };
+
+/** Rysuje laptopa z otwartą zakładką. Zwraca PNG (Buffer) albo null, gdy biblioteki brak. */
+async function renderShop(g, tab = 'start') {
+  const lib = await loadCanvas();
+  if (!lib) return null;
+  const W = 1600;
+  const H = 960;
+  const canvas = lib.createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const data = shopData(g);
+
+  // Tło
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, shopColors.bgTop);
+  bg.addColorStop(1, shopColors.bgBottom);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W / 2, H * 0.45, 50, W / 2, H * 0.45, W * 0.6);
+  glow.addColorStop(0, 'rgba(0, 176, 244, 0.20)');
+  glow.addColorStop(1, 'rgba(0, 176, 244, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  // Laptop: ekran i podstawa
+  const lx = 150;
+  const ly = 36;
+  const lw = W - 300;
+  const lh = 820;
+  ctx.fillStyle = '#0a0c10';
+  roundRect(ctx, lx, ly, lw, lh, 34);
+  ctx.fill();
+  ctx.strokeStyle = '#2b313c';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = '#1d222b';
+  ctx.beginPath();
+  ctx.arc(W / 2, ly + 15, 4, 0, Math.PI * 2);
+  ctx.fill();
+  const base = ctx.createLinearGradient(0, ly + lh, 0, ly + lh + 44);
+  base.addColorStop(0, '#3a414d');
+  base.addColorStop(1, '#161a20');
+  ctx.fillStyle = base;
+  ctx.beginPath();
+  ctx.moveTo(lx - 30, ly + lh + 4);
+  ctx.lineTo(lx + lw + 30, ly + lh + 4);
+  ctx.lineTo(lx + lw + 70, ly + lh + 34);
+  ctx.quadraticCurveTo(lx + lw + 70, ly + lh + 46, lx + lw + 50, ly + lh + 46);
+  ctx.lineTo(lx - 50, ly + lh + 46);
+  ctx.quadraticCurveTo(lx - 70, ly + lh + 46, lx - 70, ly + lh + 34);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#0d1014';
+  roundRect(ctx, W / 2 - 90, ly + lh + 4, 180, 12, 6);
+  ctx.fill();
+
+  // Wyświetlacz
+  const sx = lx + 26;
+  const sy = ly + 30;
+  const sw = lw - 52;
+  const sh = lh - 56;
+  ctx.save();
+  roundRect(ctx, sx, sy, sw, sh, 12);
+  ctx.clip();
+  const screen = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
+  screen.addColorStop(0, '#0b2233');
+  screen.addColorStop(0.55, '#081522');
+  screen.addColorStop(1, '#0a1d2c');
+  ctx.fillStyle = screen;
+  ctx.fillRect(sx, sy, sw, sh);
+  dotArc(ctx, sx + sw * 0.55, sy - 120, 520, Math.PI * 0.05, Math.PI * 0.62, 46, shopColors.brand);
+
+  // Pasek zadań z zegarem
+  const tb = 48;
+  ctx.fillStyle = 'rgba(6, 10, 15, 0.92)';
+  ctx.fillRect(sx, sy + sh - tb, sw, tb);
+  const now = new Date();
+  const clock = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Warsaw' });
+  const date = now.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Warsaw' });
+  drawText(ctx, clock, sx + sw - 24, sy + sh - tb + 21, { weight: 'medium', size: 14, align: 'right' });
+  drawText(ctx, date, sx + sw - 24, sy + sh - tb + 39, { size: 13, color: shopColors.muted, align: 'right' });
+  const logo = existsSync(join(bannerDir, 'logo.png')) ? await lib.loadImage(join(bannerDir, 'logo.png')).catch(() => null) : null;
+  const taskIcons = ['start', 'boty', 'hosting', 'opinie', 'kontakt'];
+  const tix = sx + sw / 2 - (taskIcons.length * 44) / 2;
+  for (const [k, t] of taskIcons.entries()) {
+    const ix = tix + k * 44;
+    if (t === tab) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      roundRect(ctx, ix, sy + sh - tb + 6, 36, 36, 8);
+      ctx.fill();
+      ctx.fillStyle = shopColors.brand;
+      roundRect(ctx, ix + 12, sy + sh - 6, 12, 3, 1.5);
+      ctx.fill();
+    }
+    if (t === 'start' && logo) ctx.drawImage(logo, ix + 6, sy + sh - tb + 12, 24, 24);
+    else drawIcon(ctx, await shopIcon(lib, shopTabs[t].emoji), ix + 6, sy + sh - tb + 12, 24, shopTabs[t].label);
+  }
+
+  // Okno aplikacji
+  const wx = sx + 56;
+  const wy = sy + 40;
+  const ww = sw - 112;
+  const wh = sh - tb - 74;
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 40;
+  ctx.fillStyle = shopColors.window;
+  roundRect(ctx, wx, wy, ww, wh, 14);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = shopColors.panelLine;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.save();
+  roundRect(ctx, wx, wy, ww, wh, 14);
+  ctx.clip();
+  // Pasek tytułu
+  if (logo) ctx.drawImage(logo, wx + 16, wy + 11, 22, 22);
+  drawText(ctx, upper(brand.name), wx + (logo ? 46 : 18), wy + 29, { weight: 'bold', size: 15 });
+  ctx.strokeStyle = shopColors.dim;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(wx + ww - 70, wy + 23);
+  ctx.lineTo(wx + ww - 56, wy + 23);
+  ctx.moveTo(wx + ww - 30, wy + 16);
+  ctx.lineTo(wx + ww - 16, wy + 30);
+  ctx.moveTo(wx + ww - 16, wy + 16);
+  ctx.lineTo(wx + ww - 30, wy + 30);
+  ctx.stroke();
+  // Menu boczne
+  const side = 250;
+  const top = wy + 44;
+  ctx.fillStyle = 'rgba(255,255,255,0.015)';
+  ctx.fillRect(wx, top, side, wh - 44);
+  if (logo) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(wx + side / 2, top + 70, 46, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(logo, wx + side / 2 - 46, top + 24, 92, 92);
+    ctx.restore();
+  }
+  ctx.strokeStyle = shopColors.panelLine;
+  ctx.beginPath();
+  ctx.moveTo(wx + 24, top + 140);
+  ctx.lineTo(wx + side - 24, top + 140);
+  ctx.stroke();
+  for (const [k, t] of Object.keys(shopTabs).entries()) {
+    const ty = top + 162 + k * 62;
+    const active = t === tab;
+    if (active) {
+      ctx.fillStyle = shopColors.brandSoft;
+      roundRect(ctx, wx + 14, ty, side - 28, 50, 10);
+      ctx.fill();
+      ctx.fillStyle = shopColors.brand;
+      roundRect(ctx, wx + 14, ty + 12, 4, 26, 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = active ? 1 : 0.45;
+    drawIcon(ctx, await shopIcon(lib, shopTabs[t].emoji), wx + 32, ty + 11, 28, shopTabs[t].label);
+    ctx.globalAlpha = 1;
+    drawText(ctx, shopTabs[t].short ?? shopTabs[t].label, wx + 74, ty + 33, { weight: active ? 'semibold' : 'regular', size: 19, color: active ? shopColors.text : shopColors.dim });
+  }
+  ctx.strokeStyle = shopColors.brand;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(wx + side, top + 150);
+  ctx.lineTo(wx + side, top + 150 + Object.keys(shopTabs).length * 62);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // Nagłówek i treść zakładki
+  const cx = wx + side + 36;
+  const cw = ww - side - 72;
+  const [light, bold] = shopTabs[tab].heading;
+  const lightW = drawText(ctx, `${light} `, cx, top + 52, { weight: 'regular', size: 30, color: shopColors.muted });
+  drawText(ctx, bold, cx + lightW, top + 52, { weight: 'bold', size: 30 });
+  drawText(ctx, shopTabs[tab].description, cx, top + 84, { size: 17, color: shopColors.dim });
+  await shopDrawers[tab](ctx, lib, { x: cx, y: top + 112, w: cw, h: wh - 44 - 112 - 32 }, data);
+  ctx.restore();
+  ctx.restore();
+  return canvas.encode('png');
+}
+
+// ─── Widok w Discordzie ────────────────────────────────────────────────
+
+/** Tekst zakładki - gdy obrazka nie da się narysować albo wysłać. */
+function shopTabText(g, tab) {
+  const d = shopData(g);
+  const lines = {
+    start: [point(`**${brand.tagline}.**`), ...['boty', 'hosting', 'opinie', 'kontakt'].map((t) => point(`${shopTabs[t].emoji} **${shopTabs[t].label}** - ${shopTabs[t].description}`))],
+    boty: shopBots.map(([name, price, desc, emoji]) => row(`${emoji} ${name}`, `${desc} \`${price ?? 'wycena w tickecie'}\``)),
+    hosting: [
+      ...d.plans.map((p) => row(p.name, `\`${p.price}\` • ${p.days} dni${p.best ? ' • najtaniej' : ''}`)),
+      `-# ${hostingLimits.memory} MB RAM • ${d.disk} dysku • ${hostingLimits.cpu}% CPU • ${d.langs.join(', ')}`,
+    ],
+    opinie: [
+      row('Średnia', d.reviews.count ? `\`${d.reviews.avg.toFixed(2)}/5\` ${stars(Math.round(d.reviews.avg))}` : '`-`'),
+      row('Opinii', `\`${d.reviews.count}\``),
+      row('Legit checki', `\`${d.legitChecks}\``),
+      row('Czy legit - TAK', `\`${d.legitYes}\``),
+    ],
+    kontakt: [point('**Pytanie** - masz pytanie przed zakupem? Otwórz ticket.'), point('**Współpraca** - partnerstwo, reklama albo wspólny projekt.')],
+  };
+  return [`### ${shopTabs[tab].emoji} ${x} ${shopTabs[tab].label}`, ...lines[tab]].join('\n');
+}
+
+const shopButton = (id, label, emoji, styleOf = ButtonStyle.Primary) => new ButtonBuilder().setCustomId(id).setLabel(label).setEmoji(emoji).setStyle(styleOf);
+const shopActions = {
+  start: () => [],
+  boty: () => [shopButton('tk:quick:bot', 'Zamów bota', ticketTypes.bot?.emoji ?? '🤖', ButtonStyle.Success)],
+  hosting: () => [shopButton('tk:quick:hosting', 'Kup hosting', ticketTypes.hosting?.emoji ?? '🖥️', ButtonStyle.Success)],
+  opinie: () => [shopButton('rev:open', 'Wystaw opinię', '⭐')],
+  kontakt: () => [shopButton('tk:quick:question', 'Zadaj pytanie', ticketTypes.question?.emoji ?? '❓'), shopButton('tk:quick:partner', 'Współpraca', ticketTypes.partner?.emoji ?? '🤝')],
+};
+
+/** Ostatni czas, kiedy Discord zablokował pliki (wtedy sklep od razu pokazuje wersję tekstową). */
+let uploadsBlockedAt = 0;
+const SHOP_TEXT_AFTER_BLOCK_MS = 30 * 60_000;
+
+/** Ukryty widok sklepu dla klienta: { components, files }. */
+async function shopView(g, tab = 'start') {
+  if (!shopTabs[tab]) tab = 'start';
+  const image = Date.now() - uploadsBlockedAt > SHOP_TEXT_AFTER_BLOCK_MS ? await renderShop(g, tab).catch((err) => (console.error('Sklep: obrazek', err.message), null)) : null;
+  const name = `sklep-${tab}.png`;
+  const b = box();
+  text(b, title('Sklep', '🛒'));
+  if (image) b.addMediaGalleryComponents((m) => m.addItems((it) => it.setURL(`attachment://${name}`)));
+  else text(b, shopTabText(g, tab));
+  sep(b);
+  b.addActionRowComponents((r) =>
+    r.setComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('sh:tab')
+        .setPlaceholder('Wybierz zakładkę')
+        .addOptions(Object.entries(shopTabs).map(([value, t]) => ({ label: t.label, value, description: t.description.slice(0, 100), emoji: selectEmoji(t.emoji), default: value === tab }))),
+    ),
+  );
+  const actions = shopActions[tab]().filter((btn) => btn.data.custom_id !== 'tk:quick:hosting' || ticketTypes.hosting);
+  if (actions.length) b.addActionRowComponents((r) => r.setComponents(...actions));
+  sep(b);
+  footer(b);
+  return { components: [b], files: image ? [new AttachmentBuilder(image, { name })] : [] };
+}
+
+/** Panel na kanale: opis, podgląd ekranu (baner) i przycisk „Otwórz sklep”. */
+function shopPanel(g, logo) {
+  const b = box();
+  header(
+    b,
+    [
+      title('Sklep', '🛒'),
+      '>>> ' +
+        [
+          point('Kliknij **Otwórz sklep** - zobaczysz go **tylko Ty**.'),
+          point('W menu wybierasz zakładkę: **boty**, **hosting**, **opinie** albo **kontakt**.'),
+          point('Zamówienie składasz od razu z poziomu sklepu.'),
+        ].join('\n'),
+    ].join('\n'),
+    logo,
+  );
+  banner(b, bannerUrl(g, 'sklep'));
+  sep(b);
+  b.addActionRowComponents((r) => r.setComponents(shopButton('sh:open', 'Otwórz sklep', '🛒')));
+  sep(b);
+  footer(b);
+  return b;
+}
+
+/** Odświeża wbudowany baner panelu sklepu (ekran startowy) w grafiki/. Zwraca true, gdy plik jest gotowy. */
+async function writeShopBanner(g) {
+  const image = await renderShop(g, 'start').catch((err) => (console.error('Sklep: baner', err.message), null));
+  if (!image) return existsSync(join(bannerDir, bannerFiles.sklep));
+  try {
+    writeFileSync(join(bannerDir, bannerFiles.sklep), image);
+    return true;
+  } catch (err) {
+    console.error('Sklep: nie mogę zapisać baneru', err.message);
+    return false;
+  }
+}
+
+async function routeShop(i, action) {
+  if (action === 'open' && i.isButton()) {
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    const view = await shopView(guild(i.guildId), 'start');
+    return i.editReply({ ...view, flags: V2, allowedMentions: { parse: [] } });
+  }
+  if (action === 'tab' && i.isStringSelectMenu()) {
+    await i.deferUpdate();
+    const view = await shopView(guild(i.guildId), i.values[0]);
+    return i.editReply({ ...view, attachments: [], flags: V2, allowedMentions: { parse: [] } });
+  }
+}
+
 // ═══ PANELE: WYSYŁANIE I ODŚWIEŻANIE ══════════════════════════════════
 
 const panelBuilders = {
@@ -3289,6 +3958,7 @@ const panelBuilders = {
   legit: (g, logo) => legitPanel(g, logo),
   cennik: (g, logo) => pricingPanel(g, logo),
   vouch: (g, logo) => vouchPanel(g, logo),
+  sklep: (g, logo) => shopPanel(g, logo),
 };
 
 /** Wysyła panel na kanał i zapamiętuje go. Zły link do baneru → wysyła bez baneru. */
@@ -3344,6 +4014,7 @@ const panelTitleMarkers = {
   legit: ['× CZY LEGIT?```'],
   cennik: ['× CENNIK HOSTINGU```'],
   vouch: ['× JAK NAPISAĆ LEGIT CHECKA?```', '× JAK NAPISAĆ VOUCHA?```'],
+  sklep: ['× SKLEP```'],
 };
 
 /** Szuka na kanałach (ostatnie 50 wiadomości) paneli bota spoza bazy i zapisuje najnowszy panel każdego rodzaju. */
@@ -3875,6 +4546,7 @@ function guardUploads(rest) {
         return await original(options);
       } catch (err) {
         if (err?.code !== UPLOADS_BLOCKED) throw err;
+        uploadsBlockedAt = Date.now();
         if (channelId) uploadBlocked.set(channelId, Date.now() + 30 * 60_000);
         if (Date.now() - uploadWarned > 60 * 60_000) {
           uploadWarned = Date.now();
@@ -5247,6 +5919,7 @@ command(
           { name: '🤔 Czy legit?', value: 'legit' },
           { name: '💰 Cennik', value: 'cennik' },
           { name: '✅ Jak napisać legit checka (kanał legit checków)', value: 'vouch' },
+          { name: '🛒 Sklep (ekran laptopa)', value: 'sklep' },
         ),
     )
     .addChannelOption((o) => o.setName('kanal').setDescription('Kanał docelowy (domyślnie bieżący)').addChannelTypes(ChannelType.GuildText))
@@ -5998,6 +6671,7 @@ async function route(i) {
   }
   if (scope === 'hs') return routeHosting(i);
   if (!i.inGuild()) return;
+  if (scope === 'sh') return routeShop(i, action);
 
   if (scope === 'tk') {
     if (i.isStringSelectMenu() && action === 'open') {
@@ -6169,6 +6843,7 @@ async function selfTest() {
   // Banery wbudowane: plik z grafiki/, własny link ma pierwszeństwo, „brak” wyłącza.
   const bg = guild('banner-test');
   for (const key of Object.keys(bannerFiles)) {
+    if (key === 'sklep') continue; // rysowany przez bota przy starcie
     if (!builtinBanner(key)) throw new Error(`Brak pliku grafiki/${bannerFiles[key]}`);
     if (bannerUrl(bg, key) !== `attachment://${bannerFiles[key]}` || bannerAttachments(bg, key).length !== 1) throw new Error(`Baner wbudowany: ${key}`);
   }
@@ -8376,6 +9051,54 @@ async function hostingTest() {
   console.log('✅ Test hostingu: zakup krypto (LTC, ETH, USDC, SOL), ręczny, terminy, blokada, przedłużenie, komendy OK');
 }
 
+
+async function shopTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Sklep: ${msg}`);
+  };
+  const g = {
+    reviews: [
+      { ratings: { quality: 5, time: 5, service: 5 } },
+      { ratings: { quality: 5, time: 4, service: 5 } },
+    ],
+    stats: { done: 12 },
+    legitVotes: { yes: 34, no: 0 },
+    settings: { banners: {} },
+  };
+  const savedFetch = httpFetch;
+  if (!process.env.TB_SHOP_ONLINE) httpFetch = async () => ({ ok: false });
+  const preview = process.env.TB_SHOP_PREVIEW_DIR;
+  uploadsBlockedAt = 0; // wcześniejszy test blokady plików
+  const lib = await loadCanvas();
+  for (const tab of Object.keys(shopTabs)) {
+    const view = await shopView(g, tab);
+    const json = JSON.stringify(view.components.map((c) => c.toJSON()));
+    assert(json.includes('"custom_id":"sh:tab"'), `${tab}: menu zakładek`);
+    assert(!/[–—]/.test(json + shopTabText(g, tab)), `${tab}: długi myślnik`);
+    if (lib) {
+      assert(view.files.length === 1 && json.includes(`attachment://sklep-${tab}.png`), `${tab}: obrazek`);
+      const png = view.files[0].attachment;
+      assert(png.subarray(1, 4).toString() === 'PNG', `${tab}: plik PNG`);
+      if (preview) writeFileSync(join(preview, `sklep-${tab}.png`), png);
+    } else {
+      assert(!view.files.length && json.includes(shopTabs[tab].label), `${tab}: wersja tekstowa`);
+    }
+  }
+  const actions = (tab) => JSON.stringify(shopActions[tab]().map((b) => b.toJSON()));
+  assert(actions('boty').includes('tk:quick:bot') && actions('hosting').includes('tk:quick:hosting'), 'przyciski zakupu');
+  assert(actions('kontakt').includes('tk:quick:question') && actions('opinie').includes('rev:open'), 'przyciski kontakt/opinie');
+  for (const a of ['bot', 'hosting', 'question', 'partner']) assert(ticketTypes[a], `brak kategorii ticketu ${a}`);
+  // Blokada plików: od razu wersja tekstowa.
+  uploadsBlockedAt = Date.now();
+  const blocked = await shopView(g, 'hosting');
+  assert(!blocked.files.length && JSON.stringify(blocked.components[0].toJSON()).includes(hostingPlans[0][1]), 'tekst przy blokadzie plików');
+  uploadsBlockedAt = 0;
+  const panel = JSON.stringify(shopPanel(g, null).toJSON());
+  assert(panel.includes('sh:open') && panel.includes('× SKLEP```'), 'panel');
+  httpFetch = savedFetch;
+  console.log(`✅ Test sklepu: zakładki, przyciski, panel${lib ? ', obrazki PNG' : ' (bez biblioteki: wersja tekstowa)'} OK`);
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 if (process.argv.includes('--check')) {
@@ -8393,6 +9116,7 @@ if (process.argv.includes('--check')) {
   await serverLogsTest();
   await uploadGuardTest();
   await botPaymentTest();
+  await shopTest();
   process.exit(0);
 }
 
