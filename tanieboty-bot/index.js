@@ -569,13 +569,10 @@ const reviewCooldownMinutes = 60;
 // Sklep z ekranem laptopa (/panel typ:sklep) - zakładka „Boty na zamówienie” (maks. 6 pozycji).
 // [nazwa, cena, opis, emoji]. Cena np. 'od 30 zł', a null = „Wycena w tickecie”.
 const shopBots = [
-  ['Bot ticketowy', null, 'Tickety z kategoriami, formularzami i transcriptami.', '🎫'],
-  ['Bot weryfikacyjny', null, 'Weryfikacja, regulamin i ochrona serwera.', '🛡️'],
-  ['Bot konkursowy', null, 'Konkursy, losowania i liczniki zaproszeń.', '🎁'],
-  ['Bot ekonomii', null, 'Waluta, sklep, poziomy i rankingi.', '💰'],
-  ['Bot moderacyjny', null, 'Logi, antyspam, wyciszenia i czyszczenie.', '⚙️'],
-  ['Twój pomysł', null, 'Masz inny pomysł? Zrobimy bota pod Ciebie.', '🤖'],
-];
+  ['Bot pod exchange', null, 'Wymiana walut i krypto: kursy, kalkulator, tickety wymiany i legit checki.', '🔄'],
+  ['Bot pod shop', null, 'Sklep na Discordzie: produkty, cennik, zamówienia w ticketach i płatności.', '🛒'],
+  ['Własny bot', null, 'Masz inny pomysł? Opisz go, a zrobimy bota dokładnie pod Twój serwer.', '🤖'],
+]
 
 // „Czy legit?”: emoji reakcji. Własne emoji z serwera, na którym jest bot (animowane: '<a:nazwa:id>').
 // Gdy bot nie może ich użyć, dodaje zwykłe ✅ / ❌ - obie wersje są liczone tak samo.
@@ -3495,7 +3492,7 @@ function dotArc(ctx, cx, cy, radius, from, to, count, color) {
 async function drawStart(ctx, lib, box, data) {
   const tiles = ['boty', 'hosting', 'opinie', 'kontakt'];
   const subtitle = {
-    boty: 'Bot pod Twój serwer: tickety, weryfikacja, konkursy i więcej.',
+    boty: 'Bot pod exchange, shop albo Twój własny pomysł.',
     hosting: data.from ? `Twój bot online 24/7 już od ${data.from}.` : 'Twój bot online 24/7.',
     opinie: 'Oceny klientów i liczba legit checków.',
     kontakt: 'Pytanie albo współpraca? Otwórz ticket.',
@@ -3516,7 +3513,7 @@ async function drawStart(ctx, lib, box, data) {
 
 async function drawBots(ctx, lib, box) {
   const list = shopBots.slice(0, 6);
-  const cols = 3;
+  const cols = Math.min(3, Math.max(1, list.length));
   const rows = Math.max(1, Math.ceil(list.length / cols));
   const gap = 18;
   const w = (box.w - gap * (cols - 1)) / cols;
@@ -3525,11 +3522,19 @@ async function drawBots(ctx, lib, box) {
     const x0 = box.x + (k % cols) * (w + gap);
     const y0 = box.y + Math.floor(k / cols) * (h + gap);
     card(ctx, x0, y0, w, h);
-    drawIcon(ctx, await shopIcon(lib, emoji), x0 + 20, y0 + 20, 40, name);
-    drawText(ctx, name, x0 + 20, y0 + 92, { weight: 'semibold', size: 21 });
-    font(ctx, 'regular', 15);
-    wrapLines(ctx, desc, w - 40, 2).forEach((l, n) => drawText(ctx, l, x0 + 20, y0 + 120 + n * 22, { size: 15, color: shopColors.muted }));
-    pill(ctx, price ?? 'Wycena w tickecie', x0 + 20, y0 + h - 50, price ? {} : { color: shopColors.muted, bg: 'rgba(255,255,255,0.06)' });
+    // Jeden rząd: większe karty (duża ikona, dłuższy opis).
+    const big = rows === 1;
+    const icon = big ? 64 : 40;
+    drawIcon(ctx, await shopIcon(lib, emoji), x0 + 24, y0 + 24, icon, name);
+    const ny = y0 + 24 + icon + (big ? 52 : 28);
+    // Nazwa zawsze mieści się w karcie (dłuższa = mniejsza czcionka).
+    let nameSize = big ? 26 : 21;
+    font(ctx, 'semibold', nameSize);
+    while (nameSize > 14 && ctx.measureText(name).width > w - 48) font(ctx, 'semibold', --nameSize);
+    drawText(ctx, name, x0 + 24, ny, { weight: 'semibold', size: nameSize });
+    font(ctx, 'regular', big ? 17 : 15);
+    wrapLines(ctx, desc, w - 48, big ? 5 : 2).forEach((l, n) => drawText(ctx, l, x0 + 24, ny + (big ? 38 : 28) + n * (big ? 26 : 22), { size: big ? 17 : 15, color: shopColors.muted }));
+    pill(ctx, price ?? 'Wycena w tickecie', x0 + 24, y0 + h - (big ? 64 : 50), { size: big ? 18 : 16, ...(price ? {} : { color: shopColors.muted, bg: 'rgba(255,255,255,0.06)' }) });
   }
 }
 
