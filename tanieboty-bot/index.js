@@ -6460,24 +6460,49 @@ const readNameStyle = (me) =>
   me?.display_name_styles ?? (me?.display_name_font_id != null ? { font_id: me.display_name_font_id, effect_id: me.display_name_effect_id, colors: me.display_name_colors } : null);
 const sameStyle = (a, b) => Boolean(a && b) && a.font_id === b.font_id && a.effect_id === b.effect_id && JSON.stringify(a.colors ?? []) === JSON.stringify(b.colors ?? []);
 
-/** Zapisuje styl nicku bota. Zwraca { ok, style, note }. style = null → usunięcie stylu. */
-async function setBotNameStyle(rest, style) {
+/** Pola związane z wyglądem nicku z odpowiedzi Discorda (do diagnozy - bez tokenów i danych prywatnych). */
+const styleFields = (obj) =>
+  obj && typeof obj === 'object'
+    ? JSON.stringify(Object.fromEntries(Object.entries(obj.user && !obj.display_name_styles ? { ...obj.user, ...obj } : obj).filter(([k]) => /display|style|font|effect|color|name_/i.test(k) && k !== 'user')))
+    : String(obj);
+
+/**
+ * Zapisuje styl nicku bota. Próbuje kilku miejsc (Discord nie opisał tego dla botów) i po każdej próbie sprawdza odczytem,
+ * czy styl się zmienił. Zwraca { ok, style, note, log } - log to przebieg prób (do konsoli i odpowiedzi).
+ * style = null → usunięcie stylu.
+ */
+async function setBotNameStyle(rest, style, guildId = null) {
+  const flat = style ? { display_name_font_id: style.font_id, display_name_effect_id: style.effect_id, display_name_colors: style.colors } : { display_name_font_id: null, display_name_effect_id: null, display_name_colors: null };
+  const userRoute = Routes.user();
+  const memberRoute = guildId ? Routes.guildMember(guildId, '@me') : null;
   const attempts = [
-    { display_name_styles: style },
-    style ? { display_name_font_id: style.font_id, display_name_effect_id: style.effect_id, display_name_colors: style.colors } : { display_name_font_id: null, display_name_effect_id: null, display_name_colors: null },
+    ['users/@me display_name_styles', userRoute, { display_name_styles: style }],
+    ['users/@me display_name_*', userRoute, flat],
+    ['users/@me/profile display_name_styles', '/users/@me/profile', { display_name_styles: style }],
+    ...(memberRoute ? [['members/@me display_name_styles', memberRoute, { display_name_styles: style }]] : []),
   ];
+  const log = [];
   let lastError = null;
-  for (const body of attempts) {
+  for (const [label, route, body] of attempts) {
+    let answer;
     try {
-      await rest.patch(Routes.user(), { body });
+      answer = await rest.patch(route, { body });
     } catch (err) {
       lastError = err;
+      log.push(`❌ ${label}: ${err.status ?? ''} ${err.code ?? ''} ${String(err.message).slice(0, 120)}`);
       continue;
     }
-    const now = readNameStyle(await rest.get(Routes.user()).catch(() => null));
-    if (style ? sameStyle(now, style) : !now || !now.effect_id) return { ok: true, style: now };
+    const me = await rest.get(userRoute).catch(() => null);
+    const member = memberRoute ? await rest.get(memberRoute.replace('@me', me?.id ?? '@me')).catch(() => null) : null;
+    log.push(`➜ ${label}: odpowiedź ${styleFields(answer)} | odczyt users/@me ${styleFields(me)}${member ? ` | członek ${styleFields(member)}` : ''}`);
+    const now = readNameStyle(me) ?? readNameStyle(member) ?? readNameStyle(member?.user) ?? readNameStyle(answer);
+    if (style ? sameStyle(now, style) : !now || !now.effect_id) return { ok: true, style: now, log };
   }
-  return { ok: false, note: lastError ? describeError(lastError) : 'Discord przyjął zapis, ale styl nicku się nie zmienił - Discord nie pozwala na to temu botowi (albo funkcja jest wyłączona).' };
+  return {
+    ok: false,
+    log,
+    note: lastError && log.every((l) => l.startsWith('❌')) ? describeError(lastError) : 'Discord przyjął zapis, ale styl nicku się nie zmienił - Discord nie pozwala na to temu botowi (albo funkcja jest wyłączona).',
+  };
 }
 
 command(
@@ -6496,16 +6521,18 @@ command(
     const effect = i.options.getString('efekt');
     await i.deferReply({ flags: V2_EPHEMERAL });
     if (effect === 'off') {
-      const res = await setBotNameStyle(i.client.rest, null);
+      const res = await setBotNameStyle(i.client.rest, null, i.guildId);
       return i.editReply({ components: [res.ok ? ok('Nick bota wrócił do zwykłego wyglądu.') : fail(res.note)], flags: V2 });
     }
     const raw = [i.options.getString('kolor1') ?? '#00A8FC', i.options.getString('kolor2') ?? (effect === 'gradient' ? '#5865F2' : null)].filter(Boolean);
     const colors = raw.map(parseColor);
     if (colors.some((c) => c === null)) return i.editReply({ components: [fail('Kolor wpisz jako 6 znaków HEX, np. `#00A8FC`.')], flags: V2 });
     const style = { font_id: i.options.getInteger('czcionka') ?? 1, effect_id: nameEffects[effect][0], colors: effect === 'gradient' ? colors.slice(0, 2) : colors.slice(0, 1) };
-    const res = await setBotNameStyle(i.client.rest, style);
+    const res = await setBotNameStyle(i.client.rest, style, i.guildId);
+    // Diagnoza: przebieg prób w konsoli hostingu (bez tokena).
+    for (const line of res.log ?? []) console.log(`🎨 ${line}`);
     console.log(`🎨 /wyglad-nicku: ${i.user.tag} → ${nameEffects[effect][1]}, czcionka ${style.font_id}, ${style.colors.map(hexColor).join(' ')} - ${res.ok ? 'OK' : res.note}`);
-    if (!res.ok) return i.editReply({ components: [fail(`Nie udało się zmienić wyglądu nicku.\n${res.note}`)], flags: V2 });
+    if (!res.ok) return i.editReply({ components: [fail(`Nie udało się zmienić wyglądu nicku.\n${res.note}\n-# Szczegóły prób są w konsoli hostingu (linie zaczynające się od 🎨).`)], flags: V2 });
     return i.editReply({
       components: [
         ok(
