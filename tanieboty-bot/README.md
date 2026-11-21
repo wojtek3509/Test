@@ -74,6 +74,14 @@ Bot sam dołącza niebieskie banery TanieBoty z folderu `grafiki/` (obok `index.
 
 Brak folderu `grafiki/` na serwerze bota oznacza wiadomości bez banerów. Po wgraniu folderu wyślij panele ponownie (`/panel`).
 
+## Sklep z ekranem laptopa (/panel typ:sklep)
+
+Panel z przyciskiem **Otwórz sklep**. Każdy klient dostaje własny, ukryty widok: obrazek laptopa z otwartą zakładką (Start, Boty, Hosting, Opinie, Kontakt), pod nim menu zakładek i przyciski zakupu (te same formularze co w ticketach).
+
+- Obrazki rysuje bot (biblioteka `@napi-rs/canvas` z `package.json`, czcionki z `grafiki/czcionki`). Ceny hostingu, opinie i liczniki są zawsze aktualne.
+- Lista w zakładce Boty: `shopBots` na górze `index.js` (cena `null` = „Wycena w tickecie”).
+- Bez biblioteki albo przy blokadzie plików sklep działa w wersji tekstowej.
+
 ## Baza danych (folder data/)
 
 Każdy serwer Discord ma folder `data/<ID serwera>/` z osobnymi plikami:

@@ -3923,6 +3923,9 @@ function shopPanel(g, logo) {
   return b;
 }
 
+/** Dane do ekranu startowego (nie zależy od opinii ani liczników). */
+const shopBannerData = { reviews: [], stats: { done: 0 }, legitVotes: {}, settings: { banners: {} } };
+
 /** Odświeża wbudowany baner panelu sklepu (ekran startowy) w grafiki/. Zwraca true, gdy plik jest gotowy. */
 async function writeShopBanner(g) {
   const image = await renderShop(g, 'start').catch((err) => (console.error('Sklep: baner', err.message), null));
@@ -5944,6 +5947,7 @@ command(
     if (missing.length) return replyFail(i, `Bot nie ma uprawnień na ${channel}:\n${missing.map(([, n]) => `> • ${n}`).join('\n')}`);
 
     await i.deferReply({ flags: V2_EPHEMERAL });
+    if (type === 'sklep') await writeShopBanner(shopBannerData);
     const { warning } = await postPanel(i.client, i.guild, channel, type);
     await i.editReply({ components: [ok(`Panel wysłany na ${channel}${warning}`)], flags: V2 });
   },
@@ -9093,6 +9097,12 @@ async function shopTest() {
   const blocked = await shopView(g, 'hosting');
   assert(!blocked.files.length && JSON.stringify(blocked.components[0].toJSON()).includes(hostingPlans[0][1]), 'tekst przy blokadzie plików');
   uploadsBlockedAt = 0;
+  if (lib) {
+    const file = join(bannerDir, bannerFiles.sklep);
+    const existed = existsSync(file);
+    assert((await writeShopBanner(shopBannerData)) && existsSync(file) && bannerUrl({ settings: { banners: {} } }, 'sklep') === 'attachment://baner-sklep.png', 'baner panelu');
+    if (!existed) rmSync(file);
+  }
   const panel = JSON.stringify(shopPanel(g, null).toJSON());
   assert(panel.includes('sh:open') && panel.includes('× SKLEP```'), 'panel');
   httpFetch = savedFetch;
@@ -9153,10 +9163,12 @@ function refreshAvailableEmojis(client) {
 async function onReady(ready) {
   console.log(`✅ Zalogowano jako ${ready.user.tag}`);
   refreshAvailableEmojis(ready);
-  const missingBanners = Object.values(bannerFiles).filter((f) => !existsSync(join(bannerDir, f)) && !existsSync(join(bannerDir, f.replace(/\.jpg$/, '.png'))));
+  const missingBanners = Object.entries(bannerFiles).filter(([key]) => key !== 'sklep').map(([, f]) => f).filter((f) => !existsSync(join(bannerDir, f)) && !existsSync(join(bannerDir, f.replace(/\.jpg$/, '.png'))));
   if (missingBanners.length) {
     console.warn(`⚠️ Brak banerów w folderze grafiki (${bannerDir}): ${missingBanners.join(', ')} - panele będą bez zdjęć. Wgraj pliki baner-*.jpg do folderu „grafiki” obok index.js.`);
   } else console.log('🖼️ Banery: wszystkie na miejscu');
+  // Ekran startowy sklepu (baner panelu /panel typ:sklep) rysujemy od nowa, żeby miał aktualne ceny.
+  if (await writeShopBanner(shopBannerData)) console.log(canvasLib ? '🛒 Sklep: obrazki laptopa działają' : '🛒 Sklep: wersja tekstowa (stary baner zostaje)');
   console.log(`🔗 Link zaproszenia: ${inviteUrl(ready.user.id)}`);
   console.log(`🏠 Serwery: ${ready.guilds.cache.map((g) => `${g.name} (${g.id})`).join(', ') || 'brak - zaproś bota linkiem powyżej'}`);
   if (!messageContentOn) {
