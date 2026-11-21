@@ -3191,9 +3191,11 @@ async function hostingDiagnostics() {
 // ═══ OPINIE ════════════════════════════════════════════════════════════
 
 function reviewModal(guildId) {
+  // Własne emoji w menu formularza działa tylko jako ikona opcji (nie w tekście), więc ocena jest słownie: „Rewelacja - 5/5”.
   const starOptions = [5, 4, 3, 2, 1].map((n) => ({
-    label: `${'⭐'.repeat(n)} ${['', 'Słabo', 'Może być', 'Dobrze', 'Bardzo dobrze', 'Rewelacja'][n]}`,
+    label: `${['', 'Słabo', 'Może być', 'Dobrze', 'Bardzo dobrze', 'Rewelacja'][n]} - ${n}/5`,
     value: String(n),
+    emoji: selectEmoji('⭐'),
   }));
   return new ModalBuilder()
     .setCustomId(`rev:submit:${guildId}`)
@@ -4617,7 +4619,12 @@ function dropUnusableEmoji(node) {
   if (!node || typeof node !== 'object') return node;
   const out = {};
   for (const [key, value] of Object.entries(node)) {
-    if (key === 'emoji' && value?.id && !emojiUsable(value.id)) continue;
+    // Emoji w opcjach menu: zwykłe → własne (jak w wiadomościach), niedostępne własne znikają.
+    if (key === 'emoji') {
+      const emoji = swapEmojiObject(value);
+      if (emoji) out[key] = emoji;
+      continue;
+    }
     out[key] = dropUnusableEmoji(value);
   }
   return out;
@@ -9116,7 +9123,50 @@ async function shopTest() {
   console.log(`✅ Test sklepu: zakładki, przyciski, panel${lib ? ', obrazki PNG' : ' (bez biblioteki: wersja tekstowa)'} OK`);
 }
 
+
+/** Każdy panel, widok i formularz: po podmianie nie zostaje żadne zwykłe emoji, które ma swój odpowiednik wśród własnych. */
+function emojiCoverageTest() {
+  const g = guild('emoji-skan');
+  g.reviews.push({ number: 1, userId: '1', product: 'bot', content: 'ok', ratings: { quality: 5, time: 4, service: 5 }, at: Date.now() });
+  const user = { id: '1', tag: 'u#1', username: 'u', displayAvatarURL: () => null, toString: () => '<@1>' };
+  const views = {};
+  for (const [k, f] of Object.entries(panelBuilders)) views[`panel ${k}`] = f(g, null);
+  views['karta opinii'] = reviewCard(g.reviews[0], user);
+  for (const [n, v] of hostingViewsForTest().entries()) views[`hosting ${n}`] = v;
+  views['formularz opinii'] = reviewModal('1');
+  for (const type of Object.keys(ticketTypes)) views[`formularz ${type}`] = ticketModal(type);
+  views['formularz zrealizowane'] = doneModal();
+  views['formularz niezrealizowane'] = notDoneModal();
+  views['formularz zamknięcia'] = closeReasonModal();
+  views['formularz inna płatność'] = otherPaymentModal('bot');
+  // Tylko miejsca, w których Discord pokazuje własne emoji (treść, przyciski, opcje menu) - tytuły formularzy, etykiety i podpowiedzi zostają.
+  const shown = new Set(['content', 'name']);
+  const swappable = new Set(Object.keys(emojiSwap).map((k) => k.replace(/️/g, '')));
+  const left = [];
+  const walk = (node, name, key = '') => {
+    if (Array.isArray(node)) return node.forEach((n) => walk(n, name, key));
+    if (!node || typeof node !== 'object') {
+      if (typeof node !== 'string' || !shown.has(key)) return;
+      const text = node.replace(/```[\s\S]*?```|`[^`\n]*`/g, '');
+      for (const [e] of text.matchAll(/\p{Extended_Pictographic}/gu)) if (swappable.has(e)) left.push(`${name}: ${e}`);
+      return;
+    }
+    for (const [k, v] of Object.entries(node)) walk(v, name, node.type === 2 && k === 'label' ? 'label' : k);
+  };
+  for (const [name, view] of Object.entries(views)) {
+    const json = typeof view.toJSON === 'function' ? view.toJSON() : view;
+    // Formularze idą do Discorda jako odpowiedź { type: 9, data }.
+    walk(swapEmojiPayload(json.title !== undefined && json.custom_id ? { type: 9, data: json } : json), name);
+  }
+  delete store.guilds['emoji-skan'];
+  if (left.length) throw new Error(`Zwykłe emoji zamiast własnych: ${[...new Set(left)].join(', ')}`);
+  const rev = JSON.stringify(swapEmojiPayload({ type: 9, data: reviewModal('1').toJSON() }));
+  if (!rev.includes('"name":"gwiazda"') || !rev.includes(`"id":"${customIdOf(emojiSwap['💻'] ?? '')}"`)) throw new Error('Formularz opinii bez własnych emoji');
+  console.log(`✅ Test emoji: ${Object.keys(views).length} paneli, widoków i formularzy z własnymi emoji OK`);
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
+
 
 if (process.argv.includes('--check')) {
   await selfTest();
@@ -9134,6 +9184,7 @@ if (process.argv.includes('--check')) {
   await uploadGuardTest();
   await botPaymentTest();
   await shopTest();
+  emojiCoverageTest();
   process.exit(0);
 }
 
