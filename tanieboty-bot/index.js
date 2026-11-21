@@ -352,8 +352,8 @@ const ticketTypes = {
         id: 'mode',
         label: 'Sposób zakupu',
         select: [
-          ['⚡ Automatyczny - krypto, serwer od razu', 'auto'],
-          ['⏳ Ręczny - czekasz na właściciela', 'manual'],
+          ['Automatyczny - krypto, serwer od razu', 'auto', tbEmoji.piorun],
+          ['Ręczny - czekasz na właściciela', 'manual', tbEmoji.zegar],
         ],
       },
       { id: 'payment', label: 'Płatność', select: Object.entries(hostingPayments).map(([id, p]) => [p.label, id, p.emoji]) },
@@ -542,7 +542,7 @@ const selectOption = ([label, value, emoji]) => ({ label, value, ...(emoji ? { e
 const paymentName = (key) => (payments[key] ? `${payments[key].emoji} ${payments[key].label}` : key);
 /** Płatność w zamówieniu bota: wszystkie z listy + „Inna” (klient wpisuje ją sam). */
 const OTHER_PAYMENT = 'inne';
-const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [p.label, id, p.emoji]), ['Inna - wpiszesz ją za chwilę', OTHER_PAYMENT, '✏️']];
+const orderPaymentOptions = () => [...Object.entries(payments).map(([id, p]) => [p.label, id, p.emoji]), ['Inna - wpiszesz ją za chwilę', OTHER_PAYMENT, tbEmoji.kredka]];
 /** Opcje pola wyboru (lista albo nazwa listy liczonej później, np. 'orderPayments'). */
 const selectOptions = (f) => (f.select === 'orderPayments' ? orderPaymentOptions() : f.select);
 /** Płatność z formularza do pokazania: wybrana z listy albo wpisana przez klienta. */
@@ -8263,7 +8263,9 @@ async function botPaymentTest() {
   assert(JSON.stringify(swapEmojiPayload(modalBody)) === JSON.stringify(modalBody), 'formularz bez zmian');
   // Prawdziwy formularz zamówienia bota: własne emoji płatności znikają z menu (Discord ich tam nie przyjmuje), zwykłe zostają.
   const realModal = JSON.stringify(swapEmojiPayload({ type: 9, data: ticketModal('bot').toJSON() }));
-  assert(realModal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && realModal.includes('"emoji":{"name":"✏️"}'), 'formularz z własnymi emoji w menu');
+  assert(realModal.includes('"emoji":{"id":"1572559823323791572","name":"blik"') && realModal.includes('"emoji":{"id":"1572545399573581844","name":"kredka"'), 'formularz z własnymi emoji w menu');
+  const hostModal = JSON.stringify(ticketModal('hosting').toJSON());
+  assert(hostModal.includes('"name":"piorun"') && hostModal.includes('"name":"zegar"') && !hostModal.includes('⚡') && !hostModal.includes('⏳'), 'sposób zakupu z własnymi emoji');
   // Karta ticketu: emoji płatności poza `kodem`, bez „?:” przy „Na kiedy?”.
   const cardJson = JSON.stringify(ticketMessage({ type: 'bot', userId: 'k1', openedAt: Date.now(), form: { desc: 'Z', budget: '50', deadline: 'jutro', payment: 'blik' } }, user).toJSON());
   assert(cardJson.includes('<:blik:1572559823323791572> `BLIK`') && cardJson.includes('**Na kiedy?**') && !cardJson.includes('?:**'), 'karta ticketu: emoji płatności i etykiety');
