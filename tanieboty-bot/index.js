@@ -6446,6 +6446,80 @@ command(
   },
 );
 
+// ─── Wygląd nicku bota (eksperymentalne) ────────────────────────────────
+// Discord nie opisał tego w dokumentacji dla botów - bot próbuje zapisać styl i sprawdza, czy Discord go przyjął.
+// Efekty w kolejności jak na liście Discorda (Gradient = 2 sprawdzony). Kolory: liczby RGB (np. 0x00A8FC).
+const nameEffects = { solid: [1, 'Jednolity'], gradient: [2, 'Gradient'], neon: [3, 'Neon'], toon: [4, 'Toon'], pop: [5, 'Pop'] };
+const parseColor = (value) => {
+  const v = String(value ?? '').trim().replace(/^#/, '');
+  return /^[0-9a-f]{6}$/i.test(v) ? parseInt(v, 16) : null;
+};
+const hexColor = (n) => `#${Number(n).toString(16).padStart(6, '0').toUpperCase()}`;
+/** Styl nicku z odpowiedzi Discorda (różne możliwe nazwy pól). */
+const readNameStyle = (me) =>
+  me?.display_name_styles ?? (me?.display_name_font_id != null ? { font_id: me.display_name_font_id, effect_id: me.display_name_effect_id, colors: me.display_name_colors } : null);
+const sameStyle = (a, b) => Boolean(a && b) && a.font_id === b.font_id && a.effect_id === b.effect_id && JSON.stringify(a.colors ?? []) === JSON.stringify(b.colors ?? []);
+
+/** Zapisuje styl nicku bota. Zwraca { ok, style, note }. style = null → usunięcie stylu. */
+async function setBotNameStyle(rest, style) {
+  const attempts = [
+    { display_name_styles: style },
+    style ? { display_name_font_id: style.font_id, display_name_effect_id: style.effect_id, display_name_colors: style.colors } : { display_name_font_id: null, display_name_effect_id: null, display_name_colors: null },
+  ];
+  let lastError = null;
+  for (const body of attempts) {
+    try {
+      await rest.patch(Routes.user(), { body });
+    } catch (err) {
+      lastError = err;
+      continue;
+    }
+    const now = readNameStyle(await rest.get(Routes.user()).catch(() => null));
+    if (style ? sameStyle(now, style) : !now || !now.effect_id) return { ok: true, style: now };
+  }
+  return { ok: false, note: lastError ? describeError(lastError) : 'Discord przyjął zapis, ale styl nicku się nie zmienił - Discord nie pozwala na to temu botowi (albo funkcja jest wyłączona).' };
+}
+
+command(
+  new SlashCommandBuilder()
+    .setName('wyglad-nicku')
+    .setDescription('Kolor, efekt i czcionka nicku bota na wszystkich serwerach (funkcja eksperymentalna)')
+    .addStringOption((o) =>
+      o.setName('efekt').setDescription('Efekt nicku').setRequired(true).addChoices(...Object.entries(nameEffects).map(([value, [, name]]) => ({ name, value })), { name: 'Wyłącz (zwykły nick)', value: 'off' }),
+    )
+    .addStringOption((o) => o.setName('kolor1').setDescription('Pierwszy kolor, np. #00A8FC'))
+    .addStringOption((o) => o.setName('kolor2').setDescription('Drugi kolor do gradientu, np. #5865F2'))
+    .addIntegerOption((o) => o.setName('czcionka').setDescription('Numer czcionki (fontId), domyślnie 1').setMinValue(1).setMaxValue(30))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDMPermission(false),
+  async (i) => {
+    const effect = i.options.getString('efekt');
+    await i.deferReply({ flags: V2_EPHEMERAL });
+    if (effect === 'off') {
+      const res = await setBotNameStyle(i.client.rest, null);
+      return i.editReply({ components: [res.ok ? ok('Nick bota wrócił do zwykłego wyglądu.') : fail(res.note)], flags: V2 });
+    }
+    const raw = [i.options.getString('kolor1') ?? '#00A8FC', i.options.getString('kolor2') ?? (effect === 'gradient' ? '#5865F2' : null)].filter(Boolean);
+    const colors = raw.map(parseColor);
+    if (colors.some((c) => c === null)) return i.editReply({ components: [fail('Kolor wpisz jako 6 znaków HEX, np. `#00A8FC`.')], flags: V2 });
+    const style = { font_id: i.options.getInteger('czcionka') ?? 1, effect_id: nameEffects[effect][0], colors: effect === 'gradient' ? colors.slice(0, 2) : colors.slice(0, 1) };
+    const res = await setBotNameStyle(i.client.rest, style);
+    console.log(`🎨 /wyglad-nicku: ${i.user.tag} → ${nameEffects[effect][1]}, czcionka ${style.font_id}, ${style.colors.map(hexColor).join(' ')} - ${res.ok ? 'OK' : res.note}`);
+    if (!res.ok) return i.editReply({ components: [fail(`Nie udało się zmienić wyglądu nicku.\n${res.note}`)], flags: V2 });
+    return i.editReply({
+      components: [
+        ok(
+          [
+            `Nowy wygląd nicku bota: **${nameEffects[effect][1]}**, czcionka \`${style.font_id}\`, kolory ${style.colors.map((n) => `\`${hexColor(n)}\``).join(' i ')}.`,
+            '-# Jeśli nie widzisz zmiany, zrestartuj aplikację Discorda. To funkcja eksperymentalna - Discord może ją w każdej chwili wyłączyć.',
+          ].join('\n'),
+        ),
+      ],
+      flags: V2,
+    });
+  },
+);
+
 const serverOption = (o) => o.setName('serwer').setDescription('ID serwera w panelu (z /hosting lista)').setMinValue(1).setRequired(true);
 const langChoices = (withOther) =>
   Object.entries(hostingLanguages)
@@ -9165,6 +9239,28 @@ function emojiCoverageTest() {
   console.log(`✅ Test emoji: ${Object.keys(views).length} paneli, widoków i formularzy z własnymi emoji OK`);
 }
 
+
+async function nameStyleTest() {
+  const assert = (cond, msg) => {
+    if (!cond) throw new Error(`Wygląd nicku: ${msg}`);
+  };
+  assert(parseColor('#00A8FC') === 43260 && parseColor('5865f2') === 5793266 && parseColor('zly') === null, 'kolory HEX');
+  assert(hexColor(43260) === '#00A8FC', 'kolor do HEX');
+  let me = {};
+  const calls = [];
+  const accepting = { patch: async (_r, { body }) => (calls.push(body), body.display_name_styles !== undefined && (me = { display_name_styles: body.display_name_styles })), get: async () => me };
+  const style = { font_id: 1, effect_id: 2, colors: [43260, 5793266] };
+  assert((await setBotNameStyle(accepting, style)).ok && calls.length === 1, 'zapis przyjęty od razu');
+  const ignoring = { patch: async () => ({}), get: async () => ({}) };
+  const res = await setBotNameStyle(ignoring, style);
+  assert(!res.ok && /nie zmienił/.test(res.note), 'zignorowany zapis = błąd, nie fałszywy sukces');
+  const failing = { patch: async () => { throw Object.assign(new Error('Invalid Form Body'), { code: 50035 }); }, get: async () => ({}) };
+  assert(!(await setBotNameStyle(failing, style)).ok, 'odrzucony zapis');
+  const json = JSON.stringify(commands.get('wyglad-nicku').data.toJSON());
+  assert(json.includes('"gradient"') && json.includes('"off"'), 'komenda');
+  console.log('✅ Test wyglądu nicku: zapis, sprawdzenie odczytem, kolory HEX OK');
+}
+
 // ═══ START ═════════════════════════════════════════════════════════════
 
 
@@ -9185,6 +9281,7 @@ if (process.argv.includes('--check')) {
   await botPaymentTest();
   await shopTest();
   emojiCoverageTest();
+  await nameStyleTest();
   process.exit(0);
 }
 
