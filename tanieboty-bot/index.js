@@ -6555,8 +6555,8 @@ command(
     if (colors.some((c) => c === null)) return i.editReply({ components: [fail('Kolor wpisz jako 6 znaków HEX, np. `#00A8FC`.')], flags: V2 });
     const style = { font_id: i.options.getInteger('czcionka') ?? 1, effect_id: nameEffects[effect][0], colors: effect === 'gradient' ? colors.slice(0, 2) : colors.slice(0, 1) };
     const res = await setBotNameStyle(i.client.rest, style, [...i.client.guilds.cache.keys()]);
-    // Diagnoza: przebieg prób w konsoli hostingu (bez tokena).
-    for (const line of res.log ?? []) console.log(`🎨 ${line}`);
+    // Szczegóły prób (odpowiedzi Discorda, bez tokena) tylko przy niepowodzeniu - do diagnozy.
+    if (!res.ok) for (const line of res.log ?? []) console.log(`🎨 ${line}`);
     console.log(`🎨 /wyglad-nicku: ${i.user.tag} → ${nameEffects[effect][1]}, czcionka ${style.font_id}, ${style.colors.map(hexColor).join(' ')} - ${res.ok ? 'OK' : res.note}`);
     if (!res.ok) return i.editReply({ components: [fail(`Nie udało się zmienić wyglądu nicku.\n${res.note}\n-# Szczegóły prób są w konsoli hostingu (linie zaczynające się od 🎨).`)], flags: V2 });
     return i.editReply({
