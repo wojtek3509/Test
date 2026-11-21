@@ -6472,18 +6472,22 @@ const styleFields = (obj) =>
  * style = null → usunięcie stylu.
  */
 async function setBotNameStyle(rest, style, guildId = null) {
-  const flat = style ? { display_name_font_id: style.font_id, display_name_effect_id: style.effect_id, display_name_colors: style.colors } : { display_name_font_id: null, display_name_effect_id: null, display_name_colors: null };
   const userRoute = Routes.user();
   const memberRoute = guildId ? Routes.guildMember(guildId, '@me') : null;
-  const attempts = [
-    ['users/@me display_name_styles', userRoute, { display_name_styles: style }],
-    ['users/@me display_name_*', userRoute, flat],
-    ['users/@me/profile display_name_styles', '/users/@me/profile', { display_name_styles: style }],
-    ...(memberRoute ? [['members/@me display_name_styles', memberRoute, { display_name_styles: style }]] : []),
-  ];
+  // Warianty: wybrany styl, ta sama z domyślną czcionką (11), sam kolor bez efektu i zapis na serwerze.
+  // Każdy wariant sprawdzamy odczytem - pierwszy, który Discord zapamięta, wygrywa (wynik mówi, który to był).
+  const variants = style
+    ? [
+        ['wybrany styl', userRoute, style],
+        ['czcionka domyślna (11)', userRoute, { ...style, font_id: 11 }],
+        ['jeden kolor, bez efektu', userRoute, { font_id: 11, effect_id: 1, colors: style.colors.slice(0, 1) }],
+        ...(memberRoute ? [['tylko ten serwer', memberRoute, style]] : []),
+      ]
+    : [['wyłączenie', userRoute, null]];
+  const attempts = variants.map(([label, route, expected]) => [label, route, { display_name_styles: expected }, expected]);
   const log = [];
   let lastError = null;
-  for (const [label, route, body] of attempts) {
+  for (const [label, route, body, expected] of attempts) {
     let answer;
     try {
       answer = await rest.patch(route, { body });
@@ -6496,7 +6500,7 @@ async function setBotNameStyle(rest, style, guildId = null) {
     const member = memberRoute ? await rest.get(memberRoute.replace('@me', me?.id ?? '@me')).catch(() => null) : null;
     log.push(`➜ ${label}: odpowiedź ${styleFields(answer)} | odczyt users/@me ${styleFields(me)}${member ? ` | członek ${styleFields(member)}` : ''}`);
     const now = readNameStyle(me) ?? readNameStyle(member) ?? readNameStyle(member?.user) ?? readNameStyle(answer);
-    if (style ? sameStyle(now, style) : !now || !now.effect_id) return { ok: true, style: now, log };
+    if (expected ? sameStyle(now, expected) : !now || !now.effect_id) return { ok: true, style: now, variant: label, log };
   }
   return {
     ok: false,
@@ -6538,6 +6542,7 @@ command(
         ok(
           [
             `Nowy wygląd nicku bota: **${nameEffects[effect][1]}**, czcionka \`${style.font_id}\`, kolory ${style.colors.map((n) => `\`${hexColor(n)}\``).join(' i ')}.`,
+            ...(res.variant && res.variant !== 'wybrany styl' ? [`⚠️ Discord przyjął dopiero wariant: **${res.variant}** (zapisany styl: \`${JSON.stringify(res.style)}\`).`] : []),
             '-# Jeśli nie widzisz zmiany, zrestartuj aplikację Discorda. To funkcja eksperymentalna - Discord może ją w każdej chwili wyłączyć.',
           ].join('\n'),
         ),
