@@ -570,7 +570,7 @@ const reviewCooldownMinutes = 60;
 // [nazwa, cena, opis, emoji]. Cena np. 'od 30 zł', a null = „Wycena w tickecie”.
 const shopBots = [
   ['Bot pod exchange', null, 'Wymiana walut i krypto: kursy, kalkulator, tickety wymiany i legit checki.', '🔄'],
-  ['Bot pod shop', null, 'Sklep na Discordzie: produkty, cennik, zamówienia w ticketach i płatności.', '🛒'],
+  ['Bot pod shopa', null, 'Sklep na Discordzie: produkty, cennik, zamówienia w ticketach i płatności.', '🛒'],
   ['Własny bot', null, 'Masz inny pomysł? Opisz go, a zrobimy bota dokładnie pod Twój serwer.', '🤖'],
 ]
 
